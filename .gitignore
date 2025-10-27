@@ -15,6 +15,8 @@ pkg-web/
 *.js.map
 
 # Rust
+target/
+Cargo.lock
 rust/target/
 rust/Cargo.lock
 **/*.rs.bk
