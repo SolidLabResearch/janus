@@ -1,29 +1,20 @@
 {
   "name": "janus",
   "version": "0.1.0",
-  "description": "",
+  "description": "Janus - A hybrid engine for unified Live and Historical RDF Stream Processing",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
-    "build": "npm run build:rust && npm run build:ts",
-    "build:ts": "tsc",
-    "build:rust": "cd rust && cargo build --release && wasm-pack build --target nodejs --out-dir ../pkg",
-    "build:rust:wasm": "cd rust && wasm-pack build --target web --out-dir ../pkg-web",
+    "build": "tsc",
     "dev": "tsc --watch",
-    "test": "npm run test:ts && npm run test:rust",
-    "test:ts": "jest",
-    "test:rust": "cd rust && cargo test",
+    "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
-    "lint": "npm run lint:ts && npm run lint:rust",
-    "lint:ts": "eslint 'src/**/*.{ts,tsx}'",
-    "lint:ts:fix": "eslint 'src/**/*.{ts,tsx}' 'tests/**/*.{ts,tsx}' --fix",
-    "lint:rust": "cd rust && cargo clippy -- -D warnings",
-    "format": "npm run format:ts && npm run format:rust",
-    "format:ts": "prettier --write 'src/**/*.{ts,tsx,json}' 'tests/**/*.{ts,tsx,json}' '*.{json,md}'",
-    "format:rust": "cd rust && cargo fmt",
+    "lint": "eslint 'src/**/*.{ts,tsx}'",
+    "lint:fix": "eslint 'src/**/*.{ts,tsx}' 'tests/**/*.{ts,tsx}' --fix",
+    "format": "prettier --write 'src/**/*.{ts,tsx,json}' 'tests/**/*.{ts,tsx,json}' '*.{json,md}'",
     "format:check": "prettier --check 'src/**/*.{ts,tsx,json}' 'tests/**/*.{ts,tsx,json}' '*.{json,md}'",
-    "clean": "rm -rf dist pkg pkg-web coverage",
+    "clean": "rm -rf dist coverage",
     "prepare": "husky install || true",
     "prepublishOnly": "npm run build",
     "run:oxigraph": "(command -v docker >/dev/null 2>&1 && (docker ps | grep -q oxigraph-server || docker run -d -p 7878:7878 --name oxigraph-server oxigraph/oxigraph) && sleep 3) || echo 'Docker not available, assuming Oxigraph server is running'; npx ts-node examples/basic-usage.ts --oxigraph",
@@ -37,10 +28,10 @@
     "kolibrie",
     "apache-jena",
     "sparql",
-    "wasm",
-    "rust",
     "typescript",
-    "semantic-web"
+    "semantic-web",
+    "stream-processing",
+    "rsp-ql"
   ],
   "author": "",
   "license": "MIT",
@@ -86,10 +77,6 @@
     ],
     "*.{json,md}": [
       "prettier --write"
-    ],
-    "rust/**/*.rs": [
-      "cd rust && cargo fmt --",
-      "cd rust && cargo clippy --fix --allow-dirty --allow-staged --"
     ]
   }
 }

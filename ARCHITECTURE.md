@@ -1,19 +1,21 @@
 # Janus RDF Template - Architecture Documentation
 
-Note: The WASM adapter has been fully implemented with Rust WASM integration for high-performance RDF processing.
-
 ## Overview
 
-Janus is a hybrid TypeScript + Rust architecture template designed for efficient RDF (Resource Description Framework) data store integration. It provides a unified interface for interacting with multiple RDF triple stores through both HTTP APIs and WebAssembly (WASM) bindings.
+Janus is a TypeScript-based framework designed for efficient RDF (Resource
+Description Framework) data store integration and stream processing. It provides
+a unified interface for interacting with multiple RDF triple stores through HTTP
+APIs.
 
 ## Design Principles
 
-1. Hybrid Architecture: Leverage TypeScript for developer ergonomics and Rust for performance-critical operations
-2. Adapter Pattern: Provide consistent interfaces for different RDF store implementations
-3. Type Safety: Full TypeScript type definitions with strict typing enabled
-4. Performance: Use WASM for low-latency, in-browser/server-side RDF processing
-5. Testability: Comprehensive test coverage with both unit and integration tests
-6. Extensibility: Easy to add new RDF store adapters and formats
+1. Adapter Pattern: Provide consistent interfaces for different RDF store
+   implementations
+2. Type Safety: Full TypeScript type definitions with strict typing enabled
+3. Performance: Efficient HTTP-based communication with remote RDF stores
+4. Testability: Comprehensive test coverage with both unit and integration tests
+5. Extensibility: Easy to add new RDF store adapters and formats
+6. Stream Processing: Support for both historical and live RDF stream processing
 
 ## System Architecture
 
@@ -37,7 +39,7 @@ Janus is a hybrid TypeScript + Rust architecture template designed for efficient
 │  ┌───────────────────────┴──────────────────────────┐           │
 │  │              Adapter Layer                        │           │
 │  │  ┌────────────┐  ┌────────────┐  ┌────────────┐ │           │
-│  │  │ Oxigraph   │  │    Jena    │  │   WASM     │ │           │
+│  │  │ Oxigraph   │  │    Jena    │  │ In-Memory  │ │           │
 │  │  │  Adapter   │  │  Adapter   │  │  Adapter   │ │           │
 │  │  └─────┬──────┘  └─────┬──────┘  └─────┬──────┘ │           │
 │  └────────┼───────────────┼───────────────┼────────┘           │
@@ -48,17 +50,15 @@ Janus is a hybrid TypeScript + Rust architecture template designed for efficient
 │  │  │   Logger   │  │  Errors   │  │ Validators │ │           │
 │  │  └────────────┘  └───────────┘  └────────────┘ │           │
 │  └───────────────────────────────────────────────┘            │
-└─────────────┬───────────────────────────────┬──────────────────┘
-              │ HTTP                          │ WASM Bindings
-┌─────────────▼──────────────┐  ┌─────────────▼──────────────────┐
-│  Rust RDF Library (WASM)   │  │    External RDF Stores         │
-│  ┌──────────────────────┐  │  │  ┌──────────┐  ┌───────────┐  │
-│  │  Oxigraph Store      │  │  │  │ Oxigraph │  │   Jena    │  │
-│  │  Query Executor      │  │  │  │  Server  │  │  Fuseki   │  │
-│  │  RDF Parser          │  │  │  │  (HTTP)  │  │  (HTTP)   │  │
-│  │  HTTP Client         │  │  │  └──────────┘  └───────────┘  │
-│  └──────────────────────┘  │  │                                │
-└────────────────────────────┘  └────────────────────────────────┘
+└─────────────┬───────────────────────────────────────────────────┘
+              │ HTTP
+┌─────────────▼──────────────────────────────────────────────────┐
+│                    External RDF Stores                         │
+│  ┌──────────────────┐  ┌──────────────────┐                   │
+│  │    Oxigraph      │  │    Jena Fuseki   │                   │
+│  │  Server (HTTP)   │  │    Server (HTTP) │                   │
+│  └──────────────────┘  └──────────────────┘                   │
+└────────────────────────────────────────────────────────────────┘
 ```
 
 ## Core Components
@@ -68,12 +68,15 @@ Janus is a hybrid TypeScript + Rust architecture template designed for efficient
 #### Core Types & Interfaces (`src/core/types.ts`)
 
 **Enums:**
-- RdfFormat: Supported RDF serialization formats (Turtle, N-Triples, RDF/XML, JSON-LD, N-Quads, TriG)
+
+- RdfFormat: Supported RDF serialization formats (Turtle, N-Triples, RDF/XML,
+  JSON-LD, N-Quads, TriG)
 - RdfTermType: RDF term types (URI, Literal, Blank Node, Triple)
 - RdfErrorType: Error classification types
 - LogLevel: Logging levels (Debug, Info, Warn, Error)
 
 **Core Interfaces:**
+
 - RdfTerm: RDF term representation
 - RdfTriple: RDF triple/quad structure
 - QueryResult: Union type for SPARQL query results (Select, Ask, Construct)
@@ -89,11 +92,11 @@ Janus is a hybrid TypeScript + Rust architecture template designed for efficient
   - `export()`: Export data in various formats
   - `contains()`: Check if triple exists
 - ILogger: Logging interface
-- WasmRdfStore, WasmQueryExecutor, WasmRdfParser, WasmRdfSerializer: WASM binding interfaces
 
 ### 2. Adapter Implementations
 
 #### OxigraphAdapter (`src/adapters/OxigraphAdapter.ts`)
+
 - Connects to Oxigraph via HTTP
 - Supports all SPARQL 1.1 query types
 - Implements Graph Store Protocol (GSP)
@@ -104,6 +107,7 @@ Janus is a hybrid TypeScript + Rust architecture template designed for efficient
   - Comprehensive error handling
 
 #### JenaAdapter (`src/adapters/JenaAdapter.ts`)
+
 - Connects to Apache Jena Fuseki
 - Dataset-aware operations
 - Named graph support
@@ -113,60 +117,15 @@ Janus is a hybrid TypeScript + Rust architecture template designed for efficient
   - Server statistics
   - Multi-graph management
 
-#### WasmAdapter (`src/adapters/WasmAdapter.ts`)
-- Direct integration with Rust WASM module
-- In-memory or persistent storage
+#### InMemoryAdapter (`src/adapters/InMemoryAdapter.ts`)
+
+- Simple in-memory RDF triple storage
+- JavaScript-based implementation using N3.js
 - No HTTP overhead
 - Features:
-  - Synchronous and asynchronous APIs
-  - Browser and Node.js compatible
-  - Embedded RDF store
-
-### 3. Rust Layer
-
-#### Core Library (`rust/src/lib.rs`)
-- WASM bindings for TypeScript integration
-- Configuration types
-- Format enumerations
-- Initialization functions
-
-#### Store Implementation (`rust/src/store.rs`)
-- Wraps Oxigraph's in-memory store
-- CRUD operations for triples
-- Query execution
-- Import/export functionality
-- Features:
-  - Transaction support
-  - Graph-aware operations
-  - Efficient indexing
-
-#### Query Executor (`rust/src/query.rs`)
-- SPARQL query parsing and execution
-- Query validation
-- Query builder for programmatic query construction
-- Support for:
-  - SELECT queries
-  - ASK queries
-  - CONSTRUCT queries
-  - DESCRIBE queries
-
-#### Parser/Serializer (`rust/src/parser.rs`)
-- Multi-format RDF parsing
-- Multi-format serialization
-- Format conversion
-- Streaming support for large datasets
-
-#### HTTP Client (`rust/src/http_client.rs`)
-- HTTP client for remote RDF stores
-- Store-specific endpoint handling
-- Authentication support
-- Batch operations
-
-#### Error Handling (`rust/src/error.rs`)
-- Comprehensive error types
-- Error conversion from dependencies
-- WASM-compatible error wrapper
-- Ergonomic error propagation
+  - Fast local operations
+  - Suitable for testing and development
+  - Limited scalability
 
 ## Data Flow
 
@@ -181,8 +140,8 @@ adapter.query(sparql)
     ├─► [HTTP Adapter] ──► HTTP Request ──► Remote Store ──► HTTP Response
     │                                           (Jena/Oxigraph)
     │
-    └─► [WASM Adapter] ──► WASM Call ──► Rust Store ──► WASM Response
-                                          (In-memory)
+    └─► [InMemory Adapter] ──► N3.js Store ──► Query Result
+                                (Local/In-memory)
 ```
 
 ### Data Loading Flow
@@ -199,17 +158,18 @@ adapter.loadData(data, format)
     │       ├─► Send HTTP POST to /store endpoint
     │       └─► Handle response
     │
-    └─► [WASM Adapter]
+    └─► [InMemory Adapter]
             │
-            ├─► Pass to Rust parser
+            ├─► Parse with N3.js
             ├─► Parse RDF triples
-            ├─► Insert into in-memory store
+            ├─► Insert into N3 store
             └─► Return triple count
 ```
 
 ## Technology Stack
 
 ### TypeScript/JavaScript
+
 - Runtime: Node.js 18+
 - Language: TypeScript 5.3+
 - HTTP Client: Axios
@@ -217,23 +177,27 @@ adapter.loadData(data, format)
 - Linting: ESLint
 - Formatting: Prettier
 
-### Rust
-- Version: 1.70+
-- RDF Library: Oxigraph 0.3
-- WASM: wasm-pack, wasm-bindgen
-- Serialization: serde, serde_json
-- HTTP: reqwest (optional feature)
-- Testing: Built-in test framework
-- Linting: Clippy
+### JavaScript/Node.js
+
+- Runtime: Node.js 18+
+- RDF Libraries: N3.js, rdf-parse
+- Stream Processing: rsp-js
+- Messaging: KafkaJS, MQTT
 
 ## Key Design Patterns
 
 ### 1. Adapter Pattern
-All RDF store integrations implement the `IRdfStoreAdapter` interface, allowing seamless switching between different backends.
+
+All RDF store integrations implement the `IRdfStoreAdapter` interface, allowing
+seamless switching between different backends.
 
 ```typescript
 interface IRdfStoreAdapter {
-  loadData(data: string, format: RdfFormat, graphName?: string): Promise<number>;
+  loadData(
+    data: string,
+    format: RdfFormat,
+    graphName?: string
+  ): Promise<number>;
   query(sparql: string, options?: QueryOptions): Promise<QueryResult>;
   insert(triple: RdfTriple): Promise<void>;
   // ... other methods
@@ -241,28 +205,34 @@ interface IRdfStoreAdapter {
 ```
 
 ### 2. Strategy Pattern
+
 Different query execution strategies based on store type and query complexity.
 
 ### 3. Factory Pattern
+
 Adapter creation with configuration:
 
 ```typescript
 function createAdapter(config: RdfEndpointConfig): IRdfStoreAdapter {
   switch (config.storeType) {
-    case 'oxigraph': return new OxigraphAdapter(config);
-    case 'jena': return new JenaAdapter(config);
-    default: throw new Error('Unknown store type');
+    case 'oxigraph':
+      return new OxigraphAdapter(config);
+    case 'jena':
+      return new JenaAdapter(config);
+    default:
+      throw new Error('Unknown store type');
   }
 }
 ```
 
 ### 4. Facade Pattern
+
 Simplified API over complex RDF operations:
 
 ```typescript
 class RdfStore {
   constructor(private adapter: IRdfStoreAdapter) {}
-  
+
   async loadTurtle(data: string): Promise<void> {
     await this.adapter.loadData(data, RdfFormat.Turtle);
   }
@@ -271,17 +241,20 @@ class RdfStore {
 
 ## Performance Considerations
 
-### 1. WASM Performance
-- Pros: Near-native speed, no serialization overhead
-- Cons: Initial load time, memory usage
-- Use Case: In-browser processing, low-latency queries
+### 1. HTTP Performance
 
-### 2. HTTP Performance
-- Pros: Distributed architecture, scalability
+- Pros: Distributed architecture, scalability, persistent storage
 - Cons: Network latency, serialization overhead
-- Use Case: Large datasets, shared stores, persistence
+- Use Case: Large datasets, shared stores, production deployments
+
+### 2. In-Memory Performance
+
+- Pros: Fast local operations, no network overhead
+- Cons: Limited by available memory, not persistent
+- Use Case: Testing, development, small datasets
 
 ### 3. Optimization Techniques
+
 - Connection pooling
 - Query result caching
 - Streaming for large datasets
@@ -291,22 +264,26 @@ class RdfStore {
 ## Security Architecture
 
 ### 1. Authentication
+
 - Bearer token authentication
 - API key support
 - JWT integration points
 
 ### 2. Input Validation
+
 - SPARQL injection prevention
 - IRI validation
 - Format validation
 - Schema validation
 
 ### 3. Rate Limiting
+
 - Per-endpoint rate limits
 - Per-user quotas
 - Configurable thresholds
 
 ### 4. Network Security
+
 - HTTPS/TLS enforcement
 - CORS configuration
 - Request sanitization
@@ -314,6 +291,7 @@ class RdfStore {
 ## Error Handling Strategy
 
 ### Error Hierarchy
+
 ```
 RdfError (base)
 ├── ParseError
@@ -328,6 +306,7 @@ RdfError (base)
 ```
 
 ### Error Recovery
+
 - Automatic retry with exponential backoff
 - Circuit breaker pattern for external services
 - Graceful degradation
@@ -336,23 +315,26 @@ RdfError (base)
 ## Testing Strategy
 
 ### 1. Unit Tests
+
 - Individual function testing
 - Mock external dependencies
-- TypeScript: Jest
-- Rust: `#[test]` functions
+- Testing framework: Jest
 
 ### 2. Integration Tests
+
 - End-to-end adapter testing
 - Real RDF store connections
 - Multi-format validation
 - Query execution verification
 
 ### 3. Performance Tests
+
 - Benchmark suite using Criterion (Rust)
 - Load testing with large datasets
 - Query performance profiling
 
 ### 4. Coverage Goals
+
 - TypeScript: >70% coverage
 - Rust: >70% coverage
 - Critical paths: 100% coverage
@@ -370,6 +352,7 @@ RdfError (base)
 ### Scalability
 
 #### Horizontal Scaling
+
 ```
 Load Balancer
     ├── Janus Instance 1 ──► Oxigraph Cluster
@@ -378,6 +361,7 @@ Load Balancer
 ```
 
 #### Vertical Scaling
+
 - Increase memory for larger datasets
 - More CPU cores for parallel query processing
 - SSD storage for faster I/O
@@ -385,6 +369,7 @@ Load Balancer
 ## Configuration Management
 
 ### Environment Variables
+
 ```bash
 NODE_ENV=production
 OXIGRAPH_ENDPOINT=http://oxigraph:7878
@@ -394,6 +379,7 @@ ENABLE_WASM=true
 ```
 
 ### Configuration Files
+
 - Development: `.env.development`
 - Testing: `.env.test`
 - Production: `.env.production`
@@ -401,6 +387,7 @@ ENABLE_WASM=true
 ## Monitoring and Observability
 
 ### Metrics
+
 - Query execution time
 - Request rate
 - Error rate
@@ -408,12 +395,14 @@ ENABLE_WASM=true
 - CPU utilization
 
 ### Logging
+
 - Structured JSON logs
 - Log levels: debug, info, warn, error
 - Context-aware logging
 - Log aggregation ready
 
 ### Tracing
+
 - Request ID propagation
 - Distributed tracing support
 - Performance profiling
@@ -464,6 +453,7 @@ ENABLE_WASM=true
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for details on:
+
 - Code style guidelines
 - Testing requirements
 - Pull request process
@@ -475,7 +465,5 @@ MIT License - See [LICENSE.md](LICENSE.md)
 
 ---
 
-Maintained by: Janus RDF Team
-Last Updated: 2024
-Version: 0.1.0
-WASM Adapter Status: Implemented
+Maintained by: Janus RDF Team Last Updated: 2024 Version: 0.1.0 WASM Adapter
+Status: Implemented

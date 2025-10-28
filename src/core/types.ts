@@ -100,7 +100,6 @@ export interface RdfStoreConfig {
   baseIri?: string;
   limit?: number;
   reasoning?: boolean;
-  enableWasm?: boolean;
   storePath?: string;
 }
 
@@ -203,65 +202,6 @@ export interface StoreStatistics {
   predicateCount?: number;
   objectCount?: number;
 }
-
-/* eslint-disable @typescript-eslint/no-misused-new */
-/**
- * WASM RDF Store interface (for type safety with Rust bindings)
- */
-export interface WasmRdfStore {
-  new (): WasmRdfStore;
-  loadData(data: string, format: number, graphName?: string): number;
-  query(sparql: string): string;
-  insertTriple(subject: string, predicate: string, object: string, graphName?: string): void;
-  removeTriple(subject: string, predicate: string, object: string, graphName?: string): void;
-  size(): bigint;
-  clear(): void;
-  export(format: number): string;
-  contains(subject: string, predicate: string, object: string, graphName?: string): boolean;
-}
-
-/**
- * WASM Query Executor interface
- */
-export interface WasmQueryExecutor {
-  new (): WasmQueryExecutor;
-  executeSelect(query: string): string;
-  executeAsk(query: string): boolean;
-  executeConstruct(query: string): string;
-  validateQuery(query: string): string;
-}
-
-/**
- * WASM Parser interface
- */
-export interface WasmRdfParser {
-  new (format: number): WasmRdfParser;
-  setBaseIri(baseIri?: string): void;
-  parse(data: string): string;
-  validate(data: string): number;
-}
-
-/**
- * WASM Serializer interface
- */
-export interface WasmRdfSerializer {
-  new (format: number): WasmRdfSerializer;
-  serialize(triplesJson: string): string;
-}
-
-/**
- * WASM HTTP Client interface
- */
-export interface WasmHttpRdfClient {
-  new (endpoint: RdfEndpointConfig): WasmHttpRdfClient;
-  query(sparql: string, format: number): Promise<string>;
-  uploadData(data: string, format: number, graphUri?: string): Promise<void>;
-  downloadData(format: number, graphUri?: string): Promise<string>;
-  update(sparqlUpdate: string): Promise<void>;
-  ping(): Promise<boolean>;
-  getStats(): Promise<string>;
-}
-/* eslint-enable @typescript-eslint/no-misused-new */
 
 /**
  * Query builder interface

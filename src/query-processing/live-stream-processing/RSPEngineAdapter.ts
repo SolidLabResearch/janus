@@ -52,28 +52,32 @@ export class RSPEngineAdapter {
         const adapter = this.adapters.get(brokerUrl)!;
         await adapter.connect();
         await adapter.subscribe(topic, async (message: string) => {
-          
           if (!message || message.length === 0) {
             throw new Error(`Received empty message on the topic ${topic}`);
           }
-          
+
           try {
             const event_store = await turtleStringToStore(message.toString());
-            const event_timestamp = event_store.getQuads(null, DataFactory.namedNode("https://saref.etsi.org/core/hasTimestamp"), null, null)[0]?.object.value;
-            
+            const event_timestamp = event_store.getQuads(
+              null,
+              DataFactory.namedNode('https://saref.etsi.org/core/hasTimestamp'),
+              null,
+              null
+            )[0]?.object.value;
+
             if (!event_timestamp) {
-              throw new Error(`No timestamp found in the RDF message on topic ${topic}. Maybe the message is not properly annotated. Currently we utilise the saref:hasTimestamp annotation for extracting the event timestamp.`);
+              throw new Error(
+                `No timestamp found in the RDF message on topic ${topic}. Maybe the message is not properly annotated. Currently we utilise the saref:hasTimestamp annotation for extracting the event timestamp.`
+              );
             }
-            
+
             const timestamp_epoch = Date.parse(event_timestamp);
             if (rsp_stream) {
               await this.addStoreToRSPEngine(event_store, [rsp_stream], timestamp_epoch);
-            }
-            else {
+            } else {
               throw new Error(`Stream ${stream_name} not found in RSP Engine.`);
             }
-          }
-          catch (error) {
+          } catch (error) {
             throw new Error(`Failed to parse RDF message on topic ${topic}: ${error}`);
           }
         });

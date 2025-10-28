@@ -23,12 +23,12 @@ export async function stringToStore(text: string, options: ParseOptions): Promis
   return store as Store;
 }
 
-export function storeToString(store: Store) : string { 
+export function storeToString(store: Store): string {
   const writer = new Writer();
   return writer.quadsToString(store.getQuads(null, null, null, null));
 }
 
-export function hashStringMD5(input: string): string { 
+export function hashStringMD5(input: string): string {
   input = input.replace(/\s/g, '');
   const hash = createHash('md5');
   hash.update(input);

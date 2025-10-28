@@ -9,18 +9,9 @@ yarn.lock
 # Build outputs
 dist/
 build/
-pkg/
-pkg-web/
-*.wasm
 *.js.map
 
-# Rust
-target/
-Cargo.lock
-rust/target/
-rust/Cargo.lock
-**/*.rs.bk
-*.pdb
+
 
 # Testing
 coverage/
@@ -82,14 +73,6 @@ site/
 *.bak
 *.backup
 *.old
-
-# Rust profiling
-perf.data
-perf.data.old
-flamegraph.svg
-
-# WASM artifacts
-*.wasm.d.ts
 
 # TypeScript
 *.tsbuildinfo

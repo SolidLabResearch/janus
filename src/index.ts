@@ -3,7 +3,6 @@ export * from './core/types';
 // Adapter exports
 export * from './adapters/OxigraphAdapter';
 export * from './adapters/JenaAdapter';
-export * from './adapters/WasmAdapter';
 
 // Utility exports
 export * from './utils/logger';
@@ -20,7 +19,7 @@ export const VERSION = '0.1.0';
  */
 export async function initialize(): Promise<void> {
   // Initialization logic can be added here
-  // For example, loading WASM modules, setting up connections, etc.
+  // For example, setting up connections, etc.
   console.info('Janus RDF Framework initialized');
 }
 
@@ -28,7 +27,6 @@ export async function initialize(): Promise<void> {
  * Default configuration
  */
 export const defaultConfig = {
-  enableWasm: true,
   defaultFormat: 'turtle' as const,
   defaultTimeout: 30000,
   logLevel: 'info' as const,

@@ -193,11 +193,7 @@ export class ErrorHandler {
   /**
    * Wrap an async function with error handling
    */
-  static async wrap<T>(
-    fn: () => Promise<T>,
-    errorType: RdfErrorType,
-    message: string
-  ): Promise<T> {
+  static async wrap<T>(fn: () => Promise<T>, errorType: RdfErrorType, message: string): Promise<T> {
     try {
       return await fn();
     } catch (error) {
@@ -273,7 +269,11 @@ export class ErrorHandler {
 /**
  * Assert that a condition is true, throw error if not
  */
-export function assert(condition: boolean, message: string, errorType?: RdfErrorType): asserts condition {
+export function assert(
+  condition: boolean,
+  message: string,
+  errorType?: RdfErrorType
+): asserts condition {
   if (!condition) {
     throw new RdfError(errorType || RdfErrorType.Other, message);
   }
