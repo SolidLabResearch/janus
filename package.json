@@ -25,7 +25,11 @@
     "format:check": "prettier --check 'src/**/*.{ts,tsx,json}' 'tests/**/*.{ts,tsx,json}' '*.{json,md}'",
     "clean": "rm -rf dist pkg pkg-web coverage",
     "prepare": "husky install || true",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "run:oxigraph": "(command -v docker >/dev/null 2>&1 && (docker ps | grep -q oxigraph-server || docker run -d -p 7878:7878 --name oxigraph-server oxigraph/oxigraph) && sleep 3) || echo 'Docker not available, assuming Oxigraph server is running'; npx ts-node examples/basic-usage.ts --oxigraph",
+    "run:jena": "(command -v docker >/dev/null 2>&1 && (docker ps | grep -q jena-server || docker run -d -p 3030:3030 --platform linux/amd64 -v $(pwd)/fuseki-config:/fuseki/configuration -v $(pwd)/fuseki-config/shiro.ini:/fuseki/shiro.ini --name jena-server stain/jena-fuseki) && sleep 3) || echo 'Docker not available, assuming Jena Fuseki server is running'; JENA_DATASET=\"ds\" npx ts-node examples/basic-usage.ts --jena",
+    "run:advanced": "(command -v docker >/dev/null 2>&1 && (docker ps | grep -q oxigraph-server || docker run -d -p 7878:7878 --name oxigraph-server oxigraph/oxigraph) && sleep 3) || echo 'Docker not available, assuming Oxigraph server is running'; npx ts-node examples/basic-usage.ts --advanced",
+    "run:all": "(command -v docker >/dev/null 2>&1 && ((docker ps | grep -q oxigraph-server || docker run -d -p 7878:7878 --name oxigraph-server oxigraph/oxigraph) && (docker ps | grep -q jena-server || docker run -d -p 3030:3030 --platform linux/amd64 -v $(pwd)/fuseki-config:/fuseki/configuration -v $(pwd)/fuseki-config/shiro.ini:/fuseki/shiro.ini --name jena-server stain/jena-fuseki) && sleep 3)) || echo 'Docker not available, assuming servers are running'; JENA_DATASET=\"ds\" npx ts-node examples/basic-usage.ts"
   },
   "keywords": [
     "rdf",

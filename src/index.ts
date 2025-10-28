@@ -1,29 +1,13 @@
-/**
- * Janus RDF Template - Main Entry Point
- * TypeScript + Rust hybrid architecture for RDF data store integration
- */
-
-// Core exports
-// Core functionality exports will be added when implemented
-// export * from './core/RdfStore';
-// export * from './core/QueryExecutor';
-// export * from './core/RdfParser';
 export * from './core/types';
 
 // Adapter exports
 export * from './adapters/OxigraphAdapter';
 export * from './adapters/JenaAdapter';
-// WASM adapter will be added when Rust integration is complete
 export * from './adapters/WasmAdapter';
 
 // Utility exports
 export * from './utils/logger';
-// Error utilities are already exported from types
-// export * from './utils/errors';
 export * from './utils/validators';
-
-// Re-export WASM bindings (when available)
-// Types are already exported via export * from './core/types'
 
 /**
  * Version information

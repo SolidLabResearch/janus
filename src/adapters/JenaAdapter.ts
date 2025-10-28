@@ -52,11 +52,18 @@ export class JenaAdapter implements IRdfStoreAdapter {
     if (this.endpoint.authToken) {
       this.client.interceptors.request.use((config) => {
         if (this.endpoint.authToken) {
-          config.headers.Authorization = `Bearer ${this.endpoint.authToken}`;
+          config.headers.Authorization = `Basic ${Buffer.from(this.endpoint.authToken).toString('base64')}`;
         }
         return config;
       });
     }
+  }
+
+  /**
+   * Get the base path for dataset endpoints
+   */
+  private get basePath(): string {
+    return this.datasetName ? `/${this.datasetName}` : '';
   }
 
   /**
@@ -65,12 +72,17 @@ export class JenaAdapter implements IRdfStoreAdapter {
   async loadData(data: string, format: RdfFormat, graphName?: string): Promise<number> {
     try {
       const url = graphName
-        ? `/${this.datasetName}/data?graph=${encodeURIComponent(graphName)}`
-        : `/${this.datasetName}/data`;
+        ? `${this.basePath}/data?graph=${encodeURIComponent(graphName)}`
+        : `${this.basePath}/data`;
 
       const contentType = this.getContentType(format);
 
-      await this.client.post(url, data, {
+      const method = graphName ? 'put' : 'post';
+
+      await this.client.request({
+        method,
+        url,
+        data,
         headers: {
           'Content-Type': contentType,
         },
@@ -91,18 +103,16 @@ export class JenaAdapter implements IRdfStoreAdapter {
    */
   async query(sparql: string, options?: QueryOptions): Promise<QueryResult> {
     try {
-      // Jena Fuseki uses form-encoded query parameter
-      const response = await this.client.post(
-        `/${this.datasetName}/sparql`,
-        new URLSearchParams({ query: sparql }),
-        {
-          headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
-            Accept: 'application/sparql-results+json',
-          },
-          params: this.buildQueryParams(options),
-        }
-      );
+      // Jena Fuseki uses GET with query parameter
+      const response = await this.client.get(`${this.basePath}/sparql`, {
+        headers: {
+          Accept: 'application/sparql-results+json',
+        },
+        params: {
+          query: sparql,
+          ...this.buildQueryParams(options),
+        },
+      });
 
       const result = response.data as QueryResult;
 
@@ -172,7 +182,7 @@ export class JenaAdapter implements IRdfStoreAdapter {
    */
   async export(format: RdfFormat): Promise<string> {
     try {
-      const response = await this.client.get(`/${this.datasetName}/data`, {
+      const response = await this.client.get(`${this.basePath}/data`, {
         headers: {
           Accept: this.getContentType(format),
         },
@@ -200,7 +210,7 @@ export class JenaAdapter implements IRdfStoreAdapter {
   async executeUpdate(sparqlUpdate: string): Promise<void> {
     try {
       await this.client.post(
-        `/${this.datasetName}/update`,
+        `${this.basePath}/update`,
         new URLSearchParams({ update: sparqlUpdate }),
         {
           headers: {
@@ -286,7 +296,7 @@ export class JenaAdapter implements IRdfStoreAdapter {
    */
   async uploadFile(formData: FormData): Promise<void> {
     try {
-      await this.client.post(`/${this.datasetName}/upload`, formData, {
+      await this.client.post(`${this.basePath}/upload`, formData, {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
@@ -305,8 +315,8 @@ export class JenaAdapter implements IRdfStoreAdapter {
   async gspGet(graphUri?: string): Promise<string> {
     try {
       const url = graphUri
-        ? `/${this.datasetName}/data?graph=${encodeURIComponent(graphUri)}`
-        : `/${this.datasetName}/data`;
+        ? `${this.basePath}/data?graph=${encodeURIComponent(graphUri)}`
+        : `${this.basePath}/data`;
 
       const response = await this.client.get(url, {
         headers: {
@@ -324,8 +334,8 @@ export class JenaAdapter implements IRdfStoreAdapter {
   /**
    * Build query parameters from options
    */
-  private buildQueryParams(options?: QueryOptions): Record<string, string> {
-    const params: Record<string, string> = {};
+  private buildQueryParams(options?: QueryOptions): Record<string, string | string[]> {
+    const params: Record<string, string | string[]> = {};
 
     if (options?.defaultGraphUri) {
       params['default-graph-uri'] = options.defaultGraphUri;

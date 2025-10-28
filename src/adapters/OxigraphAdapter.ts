@@ -4,6 +4,7 @@
  */
 
 import axios, { AxiosInstance } from 'axios';
+import * as N3 from 'n3';
 import {
   IRdfStoreAdapter,
   RdfFormat,
@@ -87,13 +88,42 @@ export class OxigraphAdapter implements IRdfStoreAdapter {
    */
   async query(sparql: string, options?: QueryOptions): Promise<QueryResult> {
     try {
+      const isConstruct = sparql.trim().toUpperCase().startsWith('CONSTRUCT');
+      const acceptHeader = isConstruct
+        ? 'application/n-triples'
+        : 'application/sparql-results+json';
+
       const response = await this.client.post('/query', sparql, {
         headers: {
           'Content-Type': 'application/sparql-query',
-          Accept: 'application/sparql-results+json',
+          Accept: acceptHeader,
         },
         params: this.buildQueryParams(options),
       });
+
+      if (isConstruct) {
+        // Parse N-Triples response for CONSTRUCT query
+        const triples: RdfTriple[] = [];
+        const parser = new N3.Parser({ format: 'N-Triples' });
+        parser.parse(response.data, (error, quad) => {
+          if (error) {
+            throw new RdfErrorClass(
+              RdfErrorType.QueryError,
+              `Failed to parse CONSTRUCT result: ${error.message}`
+            );
+          }
+          if (quad) {
+            triples.push({
+              subject: this.n3TermToRdfTerm(quad.subject),
+              predicate: this.n3TermToRdfTerm(quad.predicate),
+              object: this.n3TermToRdfTerm(quad.object),
+            });
+          }
+        });
+
+        this.logger.debug(`CONSTRUCT query executed successfully (${triples.length} triples)`);
+        return { triples } as ConstructQueryResult;
+      }
 
       const result = response.data as QueryResult;
 
@@ -106,9 +136,6 @@ export class OxigraphAdapter implements IRdfStoreAdapter {
           `SELECT query executed successfully (${result.results.bindings.length} results)`
         );
         return result as SelectQueryResult;
-      } else if ('triples' in result) {
-        this.logger.debug(`CONSTRUCT query executed successfully`);
-        return result as ConstructQueryResult;
       }
 
       return result;
@@ -164,8 +191,8 @@ export class OxigraphAdapter implements IRdfStoreAdapter {
   async export(format: RdfFormat): Promise<string> {
     try {
       const response = await this.client.get('/store', {
-        headers: {
-          Accept: this.getContentType(format),
+        params: {
+          format: this.getFormatParam(format),
         },
       });
 
@@ -323,6 +350,28 @@ export class OxigraphAdapter implements IRdfStoreAdapter {
   }
 
   /**
+   * Get format param for RDF format
+   */
+  private getFormatParam(format: RdfFormat): string {
+    switch (format) {
+      case RdfFormat.Turtle:
+        return 'ttl';
+      case RdfFormat.NTriples:
+        return 'nt';
+      case RdfFormat.RdfXml:
+        return 'xml';
+      case RdfFormat.JsonLd:
+        return 'jsonld';
+      case RdfFormat.NQuads:
+        return 'nq';
+      case RdfFormat.TriG:
+        return 'trig';
+      default:
+        throw new RdfErrorClass(RdfErrorType.InvalidFormat, `Unsupported format: ${format}`);
+    }
+  }
+
+  /**
    * Get content type for RDF format
    */
   private getContentType(format: RdfFormat): string {
@@ -342,6 +391,26 @@ export class OxigraphAdapter implements IRdfStoreAdapter {
       default:
         throw new RdfErrorClass(RdfErrorType.InvalidFormat, `Unsupported format: ${format}`);
     }
+  }
+
+  /**
+   * Convert N3 term to RdfTerm
+   */
+  private n3TermToRdfTerm(term: N3.Term): RdfTerm {
+    if (term.termType === 'NamedNode') {
+      return { type: 'uri', value: term.value };
+    } else if (term.termType === 'BlankNode') {
+      return { type: 'bnode', value: term.value };
+    } else if (term.termType === 'Literal') {
+      const literalTerm = term as N3.Literal;
+      return {
+        type: 'literal',
+        value: literalTerm.value,
+        datatype: literalTerm.datatype?.value,
+        language: literalTerm.language,
+      };
+    }
+    throw new RdfErrorClass(RdfErrorType.InvalidFormat, `Unknown N3 term type: ${term.termType}`);
   }
 
   /**

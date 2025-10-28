@@ -9,7 +9,7 @@ import {
   OxigraphAdapter,
   JenaAdapter,
   RdfFormat,
-  QueryResultFormat,
+  RdfTermType,
   SelectQueryResult,
   AskQueryResult,
 } from '../src';
@@ -98,30 +98,28 @@ async function oxigraphExample() {
   // Insert a new triple
   console.log('\nInserting a new triple...');
   await adapter.insert({
-    subject: { type: 'uri', value: 'http://example.org/Alice' },
-    predicate: { type: 'uri', value: 'http://xmlns.com/foaf/0.1/mbox' },
-    object: { type: 'literal', value: 'alice@example.org' },
+    subject: { type: RdfTermType.Uri, value: 'http://example.org/Alice' },
+    predicate: { type: RdfTermType.Uri, value: 'http://xmlns.com/foaf/0.1/mbox' },
+    object: { type: RdfTermType.Literal, value: 'alice@example.org' },
   });
   console.log('Triple inserted!');
 
   // Check if triple exists
   const exists = await adapter.contains({
-    subject: { type: 'uri', value: 'http://example.org/Alice' },
-    predicate: { type: 'uri', value: 'http://xmlns.com/foaf/0.1/mbox' },
-    object: { type: 'literal', value: 'alice@example.org' },
+    subject: { type: RdfTermType.Uri, value: 'http://example.org/Alice' },
+    predicate: { type: RdfTermType.Uri, value: 'http://xmlns.com/foaf/0.1/mbox' },
+    object: { type: RdfTermType.Literal, value: 'alice@example.org' },
   });
   console.log('Triple exists in store:', exists);
 
   // Export data
-  console.log('\nExporting data as N-Triples...');
-  const exported = await adapter.export(RdfFormat.NTriples);
+  console.log('\nExporting data as TriG...');
+  const exported = await adapter.export(RdfFormat.TriG);
   console.log('Exported data (first 500 chars):');
   console.log(exported.substring(0, 500) + '...');
 
-  // Clean up
-  console.log('\nCleaning up...');
-  await adapter.clear();
-  console.log('Store cleared!');
+  // Skipping cleanup to avoid update issues
+  console.log('\nSkipping cleanup...');
 }
 
 /**
@@ -137,7 +135,7 @@ async function jenaExample() {
       storeType: 'jena',
       authToken: process.env.JENA_AUTH_TOKEN,
     },
-    process.env.JENA_DATASET || 'test'
+    process.env.JENA_DATASET || 'ds'
   );
 
   // Check if server is available
@@ -149,33 +147,28 @@ async function jenaExample() {
     return;
   }
 
-  // Sample RDF data
-  const turtleData = `
-    @prefix ex: <http://example.org/> .
-    @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
-    @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
-
-    ex:Book1 a ex:Book ;
-      ex:title "The Great Gatsby" ;
-      ex:author ex:Fitzgerald ;
-      ex:published "1925"^^<http://www.w3.org/2001/XMLSchema#gYear> .
-
-    ex:Fitzgerald a ex:Author ;
-      ex:name "F. Scott Fitzgerald" .
-
-    ex:Book2 a ex:Book ;
-      ex:title "To Kill a Mockingbird" ;
-      ex:author ex:Lee ;
-      ex:published "1960"^^<http://www.w3.org/2001/XMLSchema#gYear> .
-
-    ex:Lee a ex:Author ;
-      ex:name "Harper Lee" .
+  // Load data into default graph
+  console.log('Loading RDF data into default graph...');
+  const insertQuery = `
+    PREFIX ex: <http://example.org/>
+    PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+    PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+    INSERT DATA {
+      ex:Book1 rdf:type ex:Book ;
+        ex:title "The Great Gatsby" ;
+        ex:author ex:Fitzgerald ;
+        ex:published "1925"^^<http://www.w3.org/2001/XMLSchema#gYear> .
+      ex:Fitzgerald rdf:type ex:Author ;
+        ex:name "F. Scott Fitzgerald" .
+      ex:Book2 rdf:type ex:Book ;
+        ex:title "To Kill a Mockingbird" ;
+        ex:author ex:Lee ;
+        ex:published "1960"^^<http://www.w3.org/2001/XMLSchema#gYear> .
+      ex:Lee rdf:type ex:Author ;
+        ex:name "Harper Lee" .
+    }
   `;
-
-  // Load data into named graph
-  console.log('Loading RDF data into named graph...');
-  const graphUri = 'http://example.org/books';
-  await adapter.loadData(turtleData, RdfFormat.Turtle, graphUri);
+  await adapter.executeUpdate(insertQuery);
   console.log('Data loaded successfully!');
 
   // List all graphs
@@ -183,18 +176,16 @@ async function jenaExample() {
   const graphs = await adapter.listGraphs();
   console.log('Available graphs:', graphs);
 
-  // Query the named graph
-  console.log('\nQuerying books from the named graph...');
+  // Query the default graph
+  console.log('\nQuerying books from the default graph...');
   const query = `
     PREFIX ex: <http://example.org/>
     SELECT ?title ?authorName ?year WHERE {
-      GRAPH <${graphUri}> {
-        ?book a ex:Book ;
-          ex:title ?title ;
-          ex:author ?author ;
-          ex:published ?year .
-        ?author ex:name ?authorName .
-      }
+      ?book a ex:Book ;
+        ex:title ?title ;
+        ex:author ?author ;
+        ex:published ?year .
+      ?author ex:name ?authorName .
     }
     ORDER BY ?year
   `;
@@ -206,24 +197,22 @@ async function jenaExample() {
     );
   });
 
-  // Get statistics for the graph
-  console.log('\nGetting graph statistics...');
-  const stats = await adapter.getGraphStatistics(graphUri);
-  console.log(`Graph contains ${stats.tripleCount} triples`);
+  // Get dataset statistics
+  console.log('\nGetting dataset statistics...');
+  const stats = await adapter.getStatistics();
+  console.log(`Dataset contains ${stats.tripleCount} triples`);
 
   // Execute SPARQL UPDATE
   console.log('\nExecuting SPARQL UPDATE...');
   const updateQuery = `
     PREFIX ex: <http://example.org/>
     INSERT DATA {
-      GRAPH <${graphUri}> {
-        ex:Book3 a ex:Book ;
-          ex:title "1984" ;
-          ex:author ex:Orwell ;
-          ex:published "1949"^^<http://www.w3.org/2001/XMLSchema#gYear> .
-        ex:Orwell a ex:Author ;
-          ex:name "George Orwell" .
-      }
+      ex:Book3 a ex:Book ;
+        ex:title "1984" ;
+        ex:author ex:Orwell ;
+        ex:published "1949"^^<http://www.w3.org/2001/XMLSchema#gYear> .
+      ex:Orwell a ex:Author ;
+        ex:name "George Orwell" .
     }
   `;
   await adapter.executeUpdate(updateQuery);
@@ -238,11 +227,16 @@ async function jenaExample() {
     );
   });
 
-  // Export graph data
-  console.log('\nExporting graph data...');
-  const graphData = await adapter.gspGet(graphUri);
-  console.log('Exported graph data (first 500 chars):');
-  console.log(graphData.substring(0, 500) + '...');
+  // Export dataset data
+  console.log('\nExporting dataset data...');
+  const datasetData = await adapter.gspGet();
+  console.log('Exported dataset data (first 500 chars):');
+  console.log(datasetData.substring(0, 500) + '...');
+
+  // Clean up
+  console.log('\nCleaning up...');
+  await adapter.clear();
+  console.log('Store cleared!');
 }
 
 /**
@@ -344,14 +338,29 @@ async function main() {
   console.log('Janus RDF Template - Basic Usage Examples\n');
   console.log('='.repeat(50));
 
+  // Parse command line arguments
+  const args = process.argv.slice(2);
+  let runOxigraph = args.includes('--oxigraph');
+  let runJena = args.includes('--jena');
+  let runAdvanced = args.includes('--advanced');
+
+  // If no specific flags, run all
+  if (!runOxigraph && !runJena && !runAdvanced) {
+    runOxigraph = runJena = runAdvanced = true;
+  }
+
+  console.log(
+    `Running examples: Oxigraph=${runOxigraph}, Jena=${runJena}, Advanced=${runAdvanced}\n`
+  );
+
   try {
-    // Run examples
-    await oxigraphExample();
-    await jenaExample();
-    await advancedQueryExample();
+    // Run selected examples
+    if (runOxigraph) await oxigraphExample();
+    if (runJena) await jenaExample();
+    if (runAdvanced) await advancedQueryExample();
 
     console.log('\n' + '='.repeat(50));
-    console.log('\nAll examples completed successfully!\n');
+    console.log('\nSelected examples completed successfully!\n');
   } catch (error) {
     console.error('\nError running examples:');
     console.error(error);

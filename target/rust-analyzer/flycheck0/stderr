@@ -1,5 +1,5 @@
-   0.137948125s  INFO prepare_target{force=false package_id=janus-rdf-rust v0.1.0 (/Users/kushbisen/Code/janus/rust) target="janus_rdf_rust"}: cargo::core::compiler::fingerprint: fingerprint error for janus-rdf-rust v0.1.0 (/Users/kushbisen/Code/janus/rust)/Check { test: true }/TargetInner { name_inferred: true, ..: lib_target("janus_rdf_rust", ["cdylib", "rlib"], "/Users/kushbisen/Code/janus/rust/src/lib.rs", Edition2021) }
-   0.137984333s  INFO prepare_target{force=false package_id=janus-rdf-rust v0.1.0 (/Users/kushbisen/Code/janus/rust) target="janus_rdf_rust"}: cargo::core::compiler::fingerprint:     err: failed to read `/Users/kushbisen/Code/janus/rust/target/debug/.fingerprint/janus-rdf-rust-900bd6aa26c8c59c/test-lib-janus_rdf_rust`
+   0.120516500s  INFO prepare_target{force=false package_id=janus-rdf-rust v0.1.0 (/Users/kushbisen/Code/janus/rust) target="janus_rdf_rust"}: cargo::core::compiler::fingerprint: fingerprint error for janus-rdf-rust v0.1.0 (/Users/kushbisen/Code/janus/rust)/Check { test: true }/TargetInner { name_inferred: true, ..: lib_target("janus_rdf_rust", ["cdylib", "rlib"], "/Users/kushbisen/Code/janus/rust/src/lib.rs", Edition2021) }
+   0.120672917s  INFO prepare_target{force=false package_id=janus-rdf-rust v0.1.0 (/Users/kushbisen/Code/janus/rust) target="janus_rdf_rust"}: cargo::core::compiler::fingerprint:     err: failed to read `/Users/kushbisen/Code/janus/rust/target/debug/.fingerprint/janus-rdf-rust-900bd6aa26c8c59c/test-lib-janus_rdf_rust`
 
 Caused by:
     No such file or directory (os error 2)
