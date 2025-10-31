@@ -1,0 +1,42 @@
+[package]
+name = "janus"
+version = "0.1.0"
+edition = "2021"
+authors = ["Kush Bisen <mailkushbisen@gmail.com>"]
+license = "MIT"
+description = "A hybrid engine for unified Live and Historical RDF Stream Processing"
+repository = "https://github.com/SolidLabResearch/janus"
+keywords = ["rdf", "sparql", "semantic-web", "stream-processing", "rsp-ql"]
+categories = ["database", "parser-implementations"]
+readme = "README.md"
+
+[dependencies]
+# Add your dependencies here as you build the project
+# Examples:
+# tokio = { version = "1.35", features = ["full"] }
+# serde = { version = "1.0", features = ["derive"] }
+# serde_json = "1.0"
+
+[dev-dependencies]
+# Add your development dependencies here
+# Examples:
+# tokio-test = "0.4"
+
+[lib]
+name = "janus"
+path = "src/lib.rs"
+
+[[bin]]
+name = "janus"
+path = "src/main.rs"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+
+[profile.dev]
+opt-level = 0
+
+[profile.test]
+opt-level = 0
