@@ -27,6 +27,28 @@ impl DenseIndexBuilder {
     }
 }
 
+
+#[doc=""]
+pub fn build_dense_index(
+    log_path: &str,
+    index_path: &str,
+) -> std::io::Result<()> {
+    let mut log = File::open(log_path)?;
+    let mut builder = DenseIndexBuilder::create(index_path)?;
+    
+    let mut offset = 0u64;
+    let mut record = [0u8; RECORD_SIZE];
+    
+    while log.read_exact(&mut record).is_ok(){
+        let (timestamp, _, _ , _, _ ) = decode_record(&record);
+        builder.add_entry(timestamp, offset)?;
+        offset += RECORD_SIZE as u64;
+    }
+    
+    builder.finalize()?;
+    Ok(())
+}
+
 #[doc = ""]
 pub struct DenseIndexReader {
     index: Vec<(u64, u64)>,
@@ -82,7 +104,7 @@ impl DenseIndexReader {
         }
         Ok(results)
     }
-    
+
     #[doc = ""]
     pub fn index_size_bytes(&self) -> usize {
         self.index.len() * 16

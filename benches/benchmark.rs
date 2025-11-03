@@ -1,7 +1,3 @@
-//! Janus - A hybrid engine for unified Live and Historical RDF Stream Processing
-//!
-//! This is the main entry point for the Janus command-line interface.
-
 use janus::indexing::{dense, shared::LogWriter, sparse};
 use std::fs;
 use std::time::Instant;

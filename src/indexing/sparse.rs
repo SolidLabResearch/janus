@@ -2,29 +2,22 @@ use crate::indexing::shared::{decode_record, Event, RECORD_SIZE};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom, Write};
 
-#[doc=""]
+#[doc = ""]
 pub struct SparseIndexBuilder {
     index_file: File,
     interval: usize,
 }
-#[doc=""]
+#[doc = ""]
 impl SparseIndexBuilder {
-    
-    #[doc=""]
-    pub fn create(
-        index_path: &str,
-        interval: usize,
-    ) -> std::io::Result<Self> {
+    #[doc = ""]
+    pub fn create(index_path: &str, interval: usize) -> std::io::Result<Self> {
         let index_file = File::create(index_path)?;
-        Ok (Self {
-            index_file,
-            interval,
-        })
+        Ok(Self { index_file, interval })
     }
-    
-    #[doc=""]
+
+    #[doc = ""]
     pub fn add_entry(
-        &mut self, 
+        &mut self,
         record_count: u64,
         timestamp: u64,
         offset: u64,
@@ -37,13 +30,93 @@ impl SparseIndexBuilder {
             Ok(false)
         }
     }
-    
-    #[doc=""]
+
+    #[doc = ""]
     pub fn finalize(&mut self) -> std::io::Result<()> {
         self.index_file.flush()
     }
 }
 
-// pub fn build_sparse_index(
-//     log_path: &str,
-// ) 
+pub fn build_sparse_index(
+    log_path: &str,
+    index_path: &str,
+    interval: &usize,
+) -> std::io::Result<()> {
+    let mut log = File::open(log_path)?;
+    let mut builder = SparseIndexBuilder::create(index_path, *interval)?;
+
+    let mut offset = 0u64;
+    let mut record_count = 0u64;
+    let mut record = [0u8; RECORD_SIZE];
+
+    while log.read_exact(&mut record).is_ok() {
+        let (timestamp, _, _, _, _) = decode_record(&record);
+        builder.add_entry(record_count, timestamp, offset)?;
+        offset += RECORD_SIZE as u64;
+        record_count += 1;
+    }
+
+    builder.finalize()?;
+    Ok(())
+}
+
+pub struct SparseReader {
+    index: Vec<(u64, u64)>,
+    interval: usize,
+}
+
+impl SparseReader {
+    pub fn open(index_path: &str, interval: usize) -> std::io::Result<Self> {
+        let mut index_file = File::open(index_path)?;
+        let mut index = Vec::new();
+        let mut entry = [0u8; 16];
+
+        while index_file.read_exact(&mut entry).is_ok() {
+            let timestamp = u64::from_be_bytes(entry[0..8].try_into().unwrap());
+            let offset = u64::from_be_bytes(entry[8..16].try_into().unwrap());
+
+            index.push((timestamp, offset));
+        }
+        Ok(Self { index, interval })
+    }
+
+    pub fn query(
+        &self,
+        log_path: &str,
+        timestamp_start_bound: u64,
+        timestamp_end_bound: u64,
+    ) -> std::io::Result<Vec<Event>> {
+        if self.index.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let position = self
+            .index
+            .binary_search_by_key(&timestamp_start_bound, |x| x.0)
+            .unwrap_or_else(|i| i.saturating_sub(1));
+
+        let mut log = File::open(log_path)?;
+        log.seek(SeekFrom::Start(self.index[position].1))?;
+
+        let mut results = Vec::new();
+        let mut record = [0u8; RECORD_SIZE];
+
+        while log.read_exact(&mut record).is_ok() {
+            let (timestamp, subject, predicate, object, graph) = decode_record(&record);
+
+            if timestamp > timestamp_end_bound {
+                break;
+            }
+
+            if timestamp >= timestamp_start_bound {
+                results.push(Event { timestamp, subject, predicate, object, graph });
+            }
+        }
+
+        Ok(results)
+    }
+
+    pub fn index_size_bytes(&self) -> usize {
+        self.index.len() * 16
+    }
+}

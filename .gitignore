@@ -51,3 +51,6 @@ fuseki-config/databases/
 *.db
 *.db-shm
 *.db-wal
+
+# Data for the Benchmarking
+/data/
