@@ -63,7 +63,54 @@ impl JanusQLParser {
         })
     }
 
-    pub fn parse(&self, query: &str) -> Result {
+    fn parse_window(
+        &self,
+        line: &str,
+        prefix_mapper: &HashMap<String, String>,
+    ) -> Result<Option<WindowDefinition>, Box<dyn std::error::Error>> {
+        if let Some(captures) = self.historical_sliding_window_regex.captures(line) {
+            return Ok(Some(WindowDefinition {
+                window_name: self.unwrap_iri(&captures[1], prefix_mapper),
+                stream_name: self.unwrap_iri(&captures[2], prefix_mapper),
+                offset: Some(captures[3].parse()?),
+                width: captures[4].parse()?,
+                slide: captures[5].parse()?,
+                start: None,
+                end: None,
+                window_type: WindowType::HistoricalSliding,
+            }));
+        }
+
+        if let Some(captures) = self.historical_fixed_window_regex.captures(line) {
+            return Ok(Some(WindowDefinition {
+                window_name: self.unwrap_iri(&captures[1], prefix_mapper),
+                stream_name: self.unwrap_iri(&captures[2], prefix_mapper),
+                start: Some(captures[3].parse()?),
+                end: Some(captures[4].parse()?),
+                width: 0,
+                slide: 0,
+                offset: None,
+                window_type: WindowType::HistoricalFixed,
+            }));
+        }
+
+        if let Some(captures) = self.live_sliding_window_regex.captures(line) {
+            return Ok(Some(WindowDefinition {
+                window_name: self.unwrap_iri(&captures[1], prefix_mapper),
+                stream_name: self.unwrap_iri(&captures[2], prefix_mapper),
+                width: captures[3].parse()?,
+                slide: captures[4].parse()?,
+                offset: None,
+                start: None,
+                end: None,
+                window_type: WindowType::Live,
+            }));
+        }
+
+        Ok(None)
+    }
+
+    pub fn parse(&self, query: &str) -> Result<ParsedJanusQuery, Box<dyn std::error::Error>> {
         let mut parsed = ParsedJanusQuery {
             r2s: None,
             live_windows: Vec::new(),
@@ -100,156 +147,106 @@ impl JanusQLParser {
                     let name_raw = captures.get(2).unwrap().as_str();
                     let name = self.unwrap_iri(name_raw, &parsed.prefixes);
                     parsed.r2s = Some(R2SOperator { operator, name });
-                } else if trimmed_line.starts_with("SELECT")() {
-                    parsed.select_clause = trimmed_line.to_string();
-                } else if trimmed_line.starts_with("PREFIX") {
-                    if let Some(captures) = self.prefix_regex.captures(trimmed_line) {
-                        let prefix = captures.get(1).unwrap().as_str().to_string();
-                        let namespace = captures.get(2).unwrap().as_str().to_string();
-                        parsed.prefixes.insert(prefix, namespace);
-                        prefix_lines.push(trimmed_line.to_string());
-                    }
-                } else if trimmed_line.starts_with("FROM NAMED WINDOW") {
-                    if let Some(captures) = self.parse_window(trimmed, &parsed.prefixes)? {
-                        match window.window_type {
-                            WindowType::Live => parsed.live_windows.push(window),
-                            WindowType::HistoricalSliding | WindowType::HistoricalFixed => {
-                                parsed.historical_windows.push(window);
-                            }
+                }
+            } else if trimmed_line.starts_with("PREFIX") {
+                if let Some(captures) = self.prefix_regex.captures(trimmed_line) {
+                    let prefix = captures.get(1).unwrap().as_str().to_string();
+                    let namespace = captures.get(2).unwrap().as_str().to_string();
+                    parsed.prefixes.insert(prefix, namespace);
+                    prefix_lines.push(trimmed_line.to_string());
+                }
+            } else if trimmed_line.starts_with("SELECT") {
+                parsed.select_clause = trimmed_line.to_string();
+            } else if trimmed_line.starts_with("FROM NAMED WINDOW") {
+                if let Some(window) = self.parse_window(trimmed_line, &parsed.prefixes)? {
+                    match window.window_type {
+                        WindowType::Live => parsed.live_windows.push(window),
+                        WindowType::HistoricalSliding | WindowType::HistoricalFixed => {
+                            parsed.historical_windows.push(window);
                         }
                     }
-                } else if trimmed_line.starts_with("WHERE") {
-                    in_where_clause = true;
-                    where_lines.push(line)
-                } else if in_where_clause {
-                    where_lines.push(line);
                 }
+            } else if trimmed_line.starts_with("WHERE") {
+                in_where_clause = true;
+                where_lines.push(line);
+            } else if in_where_clause {
+                where_lines.push(line);
             }
-            parsed.where_clause = where_lines.join("\n");
-
-            if !parsed.live_windows.is_empty() {
-                parsed.rspql_query = self.generate_rspql_query(&parsed, &prefix_lines);
-            }
-            parsed.sparql_queries = self.generate_sparql_queries(&parsed, &prefix_lines);
-            Ok(parsed)
         }
 
-        fn parse_window(
-            &self,
-            line: &str,
-            prefix_mapper: &HashMap<String, String>,
-        ) -> Result<Option<WindowDefinition>, Box<dyn std::error::Error>> {
-            if let Some(captures) = self.historical_sliding_regex.captures(line) {
-                return Ok(Some(WindowDefinition {
-                    window_name: self.unwrap_iri(&captures[1], prefix_mapper),
-                    stream_name: self.unwrap_iri(&captures[2], prefix_mapper),
-                    offset: Some(captures[3].parse()?),
-                    width: captures[4].parse()?,
-                    slide: captures[5].parse()?,
-                    start: None,
-                    end: None,
-                    window_type: WindowType::HistoricalSliding,
-                }));
-            }
+        parsed.where_clause = where_lines.join("\n");
 
-            if let Some(captures) = self.historical_fixed_window_regex.captures(line) {
-                return Ok(Some(WindowDefinition {
-                    window_name: self.unwrap_iri(&captures[1], prefix_mapper),
-                    stream_name: self.unwrap_iri(&captures[2], prefix_mapper),
-                    start: Some(captures[3].parse()?),
-                    end: Some(captures[4].parse()?),
-                    width: 0,
-                    slide: 0,
-                    offset: None,
-                    window_type: WindowType::HistoricalFixed,
-                }));
-            }
+        if !parsed.live_windows.is_empty() {
+            parsed.rspql_query = self.generate_rspql_query(&parsed, &prefix_lines);
+        }
+        parsed.sparql_queries = self.generate_sparql_queries(&parsed, &prefix_lines);
 
-            if let Some(captures) = self.live_sliding_window_regex.captures(line) {
-                return Ok(Some(WindowDefinition {
-                    window_name: self.unwrap_iri(&captures[1], prefix_mapper),
-                    stream_name: self.unwrap_iri(&captures[2], prefix_mapper),
-                    width: Some(captures[3].parse()?),
-                    slide: Some(captures[4].parse()?),
-                    offset: None,
-                    start: None,
-                    end: None,
-                    window_type: WindowType::Live,
-                }));
-            }
+        Ok(parsed)
+    }
 
-            Ok(None)
+    fn generate_rspql_query(&self, parsed: &ParsedJanusQuery, prefix_lines: &[String]) -> String {
+        let mut lines: Vec<String> = Vec::new();
+
+        // Add prefixes
+        for prefix in prefix_lines {
+            lines.push(prefix.clone());
         }
 
-        fn generate_rspql_query(
-            &self,
-            parsed: &ParsedJanusQuery,
-            prefix_lines: &[String],
-        ) -> String {
+        lines.push(String::new());
+
+        // Adding the R2S Operator
+        if let Some(ref r2s) = parsed.r2s {
+            let wrapped_name = self.wrap_iri(&r2s.name, &parsed.prefixes);
+            lines.push(format!("REGISTER {} {} AS", r2s.operator, wrapped_name));
+        }
+
+        if !parsed.select_clause.is_empty() {
+            lines.push(parsed.select_clause.clone());
+        }
+
+        lines.push(String::new());
+
+        // Adding live windows
+        for window in &parsed.live_windows {
+            let wrapped_window_name = self.wrap_iri(&window.window_name, &parsed.prefixes);
+            let wrapped_stream_name = self.wrap_iri(&window.stream_name, &parsed.prefixes);
+
+            lines.push(format!(
+                "FROM NAMED WINDOW {} ON STREAM {} [RANGE {} STEP {}]",
+                wrapped_window_name, wrapped_stream_name, window.width, window.slide
+            ));
+        }
+
+        // Adding WHERE clause
+        if !parsed.where_clause.is_empty() {
+            lines.push(parsed.where_clause.clone());
+        }
+        lines.join("\n")
+    }
+
+    fn generate_sparql_queries(
+        &self,
+        parsed: &ParsedJanusQuery,
+        prefix_lines: &[String],
+    ) -> Vec<String> {
+        let mut queries = Vec::new();
+
+        for window in &parsed.historical_windows {
             let mut lines: Vec<String> = Vec::new();
 
-            // Add prefixes
+            // Adding the prefixes.
             for prefix in prefix_lines {
                 lines.push(prefix.clone());
             }
 
             lines.push(String::new());
 
-            // Adding the R2S Operator
-            if let Some(ref r2s) = parsed.r2s {
-                let wrapped_name = self.wrap_iri(&r2s.name, &parsed.prefixes);
-
-                lines.push(format!("REGISTER {} {} AS", r2s.operator, wrapped_name));
-            }
-
+            // Adding the SELECT clause.
             if !parsed.select_clause.is_empty() {
                 lines.push(parsed.select_clause.clone());
             }
 
             lines.push(String::new());
-
-            // Adding live windows
-            for window in &parsed.live_windows {
-                let wrapped_window_name = self.wrap_iri(&window.window_name, &parsed.prefixes);
-                let wrapped_stream_name = self.wrap_iri(&window.stream.name, &parsed.prefixes);
-
-                lines.push(format!(
-                    "FROM NAMED WINDOW {} ON STREAM {} [RANGE {} STEP {}]",
-                    wrapped_window_name, wrapped_stream_name, window.width, window.slide
-                ));
-            }
-
-            // Adding WHERE clause
-            if !parsed.where_clause.is_empty() {
-                lines.push(parsed.where_clause.clone());
-            }
-            lines.join("\n")
-        }
-
-        fn generate_sparql_queries(
-            &self,
-            parsed: &ParsedJanusQuery,
-            prefix_lines: &[String],
-        ) -> Vec<String> {
-            let mut queries = Vec::new();
-
-            for window in &parsed.historical_windows {
-                let mut lines: Vec<String> = Vec::new();
-
-                // Adding the prefixes.
-                for prefix in prefix_lines {
-                    lines.push(prefix.clone());
-                }
-
-                lines.push(String::new());
-
-                // Adding the SELECT clause.
-                if !parsed.select_clause.is_empty() {
-                    lines.push(parsed.select_clause.clone());
-                }
-
-                lines.push(String::new());
-            }
 
             // Adding the WHERE clause for the historical window.
             let where_clause = self.adapt_where_clause_for_historical(
@@ -260,6 +257,142 @@ impl JanusQLParser {
             lines.push(where_clause);
             queries.push(lines.join("\n"));
         }
-            queries
+        queries
+    }
+
+    fn adapt_where_clause_for_historical(
+        &self,
+        where_clause: &str,
+        window: &WindowDefinition,
+        _prefixes: &HashMap<String, String>,
+    ) -> String {
+        // Replacing the window with graph.
+        let adapted = where_clause.replace("WINDOW ", "GRAPH ");
+
+        match window.window_type {
+            WindowType::HistoricalFixed => {
+                if let (Some(start), Some(end)) = (window.start, window.end) {
+                    let filter_clause =
+                        format!("\n FILTER(?timestamp >= {} && ?timestamp <= {})", start, end);
+                    adapted.replace("}&", &format!("{}\n}}", filter_clause))
+                } else {
+                    adapted
+                }
+            }
+            WindowType::HistoricalSliding => {
+                if let Some(offset) = window.offset {
+                    let filter_clause = format!("\n FILTER(?timestamp >= {})", offset);
+                    adapted.replace("}&", &format!("{}\n}}", filter_clause))
+                } else {
+                    adapted
+                }
+            }
+            _ => adapted,
         }
     }
+
+    fn unwrap_iri(&self, prefixed_iri: &str, prefix_mapper: &HashMap<String, String>) -> String {
+        let trimmed = prefixed_iri.trim();
+
+        if trimmed.starts_with('<') && trimmed.ends_with('>') {
+            return trimmed[1..trimmed.len() - 1].to_string();
+        }
+
+        if let Some(colon_pos) = trimmed.find(':') {
+            let prefix = &trimmed[..colon_pos];
+            let local_part = &trimmed[colon_pos + 1..];
+            if let Some(namespace) = prefix_mapper.get(prefix) {
+                return format!("{}{}", namespace, local_part);
+            }
+        }
+
+        trimmed.to_string()
+    }
+
+    fn wrap_iri(&self, iri: &str, prefixes: &HashMap<String, String>) -> String {
+        for (prefix, namespace) in prefixes {
+            if iri.starts_with(namespace) {
+                let local_part = &iri[namespace.len()..];
+                return format!("{}:{}", prefix, local_part);
+            }
+        }
+        format!("<{}>", iri)
+    }
+}
+
+impl Default for JanusQLParser {
+    fn default() -> Self {
+        Self::new().expect("Failed to create JanusQLParser")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_basic_live_window() {
+        let parser = JanusQLParser::new().unwrap();
+        let query = r#"
+        PREFIX sensor: <https://rsp.js/sensors/>
+        PREFIX saref: <https://saref.org/core/>
+        REGISTER RStream sensor:output AS
+        SELECT ?temperature ?timestamp
+        FROM NAMED WINDOW sensor:tempWindow ON STREAM sensor:temperatureStream [RANGE 5000 STEP 1000]
+        WHERE {
+            WINDOW :temperatureWindow {
+                ?event saref:hasValue ?temperature .
+                ?event saref:hasTimestamp ?timestamp .
+            }
+        }
+        "#;
+
+        let result = parser.parse(query).unwrap();
+        assert_eq!(result.live_windows.len(), 1);
+        assert_eq!(result.historical_windows.len(), 0);
+        assert_eq!(result.live_windows[0].width, 5000);
+        assert_eq!(result.live_windows[0].slide, 1000);
+        assert!(!result.rspql_query.is_empty());
+    }
+
+    #[test]
+    fn test_mixed_windows(){
+        let parser = JanusQLParser::new().unwrap();
+        let query = r#"
+        PREFIX sensor: <https://rsp.js/sensors/>
+        PREFIX saref: <https://saref.org/core/>
+        REGISTER RStream sensor:output AS
+        SELECT ?temperature ?timestamp
+        FROM NAMED WINDOW sensor:tempWindow ON STREAM sensor:temperatureStream [RANGE 5000 STEP 1000]
+        FROM NAMED WINDOW sensor:histWindow ON STREAM sensor:temperatureStream [START 1622505600 END 1622592000]
+        FROM NAMED WINDOW sensor:histSlideWindow ON STREAM sensor:temperatureStream [OFFSET 1622505600 RANGE 10000 STEP 2000]
+        WHERE {
+            WINDOW sensor:tempWindow {
+                ?event saref:hasValue ?temperature .
+                ?event saref:hasTimestamp ?timestamp .
+            }
+            WINDOW sensor:histWindow {
+                ?event saref:hasValue ?temperature .
+                ?event saref:hasTimestamp ?timestamp .
+            }
+            WINDOW sensor:histSlideWindow {
+                ?event saref:hasValue ?temperature .
+                ?event saref:hasTimestamp ?timestamp .
+            }
+        }
+        "#;
+
+        let result = parser.parse(query).unwrap();
+        assert_eq!(result.live_windows.len(), 1);
+        assert_eq!(result.historical_windows.len(), 2);
+        assert_eq!(result.live_windows[0].width, 5000);
+        assert_eq!(result.live_windows[0].slide, 1000);
+        assert_eq!(result.historical_windows[0].start, Some(1622505600));
+        assert_eq!(result.historical_windows[0].end, Some(1622592000));
+        assert_eq!(result.historical_windows[1].offset, Some(1622505600));
+        assert_eq!(result.historical_windows[1].width, 10000);
+        assert_eq!(result.historical_windows[1].slide, 2000);
+        assert!(!result.rspql_query.is_empty());
+        assert_eq!(result.sparql_queries.len(), 2);
+    }
+}

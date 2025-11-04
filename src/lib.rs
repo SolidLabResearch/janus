@@ -56,7 +56,10 @@ pub mod config {
 /// Module for indexing functionality
 pub mod indexing;
 
-#[doc=""]
+/// Module for parsing JanusQL queries
+pub mod parsing;
+
+#[doc = ""]
 pub mod benchmarking {
 
     mod benchmark;
