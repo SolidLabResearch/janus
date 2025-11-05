@@ -86,6 +86,10 @@ impl SparseReader {
         timestamp_start_bound: u64,
         timestamp_end_bound: u64,
     ) -> std::io::Result<Vec<Event>> {
+        if timestamp_start_bound > timestamp_end_bound {
+            return Ok(Vec::new());
+        }
+
         if self.index.is_empty() {
             return Ok(Vec::new());
         }

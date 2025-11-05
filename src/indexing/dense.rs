@@ -35,16 +35,16 @@ pub fn build_dense_index(
 ) -> std::io::Result<()> {
     let mut log = File::open(log_path)?;
     let mut builder = DenseIndexBuilder::create(index_path)?;
-    
+
     let mut offset = 0u64;
     let mut record = [0u8; RECORD_SIZE];
-    
+
     while log.read_exact(&mut record).is_ok(){
         let (timestamp, _, _ , _, _ ) = decode_record(&record);
         builder.add_entry(timestamp, offset)?;
         offset += RECORD_SIZE as u64;
     }
-    
+
     builder.finalize()?;
     Ok(())
 }
@@ -76,6 +76,10 @@ impl DenseIndexReader {
         timestamp_start_bound: u64,
         timestamp_end_bound: u64,
     ) -> std::io::Result<Vec<Event>> {
+        if timestamp_start_bound > timestamp_end_bound {
+            return Ok(Vec::new());
+        }
+
         if self.index.is_empty() {
             return Ok(Vec::new());
         }
