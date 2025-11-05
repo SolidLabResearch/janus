@@ -1,0 +1,56 @@
+# Rust build artifacts
+target/
+Cargo.lock
+
+# Debug symbols
+*.pdb
+
+# Backup files
+*~
+*.swp
+*.swo
+*.swn
+.DS_Store
+
+# IDE and editor directories
+.idea/
+.vscode/
+*.iml
+.zed/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Test coverage
+*.profraw
+*.profdata
+coverage/
+tarpaulin-report.html
+
+# Benchmark results
+benches/results/
+
+# Documentation build
+target/doc/
+
+# Temporary files
+tmp/
+temp/
+
+# OS specific
+.DS_Store
+Thumbs.db
+
+# RDF Store data
+fuseki-config/databases/
+*.lock
+
+# Docker volumes
+*.db
+*.db-shm
+*.db-wal
+
+# Data for the Benchmarking
+/data/

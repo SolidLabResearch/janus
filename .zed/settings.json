@@ -1,0 +1,10 @@
+janus/.zed/settings.json
+{
+  "lsp": {
+    "rust-analyzer": {
+      "diagnostics": {
+        "disabled": ["unlinked-file"]
+      }
+    }
+  }
+}
