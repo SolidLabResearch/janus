@@ -10,6 +10,6 @@ This code is copyrighted by Ghent University - imec and released under the MIT L
 
 ## Contact
 
-For any questions, please contact [Kush](mailto:mailkushbisen@gmail.com] or create an issue in the repository.
+For any questions, please contact [Kush](mailto:mailkushbisen@gmail.com) or create an issue in the repository.
 
 ---
