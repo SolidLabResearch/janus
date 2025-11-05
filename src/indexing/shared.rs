@@ -1,5 +1,6 @@
 use std::fs::File;
 use std::io::Write;
+use crate::indexing::dictionary::Dictionary;
 
 #[doc = ""]
 pub const RECORD_SIZE: usize = 40;
@@ -89,4 +90,25 @@ pub struct Event {
     pub object: u64,
     #[doc = ""]
     pub graph: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct ResolvedEvent{
+    pub timestamp: u64,
+    pub subject: String,
+    pub predicate: String,
+    pub object: String,
+    pub graph: String,
+}
+
+impl Event {
+    pub fn resolve(&self, dict: &Dictionary) -> ResolvedEvent {
+        ResolvedEvent {
+            timestamp: self.timestamp,
+            subject: dict.fetch_uri(self.subject).unwrap_or("UNKNOWN").to_string(),
+            predicate: dict.fetch_uri(self.predicate).unwrap_or("UNKNOWN").to_string(),
+            object: dict.fetch_uri(self.object).unwrap_or("UNKNOWN").to_string(),
+            graph: dict.fetch_uri(self.graph).unwrap_or("UNKNOWN").to_string()
+         }
+    }
 }
