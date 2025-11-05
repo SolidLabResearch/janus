@@ -356,7 +356,7 @@ mod tests {
     }
 
     #[test]
-    fn test_mixed_windows(){
+    fn test_mixed_windows() {
         let parser = JanusQLParser::new().unwrap();
         let query = r#"
         PREFIX sensor: <https://rsp.js/sensors/>

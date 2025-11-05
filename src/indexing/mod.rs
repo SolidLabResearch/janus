@@ -1,8 +1,8 @@
-#[doc=""]
-pub mod shared;
-#[doc=""]
+#[doc = ""]
 pub mod dense;
-#[doc=""]
-pub mod sparse;
-#[doc=""]
+#[doc = ""]
 pub mod dictionary;
+#[doc = ""]
+pub mod shared;
+#[doc = ""]
+pub mod sparse;
