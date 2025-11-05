@@ -10,34 +10,55 @@ pub enum WindowType {
 
 #[derive(Debug, Clone)]
 pub struct WindowDefinition {
+    /// Name of the window
     pub window_name: String,
+    /// Name of the stream
     pub stream_name: String,
+    /// Width of the window
     pub width: u64,
+    /// Slide step
     pub slide: u64,
+    /// Offset for sliding windows
     pub offset: Option<u64>,
+    /// Start time for fixed windows
     pub start: Option<u64>,
+    /// End time for fixed windows
     pub end: Option<u64>,
+    /// Type of the window
     pub window_type: WindowType,
 }
 
+/// R2S operator definition
 #[derive(Debug, Clone)]
 pub struct R2SOperator {
+    /// Operator type
     pub operator: String,
+    /// Operator name
     pub name: String,
 }
 
+/// Parsed JanusQL query structure
 #[derive(Debug)]
 pub struct ParsedJanusQuery {
+    /// R2S operator if present
     pub r2s: Option<R2SOperator>,
+    /// Live windows defined in the query
     pub live_windows: Vec<WindowDefinition>,
+    /// Historical windows defined in the query
     pub historical_windows: Vec<WindowDefinition>,
+    /// RSPQL query string
     pub rspql_query: String,
+    /// SPARQL queries
     pub sparql_queries: Vec<String>,
+    /// Prefix mappings
     pub prefixes: HashMap<String, String>,
+    /// WHERE clause
     pub where_clause: String,
+    /// SELECT clause
     pub select_clause: String,
 }
 
+/// Parser for JanusQL queries
 pub struct JanusQLParser {
     historical_sliding_window_regex: Regex,
     historical_fixed_window_regex: Regex,
@@ -47,6 +68,7 @@ pub struct JanusQLParser {
 }
 
 impl JanusQLParser {
+    /// Creates a new JanusQLParser instance.
     pub fn new() -> Result<Self, Box<dyn std::error::Error>> {
         Ok(JanusQLParser {
             historical_sliding_window_regex: Regex::new(
@@ -110,6 +132,7 @@ impl JanusQLParser {
         Ok(None)
     }
 
+    /// Parses a JanusQL query string.
     pub fn parse(&self, query: &str) -> Result<ParsedJanusQuery, Box<dyn std::error::Error>> {
         let mut parsed = ParsedJanusQuery {
             r2s: None,
@@ -356,7 +379,7 @@ mod tests {
     }
 
     #[test]
-    fn test_mixed_windows(){
+    fn test_mixed_windows() {
         let parser = JanusQLParser::new().unwrap();
         let query = r#"
         PREFIX sensor: <https://rsp.js/sensors/>

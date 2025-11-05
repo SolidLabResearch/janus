@@ -112,29 +112,6 @@ jobs:
   integration-test:
     name: Integration Tests
     runs-on: ubuntu-latest
-    services:
-      oxigraph:
-        image: oxigraph/oxigraph:latest
-        ports:
-          - 7878:7878
-        options: >-
-          --health-cmd "curl -f http://localhost:7878/query || exit 1"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-
-      fuseki:
-        image: stain/jena-fuseki:latest
-        ports:
-          - 3030:3030
-        env:
-          ADMIN_PASSWORD: admin
-          JVM_ARGS: "-Xmx2g"
-        options: >-
-          --health-cmd "curl -f http://localhost:3030/$/ping || exit 1"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
 
     steps:
       - name: Checkout code
@@ -161,26 +138,8 @@ jobs:
           path: target
           key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: Wait for services
-        run: |
-          echo "Waiting for Oxigraph..."
-          timeout 60 bash -c 'until curl -f http://localhost:7878/query; do sleep 2; done'
-          echo "Waiting for Fuseki..."
-          timeout 60 bash -c 'until curl -f http://localhost:3030/$/ping; do sleep 2; done'
-
-      - name: Create Fuseki test dataset
-        run: |
-          curl -X POST http://localhost:3030/$/datasets \
-            -H "Content-Type: application/x-www-form-urlencoded" \
-            -d "dbName=ds&dbType=mem" \
-            --user admin:admin || true
-
       - name: Run integration tests
         run: cargo test --test '*' --all-features --verbose
-        env:
-          OXIGRAPH_ENDPOINT: http://localhost:7878
-          JENA_ENDPOINT: http://localhost:3030
-          JENA_DATASET: ds
 
   # Code coverage
   coverage:

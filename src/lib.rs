@@ -59,13 +59,12 @@ pub mod indexing;
 /// Module for parsing JanusQL queries
 pub mod parsing;
 
-#[doc = ""]
+/// Benchmarking utilities
 pub mod benchmarking {
 
     mod benchmark;
 }
 
-/// Module containing error types
 pub mod error {
     //! Error types and result definitions
 
