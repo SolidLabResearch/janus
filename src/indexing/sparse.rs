@@ -1,4 +1,4 @@
-use crate::indexing::dictionary::{self, Dictionary};
+use crate::indexing::dictionary::Dictionary;
 use crate::indexing::shared::{decode_record, Event, ResolvedEvent, RECORD_SIZE};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom, Write};

@@ -61,7 +61,7 @@ impl Dictionary {
         file.read_exact(&mut count_bytes)?;
         let count = u64::from_be_bytes(count_bytes);
 
-        // Reading each IRI Entry
+        // Reading each URI Entry
 
         for id in 0..count {
             let mut len_bytes = [0u8; 4];
