@@ -1,22 +1,49 @@
-# Benchmarks
+# RDF Indexing Benchmarks
 
-This directory contains performance benchmarks for the Janus RDF Stream Processing Engine.
+This directory contains comprehensive benchmarks for comparing different RDF indexing strategies in Janus.
 
-## Running Benchmarks
+## Available Benchmarks
 
-To run all benchmarks:
+### 1. `benchmark.rs` - Read Performance (Original)
+Tests query performance on pre-built indexes:
+- Index building time comparison
+- Query speed across different data ranges
+- Memory usage comparison
 
+### 2. `write_benchmark.rs` - Write Performance (New)
+Tests writing performance during record insertion:
+- Real-time indexing (index while writing)
+- Batch indexing (build index after writing)
+- Writing throughput comparison
+- Total processing time analysis
+
+### 3. `analysis.rs` - Advanced Analysis (New)
+Detailed analysis across multiple dimensions:
+- Optimal sparse interval analysis
+- Memory usage scaling
+- Write throughput under different conditions
+- Performance recommendations
+
+## Quick Start
+
+### Run All Benchmarks
 ```bash
-cargo bench
+./run_benchmarks.sh
 ```
 
-To run a specific benchmark:
-
+### Run Individual Benchmarks
 ```bash
-cargo bench --bench <benchmark_name>
+# Original read performance benchmark
+cargo bench --bench benchmark
+
+# New write performance benchmark  
+cargo bench --bench write_benchmark
+
+# Advanced analysis suite
+cargo bench --bench analysis
 ```
 
-## Benchmark Structure
+## Step-by-Step Testing Instructions
 
 Benchmarks are organized by functionality:
 
