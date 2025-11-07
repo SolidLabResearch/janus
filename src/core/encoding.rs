@@ -1,7 +1,7 @@
 //! Binary encoding/decoding utilities for RDF events
 
-use crate::storage::indexing::dictionary::Dictionary;
 use crate::core::{Event, RDFEvent};
+use crate::storage::indexing::dictionary::Dictionary;
 
 /// Size of a single encoded record in bytes
 pub const RECORD_SIZE: usize = 40;

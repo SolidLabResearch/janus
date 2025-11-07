@@ -1,5 +1,5 @@
-use std::collections::{VecDeque, HashMap};
-use std::sync::{Arc, RwLock, Mutex};
+use std::collections::{HashMap, VecDeque};
+use std::sync::{Arc, Mutex, RwLock};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -53,5 +53,3 @@ impl Default for StreamingConfig {
         }
     }
 }
-
-

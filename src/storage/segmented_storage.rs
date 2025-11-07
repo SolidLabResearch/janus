@@ -11,11 +11,12 @@ use std::{
 };
 
 use crate::{
-    core::{encoding::{decode_record, encode_record, RECORD_SIZE}, Event, RDFEvent},
+    core::{
+        encoding::{decode_record, encode_record, RECORD_SIZE},
+        Event, RDFEvent,
+    },
     storage::{
-        indexing::{
-            dictionary::Dictionary,
-        },
+        indexing::dictionary::Dictionary,
         util::{EnhancedSegmentMetadata, IndexBlock, StreamingConfig, WAL},
     },
 };

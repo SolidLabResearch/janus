@@ -1,4 +1,7 @@
-use crate::core::{encoding::{decode_record, RECORD_SIZE}, Event};
+use crate::core::{
+    encoding::{decode_record, RECORD_SIZE},
+    Event,
+};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom, Write};
 #[doc = ""]

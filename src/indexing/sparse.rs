@@ -1,8 +1,5 @@
-use crate::core::{
-    encoding::{decode_record, RECORD_SIZE},
-    Event, RDFEvent,
-};
-use crate::storage::indexing::dictionary::Dictionary;
+use crate::indexing::dictionary::Dictionary;
+use crate::indexing::shared::{decode_record, Event, RDFEvent, RECORD_SIZE};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::Path;

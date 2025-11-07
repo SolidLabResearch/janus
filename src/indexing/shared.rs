@@ -1,8 +1,8 @@
 //! Legacy storage utilities - to be moved to storage module
 
+use crate::core::encoding::{encode_record, RECORD_SIZE};
 use std::fs::File;
 use std::io::Write;
-use crate::core::encoding::{encode_record, RECORD_SIZE};
 
 /// Log writer for appending encoded records to a file
 pub struct LogWriter {
@@ -14,10 +14,7 @@ impl LogWriter {
     /// Create a new log writer for the given file path
     pub fn create(path: &str) -> std::io::Result<Self> {
         let log_file = File::create(path)?;
-        Ok(Self {
-            log_file,
-            record_count: 0
-        })
+        Ok(Self { log_file, record_count: 0 })
     }
 
     /// Append an encoded record to the log file
@@ -46,12 +43,3 @@ impl LogWriter {
         self.log_file.flush()
     }
 }
-
-
-
-
-
-
-
-
-

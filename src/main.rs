@@ -3,8 +3,8 @@
 //! This is the main entry point for the Janus command-line interface.
 
 use janus::core::Event;
-use janus::storage::indexing::{dense, sparse};
 use janus::indexing::shared::LogWriter;
+use janus::storage::indexing::{dense, sparse};
 use janus::storage::segmented_storage::StreamingSegmentedStorage;
 use janus::storage::util::StreamingConfig;
 use std::fs;
@@ -48,7 +48,7 @@ fn benchmark_segmented_storage_rdf() -> std::io::Result<()> {
         let subject = format!("http://example.org/person/person_{}", i % 10000);
         let predicate = match i % 10 {
             0..=3 => "http://example.org/knows",
-            4..=6 => "http://example.org/worksAt", 
+            4..=6 => "http://example.org/worksAt",
             7..=8 => "http://example.org/livesIn",
             _ => "http://example.org/hasAge",
         };
@@ -82,7 +82,7 @@ fn benchmark_segmented_storage_rdf() -> std::io::Result<()> {
     println!("====================");
 
     let read_sizes = vec![100, 1_000, 10_000, 100_000, 1_000_000];
-    
+
     for &size in &read_sizes {
         // Query the first 'size' events
         let query_start_ts = base_timestamp;
@@ -90,9 +90,9 @@ fn benchmark_segmented_storage_rdf() -> std::io::Result<()> {
 
         println!("\n📖 Querying {} events...", size);
         let start_time = Instant::now();
-        
+
         let results = storage.query_rdf(query_start_ts, query_end_ts)?;
-        
+
         let query_duration = start_time.elapsed();
         let read_throughput = results.len() as f64 / query_duration.as_secs_f64();
 
@@ -103,8 +103,10 @@ fn benchmark_segmented_storage_rdf() -> std::io::Result<()> {
         // Show a sample result for verification
         if !results.is_empty() {
             let sample = &results[0];
-            println!("   Sample result: {} {} {} in {} at {}", 
-                     sample.subject, sample.predicate, sample.object, sample.graph, sample.timestamp);
+            println!(
+                "   Sample result: {} {} {} in {} at {}",
+                sample.subject, sample.predicate, sample.object, sample.graph, sample.timestamp
+            );
         }
     }
 
@@ -351,11 +353,11 @@ fn benchmark_storage_performance() -> std::io::Result<()> {
 fn main() -> std::io::Result<()> {
     // Run the new RDF benchmark
     benchmark_segmented_storage_rdf()?;
-    
+
     println!("\n{}", "=".repeat(50));
     println!("Running legacy benchmark for comparison...");
     println!("{}", "=".repeat(50));
-    
+
     // Also run the old benchmark for comparison
     benchmark_storage_performance()
 }
