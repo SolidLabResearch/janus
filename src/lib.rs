@@ -65,6 +65,8 @@ pub mod benchmarking {
     mod benchmark;
 }
 
+pub mod storage;
+
 pub mod error {
     //! Error types and result definitions
 
