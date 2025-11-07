@@ -3,7 +3,7 @@ use std::sync::{Arc, RwLock, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use crate::indexing::shared::Event;
+use crate::core::Event;
 
 #[derive(Debug)]
 pub struct WAL {

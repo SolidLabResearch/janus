@@ -1,2 +1,1 @@
-#[doc=""]
 pub mod benchmark;

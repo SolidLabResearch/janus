@@ -11,13 +11,11 @@ use std::{
 };
 
 use crate::{
-    config,
-    indexing::{
-        shared::{decode_record, encode_record, Event, RECORD_SIZE},
-        sparse,
-    },
+    core::{encoding::{decode_record, encode_record, RECORD_SIZE}, Event, RDFEvent},
     storage::{
-        self,
+        indexing::{
+            dictionary::Dictionary,
+        },
         util::{EnhancedSegmentMetadata, IndexBlock, StreamingConfig, WAL},
     },
 };
@@ -25,6 +23,7 @@ use crate::{
 pub struct StreamingSegmentedStorage {
     wal: Arc<RwLock<WAL>>,
     segments: Arc<RwLock<Vec<EnhancedSegmentMetadata>>>,
+    dictionary: Arc<RwLock<Dictionary>>,
     flush_handle: Option<JoinHandle<()>>,
     shutdown_signal: Arc<Mutex<bool>>,
     config: StreamingConfig,
@@ -43,6 +42,7 @@ impl StreamingSegmentedStorage {
             })),
 
             segments: Arc::new(RwLock::new(Vec::new())),
+            dictionary: Arc::new(RwLock::new(Dictionary::new())),
             flush_handle: None,
             shutdown_signal: Arc::new(Mutex::new(false)),
             config,
@@ -86,6 +86,23 @@ impl StreamingSegmentedStorage {
         }
 
         Ok(())
+    }
+
+    /// User-friendly API: Write RDF data directly with URI strings
+    pub fn write_rdf(
+        &self,
+        timestamp: u64,
+        subject: &str,
+        predicate: &str,
+        object: &str,
+        graph: &str,
+    ) -> std::io::Result<()> {
+        let rdf_event = RDFEvent::new(timestamp, subject, predicate, object, graph);
+        let encoded_event = {
+            let mut dict = self.dictionary.write().unwrap();
+            rdf_event.encode(&mut dict)
+        };
+        self.write(encoded_event)
     }
 
     fn should_flush(&self) -> bool {
@@ -262,6 +279,17 @@ impl StreamingSegmentedStorage {
         results.sort_by_key(|e| e.timestamp);
 
         Ok(results)
+    }
+
+    /// User-friendly API: Query and return RDF events with URI strings
+    pub fn query_rdf(
+        &self,
+        start_timestamp: u64,
+        end_timestamp: u64,
+    ) -> std::io::Result<Vec<RDFEvent>> {
+        let encoded_events = self.query(start_timestamp, end_timestamp)?;
+        let dict = self.dictionary.read().unwrap();
+        Ok(encoded_events.into_iter().map(|event| event.decode(&dict)).collect())
     }
 
     fn query_segment_two_level(

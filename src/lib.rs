@@ -28,10 +28,8 @@
 #![warn(missing_docs)]
 #![warn(clippy::all)]
 
-/// Core module containing the main engine logic
-pub mod core {
-    //! Core functionality for the Janus engine
-}
+/// Core data structures and types
+pub mod core;
 
 /// Module for handling RDF stores
 pub mod store {
@@ -60,7 +58,7 @@ pub mod indexing;
 pub mod parsing;
 
 /// Benchmarking utilities
-pub mod benchmarking {
+pub mod benchmarks {
 
     mod benchmark;
 }

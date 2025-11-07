@@ -1,4 +1,7 @@
-#[doc=""]
 pub mod util;
-#[doc = ""]
 pub mod segmented_storage;
+pub mod indexing {
+    pub mod dense;
+    pub mod dictionary;
+    pub mod sparse;
+}

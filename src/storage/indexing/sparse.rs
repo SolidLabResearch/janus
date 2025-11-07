@@ -1,5 +1,5 @@
-use crate::indexing::dictionary::Dictionary;
-use crate::indexing::shared::{decode_record, Event, ResolvedEvent, RECORD_SIZE};
+use crate::storage::indexing::dictionary::Dictionary;
+use crate::core::{encoding::{decode_record, RECORD_SIZE}, Event, RDFEvent};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::Path;
@@ -191,9 +191,9 @@ impl SparseReader {
         dict: &Dictionary,
         timestamp_start_bound: u64,
         timestamp_end_bound: u64,
-    ) -> std::io::Result<Vec<ResolvedEvent>> {
+    ) -> std::io::Result<Vec<RDFEvent>> {
         let events = self.query(log_path, timestamp_start_bound, timestamp_end_bound)?;
-        Ok(events.into_iter().map(|e| e.resolve(dict)).collect())
+        Ok(events.into_iter().map(|e| e.decode(dict)).collect())
     }
 
     /// Opens a sparse index file and loads it into memory.

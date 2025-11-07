@@ -1,4 +1,5 @@
-use crate::indexing::{dense, shared::LogWriter, sparse};
+use crate::storage::indexing::{dense, sparse};
+use crate::indexing::shared::LogWriter;
 use std::fs;
 use std::time::Instant;
 

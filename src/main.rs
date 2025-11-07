@@ -2,18 +2,118 @@
 //!
 //! This is the main entry point for the Janus command-line interface.
 
-use janus::indexing::shared::Event;
-use janus::indexing::{dense, shared::LogWriter, sparse};
+use janus::core::Event;
+use janus::storage::indexing::{dense, sparse};
+use janus::indexing::shared::LogWriter;
 use janus::storage::segmented_storage::StreamingSegmentedStorage;
 use janus::storage::util::StreamingConfig;
 use std::fs;
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 const DATA_DIR: &str = "data/benchmark";
 const LOG_FILE: &str = "data/benchmark/log.dat";
 const DENSE_INDEX_FILE: &str = "data/benchmark/dense.idx";
 const SPARSE_INDEX_FILE: &str = "data/benchmark/sparse.idx";
 const SPARSE_INTERVAL: usize = 1000;
+const SEGMENT_BASE_PATH: &str = "data/rdf_benchmark";
+
+fn benchmark_segmented_storage_rdf() -> std::io::Result<()> {
+    println!("🚀 RDF Segmented Storage Benchmark");
+    println!("==================================");
+
+    // Clean up and create directories
+    let _ = fs::remove_dir_all(SEGMENT_BASE_PATH);
+    fs::create_dir_all(SEGMENT_BASE_PATH)?;
+
+    // Configure storage
+    let config = StreamingConfig {
+        max_wal_events: 10_000,
+        max_wal_age_seconds: 60,
+        max_wal_bytes: 1_000_000,
+        sparse_interval: 1000,
+        entries_per_index_block: 100,
+        segment_base_path: SEGMENT_BASE_PATH.to_string(),
+    };
+
+    let mut storage = StreamingSegmentedStorage::new(config)?;
+    storage.start_background_flushing();
+
+    // Benchmark writing 1 million RDF events
+    println!("\n📝 Writing 1,000,000 RDF events...");
+    let start_time = Instant::now();
+    let base_timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos() as u64;
+
+    for i in 0..1_000_000u64 {
+        let timestamp = base_timestamp + i * 1_000_000; // 1ms intervals
+        let subject = format!("http://example.org/person/person_{}", i % 10000);
+        let predicate = match i % 10 {
+            0..=3 => "http://example.org/knows",
+            4..=6 => "http://example.org/worksAt", 
+            7..=8 => "http://example.org/livesIn",
+            _ => "http://example.org/hasAge",
+        };
+        let object = match i % 10 {
+            0..=3 => format!("http://example.org/person/person_{}", (i + 1) % 10000),
+            4..=6 => format!("http://example.org/organization/org_{}", i % 1000),
+            7..=8 => format!("http://example.org/location/city_{}", i % 100),
+            _ => format!("\"{}\"^^http://www.w3.org/2001/XMLSchema#integer", 20 + (i % 60)),
+        };
+        let graph = format!("http://example.org/graph/graph_{}", i % 100);
+
+        storage.write_rdf(timestamp, &subject, predicate, &object, &graph)?;
+
+        if i > 0 && i % 100_000 == 0 {
+            println!("  ✓ Written {} events", i);
+        }
+    }
+
+    let write_duration = start_time.elapsed();
+    let write_throughput = 1_000_000.0 / write_duration.as_secs_f64();
+
+    println!("✅ Write completed!");
+    println!("   Duration: {:.3} seconds", write_duration.as_secs_f64());
+    println!("   Throughput: {:.0} events/sec", write_throughput);
+
+    // Wait a bit for background flushing
+    std::thread::sleep(Duration::from_secs(2));
+
+    // Benchmark reading different amounts of data
+    println!("\n🔍 Reading Benchmarks");
+    println!("====================");
+
+    let read_sizes = vec![100, 1_000, 10_000, 100_000, 1_000_000];
+    
+    for &size in &read_sizes {
+        // Query the first 'size' events
+        let query_start_ts = base_timestamp;
+        let query_end_ts = base_timestamp + (size as u64 * 1_000_000);
+
+        println!("\n📖 Querying {} events...", size);
+        let start_time = Instant::now();
+        
+        let results = storage.query_rdf(query_start_ts, query_end_ts)?;
+        
+        let query_duration = start_time.elapsed();
+        let read_throughput = results.len() as f64 / query_duration.as_secs_f64();
+
+        println!("   Results found: {}", results.len());
+        println!("   Query time: {:.3} ms", query_duration.as_millis());
+        println!("   Read throughput: {:.0} events/sec", read_throughput);
+
+        // Show a sample result for verification
+        if !results.is_empty() {
+            let sample = &results[0];
+            println!("   Sample result: {} {} {} in {} at {}", 
+                     sample.subject, sample.predicate, sample.object, sample.graph, sample.timestamp);
+        }
+    }
+
+    // Shutdown storage
+    storage.shutdown()?;
+
+    println!("\n🎉 Benchmark completed successfully!");
+    Ok(())
+}
 
 fn setup_data(number_records: u64) -> std::io::Result<()> {
     let _ = fs::remove_dir_all(DATA_DIR);
@@ -249,5 +349,13 @@ fn benchmark_storage_performance() -> std::io::Result<()> {
 }
 
 fn main() -> std::io::Result<()> {
+    // Run the new RDF benchmark
+    benchmark_segmented_storage_rdf()?;
+    
+    println!("\n{}", "=".repeat(50));
+    println!("Running legacy benchmark for comparison...");
+    println!("{}", "=".repeat(50));
+    
+    // Also run the old benchmark for comparison
     benchmark_storage_performance()
 }
