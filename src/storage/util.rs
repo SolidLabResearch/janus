@@ -6,7 +6,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use crate::core::Event;
 
 #[derive(Debug)]
-pub struct WAL {
+/// In-memory buffer that batches events before persisting them to disk
+pub struct BatchBuffer {
     pub events: VecDeque<Event>,
     pub total_bytes: usize,
     pub oldest_timestamp_bound: Option<u64>,
@@ -33,9 +34,12 @@ pub struct EnhancedSegmentMetadata {
 
 #[derive(Clone)]
 pub struct StreamingConfig {
-    pub max_wal_events: u64,
-    pub max_wal_age_seconds: u64,
-    pub max_wal_bytes: usize,
+    /// Maximum number of events to buffer before flushing to disk
+    pub max_batch_events: u64,
+    /// Maximum age in seconds before flushing buffered events to disk
+    pub max_batch_age_seconds: u64,
+    /// Maximum bytes to buffer before flushing to disk
+    pub max_batch_bytes: usize,
     pub sparse_interval: usize,
     pub entries_per_index_block: usize,
     pub segment_base_path: String,
@@ -44,9 +48,9 @@ pub struct StreamingConfig {
 impl Default for StreamingConfig {
     fn default() -> Self {
         Self {
-            max_wal_bytes: 10 * 1024 * 1024,
-            max_wal_age_seconds: 60,
-            max_wal_events: 100_000,
+            max_batch_bytes: 10 * 1024 * 1024,
+            max_batch_age_seconds: 60,
+            max_batch_events: 100_000,
             sparse_interval: 1000,
             entries_per_index_block: 1024,
             segment_base_path: "./data".to_string(),

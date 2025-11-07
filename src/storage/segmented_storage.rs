@@ -17,12 +17,12 @@ use crate::{
     },
     storage::{
         indexing::dictionary::Dictionary,
-        util::{EnhancedSegmentMetadata, IndexBlock, StreamingConfig, WAL},
+        util::{BatchBuffer, EnhancedSegmentMetadata, IndexBlock, StreamingConfig},
     },
 };
 
 pub struct StreamingSegmentedStorage {
-    wal: Arc<RwLock<WAL>>,
+    batch_buffer: Arc<RwLock<BatchBuffer>>,
     segments: Arc<RwLock<Vec<EnhancedSegmentMetadata>>>,
     dictionary: Arc<RwLock<Dictionary>>,
     flush_handle: Option<JoinHandle<()>>,
@@ -35,7 +35,7 @@ impl StreamingSegmentedStorage {
         std::fs::create_dir_all(&config.segment_base_path)?;
 
         let storage = Self {
-            wal: Arc::new(RwLock::new(WAL {
+            batch_buffer: Arc::new(RwLock::new(BatchBuffer {
                 events: VecDeque::new(),
                 total_bytes: 0,
                 oldest_timestamp_bound: None,
@@ -53,13 +53,18 @@ impl StreamingSegmentedStorage {
     }
 
     pub fn start_background_flushing(&mut self) {
-        let wal_clone = Arc::clone(&self.wal);
+        let batch_buffer_clone = Arc::clone(&self.batch_buffer);
         let segments_clone = Arc::clone(&self.segments);
         let shutdown_clone = Arc::clone(&self.shutdown_signal);
         let config_clone = self.config.clone();
 
         let handle = std::thread::spawn(move || {
-            Self::background_flush_loop(wal_clone, segments_clone, shutdown_clone, config_clone);
+            Self::background_flush_loop(
+                batch_buffer_clone,
+                segments_clone,
+                shutdown_clone,
+                config_clone,
+            );
         });
 
         self.flush_handle = Some(handle);
@@ -69,22 +74,21 @@ impl StreamingSegmentedStorage {
         let event_size = std::mem::size_of::<Event>();
 
         {
-            let mut wal = self.wal.write().unwrap();
+            let mut batch_buffer = self.batch_buffer.write().unwrap();
 
-            if wal.oldest_timestamp_bound.is_none() {
-                wal.oldest_timestamp_bound = Some(event.timestamp);
+            if batch_buffer.oldest_timestamp_bound.is_none() {
+                batch_buffer.oldest_timestamp_bound = Some(event.timestamp);
             }
 
-            wal.newest_timestamp_bound = Some(event.timestamp);
+            batch_buffer.newest_timestamp_bound = Some(event.timestamp);
 
-            wal.total_bytes += event_size;
+            batch_buffer.total_bytes += event_size;
 
-            wal.events.push_back(event);
+            batch_buffer.events.push_back(event);
         }
 
-        if self.should_flush() {
-            self.flush_wal_to_segment()?;
-        }
+        // Note: Synchronous flushing removed for high throughput.
+        // Background thread handles all flushing based on time limits.
 
         Ok(())
     }
@@ -107,16 +111,16 @@ impl StreamingSegmentedStorage {
     }
 
     fn should_flush(&self) -> bool {
-        let wal = self.wal.read().unwrap();
+        let batch_buffer = self.batch_buffer.read().unwrap();
 
-        wal.events.len() >= self.config.max_wal_events.try_into().unwrap()
-            || wal.total_bytes > self.config.max_wal_bytes
-            || wal.oldest_timestamp_bound.map_or(false, |oldest| {
+        batch_buffer.events.len() >= self.config.max_batch_events.try_into().unwrap()
+            || batch_buffer.total_bytes > self.config.max_batch_bytes
+            || batch_buffer.oldest_timestamp_bound.map_or(false, |oldest| {
                 let current_timestamp = Self::current_timestamp();
 
                 // Use saturating subtraction to avoid underflow if oldest > current_timestamp
                 current_timestamp.saturating_sub(oldest)
-                    >= self.config.max_wal_age_seconds * 1_000_000_000
+                    >= self.config.max_batch_age_seconds * 1_000_000_000
             })
     }
 
@@ -124,20 +128,20 @@ impl StreamingSegmentedStorage {
         SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos() as u64
     }
 
-    fn flush_wal_to_segment(&self) -> std::io::Result<()> {
-        // Automatically extract events from the WAL.
+    fn flush_batch_buffer_to_segment(&self) -> std::io::Result<()> {
+        // Automatically extract events from the batch buffer.
 
         let events_to_flush = {
-            let mut wal = self.wal.write().unwrap();
-            if wal.events.is_empty() {
+            let mut batch_buffer = self.batch_buffer.write().unwrap();
+            if batch_buffer.events.is_empty() {
                 return Ok(());
             }
 
-            let events: Vec<Event> = wal.events.drain(..).collect();
+            let events: Vec<Event> = batch_buffer.events.drain(..).collect();
 
-            wal.total_bytes = 0;
-            wal.oldest_timestamp_bound = None;
-            wal.newest_timestamp_bound = None;
+            batch_buffer.total_bytes = 0;
+            batch_buffer.oldest_timestamp_bound = None;
+            batch_buffer.newest_timestamp_bound = None;
             events
         };
 
@@ -174,7 +178,7 @@ impl StreamingSegmentedStorage {
 
         for (record_count, event) in events.iter().enumerate() {
             let record_bytes = self.serialize_event_to_fixed_size(event);
-            data_file.write_all(&record_bytes);
+            data_file.write_all(&record_bytes)?;
 
             if record_count % self.config.sparse_interval == 0 {
                 let sparse_entry = (event.timestamp, data_offset);
@@ -234,30 +238,18 @@ impl StreamingSegmentedStorage {
         min_ts: u64,
         max_ts: u64,
     ) -> std::io::Result<IndexBlock> {
-        let file_offset = index_file.stream_position()?;
-
-        for (timestamp, offset) in entries {
-            index_file.write_all(&timestamp.to_ne_bytes())?;
-            index_file.write_all(&offset.to_be_bytes())?;
-        }
-
-        Ok(IndexBlock {
-            min_timestamp: min_ts,
-            max_timestamp: max_ts,
-            file_offset,
-            entry_count: entries.len() as u32,
-        })
+        Self::flush_index_block_static(index_file, entries, min_ts, max_ts)
     }
 
     pub fn query(&self, start_timestamp: u64, end_timestamp: u64) -> std::io::Result<Vec<Event>> {
         let mut results = Vec::new();
 
-        // First try to query the immediate WAL which has the fastest visibility.
+        // First try to query the immediate batch buffer which has the fastest visibility.
 
         {
-            let wal = self.wal.read().unwrap();
+            let batch_buffer = self.batch_buffer.read().unwrap();
 
-            for event in &wal.events {
+            for event in &batch_buffer.events {
                 if event.timestamp >= start_timestamp && event.timestamp <= end_timestamp {
                     results.push(event.clone());
                 }
@@ -405,30 +397,33 @@ impl StreamingSegmentedStorage {
     }
 
     fn background_flush_loop(
-        wal: Arc<RwLock<WAL>>,
+        batch_buffer: Arc<RwLock<BatchBuffer>>,
         segments: Arc<RwLock<Vec<EnhancedSegmentMetadata>>>,
         shutdown_signal: Arc<Mutex<bool>>,
         config: StreamingConfig,
     ) {
         while !*shutdown_signal.lock().unwrap() {
-            std::thread::sleep(Duration::from_secs(1));
+            std::thread::sleep(Duration::from_millis(100));
 
             // Check if flush is needed or not.
 
             let should_flush = {
-                let wal = wal.read().unwrap();
+                let batch_buffer = batch_buffer.read().unwrap();
 
-                wal.events.len() >= config.max_wal_bytes
-                    || wal.total_bytes >= config.max_wal_bytes
-                    || wal.oldest_timestamp_bound.map_or(false, |oldest| {
+                batch_buffer.events.len() >= config.max_batch_events.try_into().unwrap()
+                    || batch_buffer.total_bytes >= config.max_batch_bytes
+                    || batch_buffer.oldest_timestamp_bound.map_or(false, |oldest| {
                         let current_timestamp = Self::current_timestamp();
-                        (current_timestamp - oldest) >= config.max_wal_age_seconds * 1_000_000_000
+                        current_timestamp.saturating_sub(oldest)
+                            >= config.max_batch_age_seconds * 1_000_000_000
                     })
             };
 
             if should_flush {
                 // TODO : Add better error handling here in this case
-                if let Err(e) = Self::flush_background(wal.clone(), segments.clone(), &config) {
+                if let Err(e) =
+                    Self::flush_background(batch_buffer.clone(), segments.clone(), &config)
+                {
                     eprintln!("Background flush failed: {}", e);
                 }
             }
@@ -436,10 +431,104 @@ impl StreamingSegmentedStorage {
     }
 
     fn flush_background(
-        wal: Arc<RwLock<WAL>>,
+        batch_buffer: Arc<RwLock<BatchBuffer>>,
         segments: Arc<RwLock<Vec<EnhancedSegmentMetadata>>>,
         config: &StreamingConfig,
     ) -> std::io::Result<()> {
+        // Automatically extract events from the batch buffer.
+
+        let events_to_flush = {
+            let mut batch_buffer = batch_buffer.write().unwrap();
+            if batch_buffer.events.is_empty() {
+                return Ok(());
+            }
+
+            let events: Vec<Event> = batch_buffer.events.drain(..).collect();
+
+            batch_buffer.total_bytes = 0;
+            batch_buffer.oldest_timestamp_bound = None;
+            batch_buffer.newest_timestamp_bound = None;
+            events
+        };
+
+        // Create a new segment for these events
+        let segment_id = Self::current_timestamp();
+        let data_path = format!("{}/segment-{}.log", config.segment_base_path, segment_id);
+        let index_path = format!("{}/segment-{}.idx", config.segment_base_path, segment_id);
+
+        // Use buffered writers for performance (same as original implementation)
+        let mut data_file = BufWriter::new(std::fs::File::create(&data_path)?);
+        let mut index_file = BufWriter::new(std::fs::File::create(&index_path)?);
+
+        let mut index_directory = Vec::new();
+        let mut current_block_entries = Vec::new();
+        let mut current_block_min_ts = None;
+        let mut current_block_max_ts = 0u64;
+        let mut data_offset = 0u64;
+
+        for (record_count, event) in events_to_flush.iter().enumerate() {
+            // Use the same serialization as the original
+            let record_bytes = Self::serialize_event_to_fixed_size_static(event);
+            data_file.write_all(&record_bytes)?;
+
+            if record_count % config.sparse_interval == 0 {
+                let sparse_entry = (event.timestamp, data_offset);
+
+                if current_block_min_ts.is_none() {
+                    current_block_min_ts = Some(event.timestamp);
+                }
+
+                current_block_max_ts = event.timestamp;
+                current_block_entries.push(sparse_entry);
+
+                if current_block_entries.len() >= config.entries_per_index_block {
+                    let block_metadata = Self::flush_index_block_static(
+                        &mut index_file,
+                        &current_block_entries,
+                        current_block_min_ts.unwrap(),
+                        current_block_max_ts,
+                    )?;
+
+                    index_directory.push(block_metadata);
+
+                    current_block_entries.clear();
+                    current_block_min_ts = None;
+                }
+            }
+            data_offset += record_bytes.len() as u64;
+        }
+
+        if !current_block_entries.is_empty() {
+            let block_metadata = Self::flush_index_block_static(
+                &mut index_file,
+                &current_block_entries,
+                current_block_min_ts.unwrap(),
+                current_block_max_ts,
+            )?;
+
+            index_directory.push(block_metadata);
+        }
+
+        data_file.flush()?;
+        index_file.flush()?;
+
+        // Add the new segment to the segments list
+        let new_segment = EnhancedSegmentMetadata {
+            start_timstamp: events_to_flush.first().unwrap().timestamp,
+            end_timestamp: events_to_flush.last().unwrap().timestamp,
+            data_path,
+            index_path,
+            record_count: events_to_flush.len() as u64,
+            index_directory,
+        };
+
+        {
+            let mut segments = segments.write().unwrap();
+            segments.push(new_segment);
+            // Keep segments sorted by start timestamp
+            segments.sort_by_key(|s| s.start_timstamp);
+        }
+
         Ok(())
     }
 
@@ -504,7 +593,7 @@ impl StreamingSegmentedStorage {
 
         // Final Flush
 
-        self.flush_wal_to_segment();
+        self.flush_batch_buffer_to_segment()?;
 
         if let Some(handle) = self.flush_handle.take() {
             handle.join().unwrap();
@@ -513,6 +602,10 @@ impl StreamingSegmentedStorage {
     }
 
     fn serialize_event_to_fixed_size(&self, event: &Event) -> Vec<u8> {
+        Self::serialize_event_to_fixed_size_static(event)
+    }
+
+    fn serialize_event_to_fixed_size_static(event: &Event) -> Vec<u8> {
         let mut record = [0u8; RECORD_SIZE];
         encode_record(
             &mut record,
@@ -523,6 +616,27 @@ impl StreamingSegmentedStorage {
             event.graph,
         );
         record.to_vec()
+    }
+
+    fn flush_index_block_static(
+        index_file: &mut BufWriter<std::fs::File>,
+        entries: &[(u64, u64)],
+        min_ts: u64,
+        max_ts: u64,
+    ) -> std::io::Result<IndexBlock> {
+        let file_offset = index_file.stream_position()?;
+
+        for (timestamp, offset) in entries {
+            index_file.write_all(&timestamp.to_le_bytes())?;
+            index_file.write_all(&offset.to_be_bytes())?;
+        }
+
+        Ok(IndexBlock {
+            min_timestamp: min_ts,
+            max_timestamp: max_ts,
+            file_offset,
+            entry_count: entries.len() as u32,
+        })
     }
 
     fn generate_segment_id() -> u64 {

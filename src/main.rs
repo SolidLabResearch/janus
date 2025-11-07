@@ -27,9 +27,9 @@ fn benchmark_segmented_storage_rdf() -> std::io::Result<()> {
 
     // Configure storage
     let config = StreamingConfig {
-        max_wal_events: 10_000,
-        max_wal_age_seconds: 60,
-        max_wal_bytes: 1_000_000,
+        max_batch_events: 500_000,
+        max_batch_age_seconds: 1,
+        max_batch_bytes: 50_000_000,
         sparse_interval: 1000,
         entries_per_index_block: 100,
         segment_base_path: SEGMENT_BASE_PATH.to_string(),
@@ -247,9 +247,9 @@ fn benchmark_storage_performance() -> std::io::Result<()> {
 
         // Configure storage
         let config = StreamingConfig {
-            max_wal_events: 5000,
-            max_wal_age_seconds: 30,
-            max_wal_bytes: 5 * 1024 * 1024,
+            max_batch_events: 250_000,
+            max_batch_age_seconds: 1,
+            max_batch_bytes: 100 * 1024 * 1024,
             sparse_interval: 100,
             entries_per_index_block: 512,
             segment_base_path: format!("./benchmark_data_{}", num_records),

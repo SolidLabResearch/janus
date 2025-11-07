@@ -56,4 +56,18 @@ impl Event {
             graph: dict.decode(self.graph).unwrap_or("UNKNOWN").to_string(),
         }
     }
+
+    /// Encode this Event to bytes
+    pub fn to_bytes(&self) -> [u8; RECORD_SIZE] {
+        let mut buffer = [0u8; RECORD_SIZE];
+        encode_record(
+            &mut buffer,
+            self.timestamp,
+            self.subject,
+            self.predicate,
+            self.object,
+            self.graph,
+        );
+        buffer
+    }
 }
