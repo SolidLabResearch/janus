@@ -22,9 +22,10 @@
 //! - Object ID → "23.5" (the literal value)
 //! - Datatype ID → "http://www.w3.org/2001/XMLSchema#double" (if needed)
 
-use janus::indexing::dictionary::Dictionary;
-use janus::indexing::shared::{decode_record, encode_record, LogWriter, RECORD_SIZE};
-use janus::indexing::sparse::{build_sparse_index, SparseReader};
+use janus::core::encoding::{decode_record, encode_record, RECORD_SIZE};
+use janus::indexing::shared::LogWriter;
+use janus::storage::indexing::dictionary::Dictionary;
+use janus::storage::indexing::sparse::{build_sparse_index, SparseReader};
 use std::fs;
 use std::path::Path;
 
@@ -39,30 +40,30 @@ fn test_rdf_syntax_to_dictionary_mapping() {
 
     // Subject: <https://rsp.js/event1> → stored as the URI string
     let subject = "https://rsp.js/event1";
-    let subject_id = dict.fetch_id(subject);
+    let subject_id = dict.encode(subject);
 
     // Predicate: <http://www.w3.org/ns/saref#hasValue> → stored as the URI string
     let predicate = "http://www.w3.org/ns/saref#hasValue";
-    let predicate_id = dict.fetch_id(predicate);
+    let predicate_id = dict.encode(predicate);
 
     // Object: "23.5"^^xsd:double → stored as the literal value "23.5"
     let object = "23.5";
-    let object_id = dict.fetch_id(object);
+    let object_id = dict.encode(object);
 
     // Datatype: ^^<http://www.w3.org/2001/XMLSchema#double> → stored as URI string
     let datatype = "http://www.w3.org/2001/XMLSchema#double";
-    let datatype_id = dict.fetch_id(datatype);
+    let datatype_id = dict.encode(datatype);
 
     // Graph: <https://example.org/graph> → stored as the URI string
     let graph = "https://example.org/graph";
-    let graph_id = dict.fetch_id(graph);
+    let graph_id = dict.encode(graph);
 
     // Verify all components are stored correctly
-    assert_eq!(dict.fetch_uri(subject_id), Some(subject));
-    assert_eq!(dict.fetch_uri(predicate_id), Some(predicate));
-    assert_eq!(dict.fetch_uri(object_id), Some(object));
-    assert_eq!(dict.fetch_uri(datatype_id), Some(datatype));
-    assert_eq!(dict.fetch_uri(graph_id), Some(graph));
+    assert_eq!(dict.decode(subject_id), Some(subject));
+    assert_eq!(dict.decode(predicate_id), Some(predicate));
+    assert_eq!(dict.decode(object_id), Some(object));
+    assert_eq!(dict.decode(datatype_id), Some(datatype));
+    assert_eq!(dict.decode(graph_id), Some(graph));
 
     // In a real system, you'd also store metadata about which IDs are literals vs URIs
     // and what datatype each literal has. This test just demonstrates the string storage.
@@ -91,34 +92,34 @@ fn test_rdf_literal_datatypes() {
     let label_datatype = "http://www.w3.org/2001/XMLSchema#string";
 
     // Store all values and datatypes in dictionary
-    let timestamp_val_id = dict.fetch_id(timestamp_value);
-    let timestamp_dt_id = dict.fetch_id(timestamp_datatype);
+    let timestamp_val_id = dict.encode(timestamp_value);
+    let timestamp_dt_id = dict.encode(timestamp_datatype);
 
-    let temp_val_id = dict.fetch_id(temp_value);
-    let temp_dt_id = dict.fetch_id(temp_datatype);
+    let temp_val_id = dict.encode(temp_value);
+    let temp_dt_id = dict.encode(temp_datatype);
 
-    let count_val_id = dict.fetch_id(count_value);
-    let count_dt_id = dict.fetch_id(count_datatype);
+    let count_val_id = dict.encode(count_value);
+    let count_dt_id = dict.encode(count_datatype);
 
-    let label_val_id = dict.fetch_id(label_value);
-    let label_dt_id = dict.fetch_id(label_datatype);
+    let label_val_id = dict.encode(label_value);
+    let label_dt_id = dict.encode(label_datatype);
 
     // Verify all are stored correctly
-    assert_eq!(dict.fetch_uri(timestamp_val_id), Some(timestamp_value));
-    assert_eq!(dict.fetch_uri(timestamp_dt_id), Some(timestamp_datatype));
+    assert_eq!(dict.decode(timestamp_val_id), Some(timestamp_value));
+    assert_eq!(dict.decode(timestamp_dt_id), Some(timestamp_datatype));
 
-    assert_eq!(dict.fetch_uri(temp_val_id), Some(temp_value));
-    assert_eq!(dict.fetch_uri(temp_dt_id), Some(temp_datatype));
+    assert_eq!(dict.decode(temp_val_id), Some(temp_value));
+    assert_eq!(dict.decode(temp_dt_id), Some(temp_datatype));
 
-    assert_eq!(dict.fetch_uri(count_val_id), Some(count_value));
-    assert_eq!(dict.fetch_uri(count_dt_id), Some(count_datatype));
+    assert_eq!(dict.decode(count_val_id), Some(count_value));
+    assert_eq!(dict.decode(count_dt_id), Some(count_datatype));
 
-    assert_eq!(dict.fetch_uri(label_val_id), Some(label_value));
-    assert_eq!(dict.fetch_uri(label_dt_id), Some(label_datatype));
+    assert_eq!(dict.decode(label_val_id), Some(label_value));
+    assert_eq!(dict.decode(label_dt_id), Some(label_datatype));
 
     // Note: Datatype URIs are reused across multiple literals
     // E.g., many literals will have ^^xsd:double as their datatype
-    assert_eq!(temp_dt_id, dict.fetch_id(temp_datatype)); // Same ID when requested again
+    assert_eq!(temp_dt_id, dict.encode(temp_datatype)); // Same ID when requested again
 }
 
 #[test]
@@ -132,35 +133,35 @@ fn test_dictionary_basic_operations() {
     let uri4 = "http://www.w3.org/ns/ssn#observedBy";
 
     // First insertion should return ID 0
-    let id1 = dict.fetch_id(uri1);
+    let id1 = dict.encode(uri1);
     assert_eq!(id1, 0);
 
     // Subsequent insertions should return sequential IDs
-    let id2 = dict.fetch_id(uri2);
+    let id2 = dict.encode(uri2);
     assert_eq!(id2, 1);
 
-    let id3 = dict.fetch_id(uri3);
+    let id3 = dict.encode(uri3);
     assert_eq!(id3, 2);
 
-    let id4 = dict.fetch_id(uri4);
+    let id4 = dict.encode(uri4);
     assert_eq!(id4, 3);
 
     // Requesting same URI should return same ID
-    let id1_again = dict.fetch_id(uri1);
+    let id1_again = dict.encode(uri1);
     assert_eq!(id1_again, id1);
 
     // Test retrieval
-    assert_eq!(dict.fetch_uri(id1), Some(uri1));
-    assert_eq!(dict.fetch_uri(id2), Some(uri2));
-    assert_eq!(dict.fetch_uri(id3), Some(uri3));
-    assert_eq!(dict.fetch_uri(id4), Some(uri4));
+    assert_eq!(dict.decode(id1), Some(uri1));
+    assert_eq!(dict.decode(id2), Some(uri2));
+    assert_eq!(dict.decode(id3), Some(uri3));
+    assert_eq!(dict.decode(id4), Some(uri4));
 
     // Test invalid ID
-    assert_eq!(dict.fetch_uri(999), None);
+    assert_eq!(dict.decode(999), None);
 
     // Test length
-    assert_eq!(dict.len(), 4);
-    assert!(!dict.is_empty());
+    assert_eq!(dict.id_to_uri.len(), 4);
+    assert!(!dict.id_to_uri.is_empty());
 }
 
 #[test]
@@ -180,7 +181,7 @@ fn test_dictionary_persistence() -> std::io::Result<()> {
         "https://solid.ti.rw.fau.de/public/ns/stream#",
     ];
 
-    let ids: Vec<u64> = uris.iter().map(|uri| dict.fetch_id(uri)).collect();
+    let ids: Vec<u32> = uris.iter().map(|uri| dict.encode(uri)).collect();
 
     // Save to file
     dict.save_to_file(&dict_path)?;
@@ -190,10 +191,10 @@ fn test_dictionary_persistence() -> std::io::Result<()> {
 
     // Verify all URIs are preserved with correct IDs
     for (i, uri) in uris.iter().enumerate() {
-        assert_eq!(loaded_dict.fetch_uri(ids[i]), Some(*uri));
+        assert_eq!(loaded_dict.decode(ids[i]), Some(*uri));
     }
 
-    assert_eq!(loaded_dict.len(), uris.len());
+    assert_eq!(loaded_dict.id_to_uri.len(), uris.len());
 
     Ok(())
 }
@@ -214,10 +215,10 @@ fn test_rdf_event_encoding_with_dictionary() {
 
     // Map URIs to IDs
     let timestamp: u64 = 1699181400;
-    let subject_id = dict.fetch_id(subject_uri);
-    let predicate_id = dict.fetch_id(predicate_uri);
-    let object_id = dict.fetch_id(object_uri);
-    let graph_id = dict.fetch_id(graph_uri);
+    let subject_id = dict.encode(subject_uri);
+    let predicate_id = dict.encode(predicate_uri);
+    let object_id = dict.encode(object_uri);
+    let graph_id = dict.encode(graph_uri);
 
     // Encode record with IDs
     let mut buffer = [0u8; RECORD_SIZE];
@@ -234,10 +235,10 @@ fn test_rdf_event_encoding_with_dictionary() {
     assert_eq!(dec_graph, graph_id);
 
     // Resolve IDs back to URIs
-    assert_eq!(dict.fetch_uri(dec_subject), Some(subject_uri));
-    assert_eq!(dict.fetch_uri(dec_predicate), Some(predicate_uri));
-    assert_eq!(dict.fetch_uri(dec_object), Some(object_uri));
-    assert_eq!(dict.fetch_uri(dec_graph), Some(graph_uri));
+    assert_eq!(dict.decode(dec_subject), Some(subject_uri));
+    assert_eq!(dict.decode(dec_predicate), Some(predicate_uri));
+    assert_eq!(dict.decode(dec_object), Some(object_uri));
+    assert_eq!(dict.decode(dec_graph), Some(graph_uri));
 }
 
 #[test]
@@ -258,10 +259,10 @@ fn test_iot_sensor_events_with_dictionary() -> std::io::Result<()> {
     ];
 
     // Map predicates to IDs first (these will be reused)
-    let predicate_ids: Vec<u64> = predicates.iter().map(|p| dict.fetch_id(p)).collect();
+    let predicate_ids: Vec<u32> = predicates.iter().map(|p| dict.encode(p)).collect();
 
     let graph_uri = "https://solid.ti.rw.fau.de/public/ns/stream#iot";
-    let graph_id = dict.fetch_id(graph_uri);
+    let graph_id = dict.encode(graph_uri);
 
     // Create log writer
     let mut writer = LogWriter::create(&log_path)?;
@@ -272,14 +273,14 @@ fn test_iot_sensor_events_with_dictionary() -> std::io::Result<()> {
 
         // Each event has unique subject (sensor reading ID)
         let subject_uri = format!("https://rsp.js/event/sensor-reading-{:03}", i);
-        let subject_id = dict.fetch_id(&subject_uri);
+        let subject_id = dict.encode(&subject_uri);
 
         // Rotate through predicates (demonstrating reuse)
         let predicate_id = predicate_ids[(i % predicate_ids.len() as u64) as usize];
 
         // Unique object (sensor value)
         let object_uri = format!("value-{}", i * 10);
-        let object_id = dict.fetch_id(&object_uri);
+        let object_id = dict.encode(&object_uri);
 
         writer.append_record(timestamp, subject_id, predicate_id, object_id, graph_id)?;
     }
@@ -293,11 +294,11 @@ fn test_iot_sensor_events_with_dictionary() -> std::io::Result<()> {
     // - 100 unique objects
     // - 1 graph URI
     // Total: 205 unique URIs
-    assert_eq!(dict.len(), 205);
+    assert_eq!(dict.id_to_uri.len(), 205);
 
     // Verify predicate reuse - predicates should have low IDs (0-3)
     for (i, pred) in predicates.iter().enumerate() {
-        assert_eq!(dict.fetch_id(pred), i as u64);
+        assert_eq!(dict.encode(pred), i as u32);
     }
 
     Ok(())
@@ -319,10 +320,10 @@ fn test_sparse_index_with_dictionary_integration() -> std::io::Result<()> {
     let predicates =
         vec!["http://www.w3.org/ns/saref#hasTimestamp", "http://www.w3.org/ns/saref#hasValue"];
 
-    let predicate_ids: Vec<u64> = predicates.iter().map(|p| dict.fetch_id(p)).collect();
+    let predicate_ids: Vec<u32> = predicates.iter().map(|p| dict.encode(p)).collect();
 
     let graph_uri = "https://example.org/graph/sensors";
-    let graph_id = dict.fetch_id(graph_uri);
+    let graph_id = dict.encode(graph_uri);
 
     // Create log with 1000 events
     let mut writer = LogWriter::create(&log_path)?;
@@ -330,10 +331,10 @@ fn test_sparse_index_with_dictionary_integration() -> std::io::Result<()> {
     for i in 0..1000 {
         let timestamp = i;
         let subject_uri = format!("https://rsp.js/event/{:04}", i);
-        let subject_id = dict.fetch_id(&subject_uri);
+        let subject_id = dict.encode(&subject_uri);
         let predicate_id = predicate_ids[(i % 2) as usize];
         let object_uri = format!("reading-{}", i);
-        let object_id = dict.fetch_id(&object_uri);
+        let object_id = dict.encode(&object_uri);
 
         writer.append_record(timestamp, subject_id, predicate_id, object_id, graph_id)?;
     }
@@ -380,11 +381,11 @@ fn test_large_uri_handling() {
         "measurement-with-very-long-identifier-12345678901234567890"
     );
 
-    let id = dict.fetch_id(&long_uri);
+    let id = dict.encode(&long_uri);
     assert_eq!(id, 0);
 
     // Verify retrieval works
-    assert_eq!(dict.fetch_uri(id), Some(long_uri.as_str()));
+    assert_eq!(dict.decode(id), Some(long_uri.as_str()));
 
     // Test that we can handle many long URIs
     for i in 0..100 {
@@ -394,10 +395,10 @@ fn test_large_uri_handling() {
             i * 2,
             i * 3
         );
-        dict.fetch_id(&uri);
+        dict.encode(&uri);
     }
 
-    assert_eq!(dict.len(), 101);
+    assert_eq!(dict.id_to_uri.len(), 101);
 }
 
 #[test]
@@ -415,24 +416,24 @@ fn test_rdf_namespace_reuse() {
     ];
 
     // Map each namespace
-    let namespace_ids: Vec<u64> = common_namespaces.iter().map(|ns| dict.fetch_id(ns)).collect();
+    let namespace_ids: Vec<u32> = common_namespaces.iter().map(|ns| dict.encode(ns)).collect();
 
     // Create 1000 events that all use these namespaces
     for i in 0..1000 {
         let event_uri = format!("https://rsp.js/event/{}", i);
-        dict.fetch_id(&event_uri);
+        dict.encode(&event_uri);
 
         // Reference one of the common namespaces
         let ns_id = namespace_ids[i % namespace_ids.len()];
-        assert!(dict.fetch_uri(ns_id).is_some());
+        assert!(dict.decode(ns_id).is_some());
     }
 
     // Dictionary should have: 6 namespaces + 1000 events = 1006 entries
-    assert_eq!(dict.len(), 1006);
+    assert_eq!(dict.id_to_uri.len(), 1006);
 
     // Verify namespace IDs are unchanged (demonstrating reuse)
     for (i, ns) in common_namespaces.iter().enumerate() {
-        assert_eq!(dict.fetch_id(ns), namespace_ids[i]);
+        assert_eq!(dict.encode(ns), namespace_ids[i]);
     }
 }
 
@@ -474,10 +475,10 @@ fn test_event_resolution_workflow() -> std::io::Result<()> {
     let mut writer = LogWriter::create(&log_path)?;
 
     for (timestamp, subject, predicate, object, graph) in &event_uris {
-        let subject_id = dict.fetch_id(subject);
-        let predicate_id = dict.fetch_id(predicate);
-        let object_id = dict.fetch_id(object);
-        let graph_id = dict.fetch_id(graph);
+        let subject_id = dict.encode(subject);
+        let predicate_id = dict.encode(predicate);
+        let object_id = dict.encode(object);
+        let graph_id = dict.encode(graph);
 
         writer.append_record(*timestamp, subject_id, predicate_id, object_id, graph_id)?;
     }
@@ -498,10 +499,10 @@ fn test_event_resolution_workflow() -> std::io::Result<()> {
         assert_eq!(dec_ts, *timestamp);
 
         // Resolve IDs to URIs
-        assert_eq!(dict.fetch_uri(dec_subj_id), Some(*subject));
-        assert_eq!(dict.fetch_uri(dec_pred_id), Some(*predicate));
-        assert_eq!(dict.fetch_uri(dec_obj_id), Some(*object));
-        assert_eq!(dict.fetch_uri(dec_graph_id), Some(*graph));
+        assert_eq!(dict.decode(dec_subj_id), Some(*subject));
+        assert_eq!(dict.decode(dec_pred_id), Some(*predicate));
+        assert_eq!(dict.decode(dec_obj_id), Some(*object));
+        assert_eq!(dict.decode(dec_graph_id), Some(*graph));
     }
 
     Ok(())
@@ -522,7 +523,7 @@ fn test_dictionary_space_savings() {
     let raw_size: usize = uris.iter().map(|u| u.len()).sum();
 
     // With dictionary, we store 8 bytes per ID
-    let ids: Vec<u64> = uris.iter().map(|u| dict.fetch_id(u)).collect();
+    let ids: Vec<u32> = uris.iter().map(|u| dict.encode(u)).collect();
     let encoded_size = ids.len() * 8; // 8 bytes per u64
 
     println!("Raw URIs size: {} bytes", raw_size);
@@ -572,7 +573,7 @@ fn test_complete_rdf_quad_with_datatype() {
     // Store all components and get their IDs
     let mut component_ids = std::collections::HashMap::new();
     for (name, value) in &components {
-        let id = dict.fetch_id(value);
+        let id = dict.encode(value);
         component_ids.insert(*name, id);
         println!("{}: '{}' → ID {}", name, value, id);
     }
@@ -588,11 +589,11 @@ fn test_complete_rdf_quad_with_datatype() {
     // that tracks which object IDs are literals and what their datatypes are.
 
     // Verify retrieval
-    assert_eq!(dict.fetch_uri(component_ids["subject"]), Some(components[0].1));
-    assert_eq!(dict.fetch_uri(component_ids["predicate"]), Some(components[1].1));
-    assert_eq!(dict.fetch_uri(component_ids["object_value"]), Some(components[2].1));
-    assert_eq!(dict.fetch_uri(component_ids["object_datatype"]), Some(components[3].1));
-    assert_eq!(dict.fetch_uri(component_ids["graph"]), Some(components[4].1));
+    assert_eq!(dict.decode(component_ids["subject"]), Some(components[0].1));
+    assert_eq!(dict.decode(component_ids["predicate"]), Some(components[1].1));
+    assert_eq!(dict.decode(component_ids["object_value"]), Some(components[2].1));
+    assert_eq!(dict.decode(component_ids["object_datatype"]), Some(components[3].1));
+    assert_eq!(dict.decode(component_ids["graph"]), Some(components[4].1));
 
     // Another quad with the same datatype:
     // <https://rsp.js/event/humidity-sensor-001> <http://www.w3.org/ns/saref#hasValue> "65.2"^^<http://www.w3.org/2001/XMLSchema#double> <https://example.org/graph/sensors> .
@@ -600,13 +601,13 @@ fn test_complete_rdf_quad_with_datatype() {
     let subject2 = "https://rsp.js/event/humidity-sensor-001";
     let value2 = "65.2";
 
-    let _subject2_id = dict.fetch_id(subject2);
-    let _value2_id = dict.fetch_id(value2);
+    let _subject2_id = dict.encode(subject2);
+    let _value2_id = dict.encode(value2);
 
     // These components are REUSED (same ID returned):
-    let predicate2_id = dict.fetch_id("http://www.w3.org/ns/saref#hasValue");
-    let datatype2_id = dict.fetch_id("http://www.w3.org/2001/XMLSchema#double");
-    let graph2_id = dict.fetch_id("https://example.org/graph/sensors");
+    let predicate2_id = dict.encode("http://www.w3.org/ns/saref#hasValue");
+    let datatype2_id = dict.encode("http://www.w3.org/2001/XMLSchema#double");
+    let graph2_id = dict.encode("https://example.org/graph/sensors");
 
     // Verify reuse
     assert_eq!(predicate2_id, component_ids["predicate"]);
@@ -614,9 +615,9 @@ fn test_complete_rdf_quad_with_datatype() {
     assert_eq!(graph2_id, component_ids["graph"]);
 
     // Dictionary has: 5 original components + 2 new (subject2, value2) = 7 total
-    assert_eq!(dict.len(), 7);
+    assert_eq!(dict.id_to_uri.len(), 7);
 
     println!("\n✓ Demonstrated RDF datatype handling with dictionary encoding");
     println!("✓ Showed URI reuse across multiple quads (predicate, datatype, graph)");
-    println!("✓ Dictionary size: {} entries for 2 complete RDF quads", dict.len());
+    println!("✓ Dictionary size: {} entries for 2 complete RDF quads", dict.id_to_uri.len());
 }

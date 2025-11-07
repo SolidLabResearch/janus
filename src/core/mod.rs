@@ -1,13 +1,15 @@
 //! Core data structures and types for Janus RDF Stream Processing Engine
 
 /// Internal storage event with encoded IDs
+/// Uses u32 for dictionary IDs (4B max) and u64 for timestamp (milliseconds)
+/// Total: 24 bytes vs 40 bytes (40% space savings)
 #[derive(Clone, Debug)]
 pub struct Event {
-    pub timestamp: u64,
-    pub subject: u64,
-    pub predicate: u64,
-    pub object: u64,
-    pub graph: u64,
+    pub timestamp: u64, // 8 bytes - milliseconds since epoch
+    pub subject: u32,   // 4 bytes - dictionary-encoded (4B max unique strings)
+    pub predicate: u32, // 4 bytes - dictionary-encoded (usually <1000 unique)
+    pub object: u32,    // 4 bytes - dictionary-encoded (4B max unique strings)
+    pub graph: u32,     // 4 bytes - dictionary-encoded (usually <100 unique)
 }
 
 /// User-facing RDF event with URI strings

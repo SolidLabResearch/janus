@@ -10,9 +10,9 @@ use crate::core::Event;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Dictionary {
-    pub string_to_id: HashMap<String, u64>,
-    pub id_to_uri: HashMap<u64, String>,
-    pub next_id: u64,
+    pub string_to_id: HashMap<String, u32>,
+    pub id_to_uri: HashMap<u32, String>,
+    pub next_id: u32,
 }
 
 impl Dictionary {
@@ -20,7 +20,7 @@ impl Dictionary {
         Dictionary { string_to_id: HashMap::new(), id_to_uri: HashMap::new(), next_id: 0 }
     }
 
-    pub fn encode(&mut self, value: &str) -> u64 {
+    pub fn encode(&mut self, value: &str) -> u32 {
         if let Some(&id) = self.string_to_id.get(value) {
             id
         } else {
@@ -32,7 +32,7 @@ impl Dictionary {
         }
     }
 
-    pub fn decode(&self, id: u64) -> Option<&str> {
+    pub fn decode(&self, id: u32) -> Option<&str> {
         self.id_to_uri.get(&id).map(|s| s.as_str())
     }
 
@@ -69,7 +69,7 @@ impl Dictionary {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::indexing::shared::Event;
+    use crate::core::Event;
 
     #[test]
     fn test_dictionary_encoding_decoding() {
@@ -116,7 +116,7 @@ mod tests {
 
     #[test]
     fn test_clean_rdf_api() {
-        use crate::indexing::shared::RDFEvent;
+        use crate::core::RDFEvent;
 
         let mut dict = Dictionary::new();
 

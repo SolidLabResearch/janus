@@ -151,7 +151,7 @@ fn analyze_write_throughput() -> std::io::Result<()> {
 
         for i in 0..batch_size {
             log_writer.append_record(i, i % 1000, i % 500, i % 2000, 1)?;
-            index_builder.add_entry(i, i * 40)?;
+            index_builder.add_entry(i, i * 24)?;
         }
         log_writer.flush()?;
         index_builder.finalize()?;
@@ -170,7 +170,7 @@ fn analyze_write_throughput() -> std::io::Result<()> {
 
         for i in 0..batch_size {
             log_writer.append_record(i, i % 1000, i % 500, i % 2000, 1)?;
-            index_builder.add_entry(i, i, i * 40)?;
+            index_builder.add_entry(i, i, i * 24)?;
         }
         log_writer.flush()?;
         index_builder.finalize()?;

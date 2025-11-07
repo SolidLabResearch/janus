@@ -21,10 +21,10 @@ impl LogWriter {
     pub fn append_record(
         &mut self,
         timestamp: u64,
-        subject: u64,
-        predicate: u64,
-        object: u64,
-        graph: u64,
+        subject: u32,
+        predicate: u32,
+        object: u32,
+        graph: u32,
     ) -> std::io::Result<()> {
         let mut buffer = [0u8; RECORD_SIZE];
         encode_record(&mut buffer, timestamp, subject, predicate, object, graph);

@@ -28,10 +28,10 @@ fn benchmark_dense_writing(number_records: u64) -> std::io::Result<(f64, f64)> {
 
     for i in 0..number_records {
         let timestamp = i;
-        let subject = (i % 1000) as u64;
-        let predicate = (i % 500) as u64;
-        let object = (i % 2000) as u64;
-        let graph: u64 = 1;
+        let subject = (i % 1000) as u32;
+        let predicate = (i % 500) as u32;
+        let object = (i % 2000) as u32;
+        let graph: u32 = 1;
 
         // Write record to log
         log_writer.append_record(timestamp, subject, predicate, object, graph)?;
@@ -39,7 +39,7 @@ fn benchmark_dense_writing(number_records: u64) -> std::io::Result<(f64, f64)> {
         // Add entry to index
         index_builder.add_entry(timestamp, current_offset)?;
 
-        current_offset += 40; // RECORD_SIZE
+        current_offset += 24; // RECORD_SIZE
     }
 
     let write_time = start.elapsed();
@@ -66,10 +66,10 @@ fn benchmark_sparse_writing(number_records: u64) -> std::io::Result<(f64, f64)> 
 
     for i in 0..number_records {
         let timestamp = i;
-        let subject = (i % 1000) as u64;
-        let predicate = (i % 500) as u64;
-        let object = (i % 2000) as u64;
-        let graph: u64 = 1;
+        let subject = (i % 1000) as u32;
+        let predicate = (i % 500) as u32;
+        let object = (i % 2000) as u32;
+        let graph: u32 = 1;
 
         // Write record to log
         log_writer.append_record(timestamp, subject, predicate, object, graph)?;
@@ -77,7 +77,7 @@ fn benchmark_sparse_writing(number_records: u64) -> std::io::Result<(f64, f64)> 
         // Add entry to index (will only add if i % interval == 0)
         index_builder.add_entry(i, timestamp, current_offset)?;
 
-        current_offset += 40; // RECORD_SIZE
+        current_offset += 24; // RECORD_SIZE
     }
 
     let write_time = start.elapsed();
@@ -110,10 +110,10 @@ fn benchmark_batch_vs_realtime(number_records: u64) -> std::io::Result<()> {
     let mut log_writer = LogWriter::create(DENSE_LOG_FILE)?;
     for i in 0..number_records {
         let timestamp = i;
-        let subject = (i % 1000) as u64;
-        let predicate = (i % 500) as u64;
-        let object = (i % 2000) as u64;
-        let graph: u64 = 1;
+        let subject = (i % 1000) as u32;
+        let predicate = (i % 500) as u32;
+        let object = (i % 2000) as u32;
+        let graph: u32 = 1;
         log_writer.append_record(timestamp, subject, predicate, object, graph)?;
     }
     log_writer.flush()?;
@@ -132,10 +132,10 @@ fn benchmark_batch_vs_realtime(number_records: u64) -> std::io::Result<()> {
     let mut log_writer = LogWriter::create(SPARSE_LOG_FILE)?;
     for i in 0..number_records {
         let timestamp = i;
-        let subject = (i % 1000) as u64;
-        let predicate = (i % 500) as u64;
-        let object = (i % 2000) as u64;
-        let graph: u64 = 1;
+        let subject = (i % 1000) as u32;
+        let predicate = (i % 500) as u32;
+        let object = (i % 2000) as u32;
+        let graph: u32 = 1;
         log_writer.append_record(timestamp, subject, predicate, object, graph)?;
     }
     log_writer.flush()?;

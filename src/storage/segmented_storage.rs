@@ -1,10 +1,8 @@
 use core::time;
 use std::{
     collections::VecDeque,
-    fmt::format,
     io::{BufWriter, Read, Seek, SeekFrom, Write},
-    ops::Index,
-    panic::set_hook,
+    rc::Rc,
     sync::{Arc, Mutex, RwLock},
     thread::JoinHandle,
     time::{Duration, SystemTime, UNIX_EPOCH},
@@ -21,16 +19,18 @@ use crate::{
     },
 };
 
+#[doc = "Struct for the Implementation of the Segmented Storage of RDF Streams."]
 pub struct StreamingSegmentedStorage {
     batch_buffer: Arc<RwLock<BatchBuffer>>,
     segments: Arc<RwLock<Vec<EnhancedSegmentMetadata>>>,
-    dictionary: Arc<RwLock<Dictionary>>,
+    dictionary: Rc<RwLock<Dictionary>>,
     flush_handle: Option<JoinHandle<()>>,
     shutdown_signal: Arc<Mutex<bool>>,
     config: StreamingConfig,
 }
 
 impl StreamingSegmentedStorage {
+    #[doc = ""]
     pub fn new(config: StreamingConfig) -> std::io::Result<Self> {
         std::fs::create_dir_all(&config.segment_base_path)?;
 
@@ -43,7 +43,7 @@ impl StreamingSegmentedStorage {
             })),
 
             segments: Arc::new(RwLock::new(Vec::new())),
-            dictionary: Arc::new(RwLock::new(Dictionary::new())),
+            dictionary: Rc::new(RwLock::new(Dictionary::new())),
             flush_handle: None,
             shutdown_signal: Arc::new(Mutex::new(false)),
             config,
@@ -52,6 +52,7 @@ impl StreamingSegmentedStorage {
         Ok(storage)
     }
 
+    #[doc = ""]
     pub fn start_background_flushing(&mut self) {
         let batch_buffer_clone = Arc::clone(&self.batch_buffer);
         let segments_clone = Arc::clone(&self.segments);
@@ -86,10 +87,8 @@ impl StreamingSegmentedStorage {
 
             batch_buffer.events.push_back(event);
         }
-
         // Note: Synchronous flushing removed for high throughput.
         // Background thread handles all flushing based on time limits.
-
         Ok(())
     }
 
@@ -120,12 +119,12 @@ impl StreamingSegmentedStorage {
 
                 // Use saturating subtraction to avoid underflow if oldest > current_timestamp
                 current_timestamp.saturating_sub(oldest)
-                    >= self.config.max_batch_age_seconds * 1_000_000_000
+                    >= self.config.max_batch_age_seconds * 1_000
             })
     }
 
     fn current_timestamp() -> u64 {
-        SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos() as u64
+        SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64
     }
 
     fn flush_batch_buffer_to_segment(&self) -> std::io::Result<()> {
@@ -415,7 +414,7 @@ impl StreamingSegmentedStorage {
                     || batch_buffer.oldest_timestamp_bound.map_or(false, |oldest| {
                         let current_timestamp = Self::current_timestamp();
                         current_timestamp.saturating_sub(oldest)
-                            >= config.max_batch_age_seconds * 1_000_000_000
+                            >= config.max_batch_age_seconds * 1_000
                     })
             };
 
@@ -640,6 +639,6 @@ impl StreamingSegmentedStorage {
     }
 
     fn generate_segment_id() -> u64 {
-        SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos() as u64
+        SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64
     }
 }

@@ -6,6 +6,15 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use crate::core::Event;
 
 #[derive(Debug)]
+/// Storage component memory usage breakdown
+pub struct StorageComponentSizes {
+    pub batch_buffer_bytes: usize,
+    pub segments_count: usize,
+    pub dictionary_bytes: usize,
+    pub estimated_total_bytes: usize,
+}
+
+#[derive(Debug)]
 /// In-memory buffer that batches events before persisting them to disk
 pub struct BatchBuffer {
     pub events: VecDeque<Event>,

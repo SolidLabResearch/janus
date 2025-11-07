@@ -4,31 +4,32 @@ use crate::core::{Event, RDFEvent};
 use crate::storage::indexing::dictionary::Dictionary;
 
 /// Size of a single encoded record in bytes
-pub const RECORD_SIZE: usize = 40;
+/// Reduced from 40 to 24 bytes (40% space savings)
+pub const RECORD_SIZE: usize = 24;
 
 /// Encode an RDF event record into a byte buffer
 pub fn encode_record(
     buffer: &mut [u8; RECORD_SIZE],
     timestamp: u64,
-    subject: u64,
-    predicate: u64,
-    object: u64,
-    graph: u64,
+    subject: u32,
+    predicate: u32,
+    object: u32,
+    graph: u32,
 ) {
     buffer[0..8].copy_from_slice(&timestamp.to_le_bytes());
-    buffer[8..16].copy_from_slice(&subject.to_le_bytes());
-    buffer[16..24].copy_from_slice(&predicate.to_le_bytes());
-    buffer[24..32].copy_from_slice(&object.to_le_bytes());
-    buffer[32..40].copy_from_slice(&graph.to_le_bytes());
+    buffer[8..12].copy_from_slice(&subject.to_le_bytes());
+    buffer[12..16].copy_from_slice(&predicate.to_le_bytes());
+    buffer[16..20].copy_from_slice(&object.to_le_bytes());
+    buffer[20..24].copy_from_slice(&graph.to_le_bytes());
 }
 
 /// Decode a byte buffer into an RDF event record
-pub fn decode_record(buffer: &[u8; RECORD_SIZE]) -> (u64, u64, u64, u64, u64) {
+pub fn decode_record(buffer: &[u8; RECORD_SIZE]) -> (u64, u32, u32, u32, u32) {
     let timestamp = u64::from_le_bytes(buffer[0..8].try_into().unwrap());
-    let subject = u64::from_le_bytes(buffer[8..16].try_into().unwrap());
-    let predicate = u64::from_le_bytes(buffer[16..24].try_into().unwrap());
-    let object = u64::from_le_bytes(buffer[24..32].try_into().unwrap());
-    let graph = u64::from_le_bytes(buffer[32..40].try_into().unwrap());
+    let subject = u32::from_le_bytes(buffer[8..12].try_into().unwrap());
+    let predicate = u32::from_le_bytes(buffer[12..16].try_into().unwrap());
+    let object = u32::from_le_bytes(buffer[16..20].try_into().unwrap());
+    let graph = u32::from_le_bytes(buffer[20..24].try_into().unwrap());
     (timestamp, subject, predicate, object, graph)
 }
 
