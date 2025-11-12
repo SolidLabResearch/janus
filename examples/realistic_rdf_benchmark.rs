@@ -239,18 +239,18 @@ fn run_single_benchmark(
 
     // Point query benchmark - query for a specific observation (should return 5 quads)
     // Query for the very first timestamp we wrote (we know it exists)
-    let single_ts = min_timestamp;  // This is base_timestamp + 0
-    
+    let single_ts = min_timestamp; // This is base_timestamp + 0
+
     let point_start = Instant::now();
     let point_results = storage.query_rdf(single_ts, single_ts)?;
     let point_duration = point_start.elapsed();
     // Use microseconds for sub-millisecond precision
     let point_time_us = point_duration.as_micros() as f64;
     let point_time_ms = point_time_us / 1000.0;
-    
+
     // Debug: show results count for small datasets
     if size <= 10_000 {
-        eprintln!("   DEBUG: Point query at ts={} (min_ts, size={}) returned {} quads (duration: {:.3} µs = {:.3} ms)", 
+        eprintln!("   DEBUG: Point query at ts={} (min_ts, size={}) returned {} quads (duration: {:.3} µs = {:.3} ms)",
                   single_ts, size, point_results.len(), point_time_us, point_time_ms);
     }
 

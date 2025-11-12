@@ -258,7 +258,7 @@ impl StreamingSegmentedStorage {
 
         {
             let segments = self.segments.read().unwrap();
-            
+
             for segment in segments.iter() {
                 if self.segment_overlaps(segment, start_timestamp, end_timestamp) {
                     let segment_results =
@@ -559,11 +559,10 @@ impl StreamingSegmentedStorage {
 
                             if let Ok(_metadata) = fs::metadata(&data_path) {
                                 // Load index directory if index file exists
-                                let (index_directory, start_ts, end_ts, record_count) = 
+                                let (index_directory, start_ts, end_ts, record_count) =
                                     if fs::metadata(&index_path).is_ok() {
-                                        Self::load_index_directory_from_file(&index_path).unwrap_or_else(|_| {
-                                            (Vec::new(), 0, u64::MAX, 0)
-                                        })
+                                        Self::load_index_directory_from_file(&index_path)
+                                            .unwrap_or_else(|_| (Vec::new(), 0, u64::MAX, 0))
                                     } else {
                                         (Vec::new(), 0, u64::MAX, 0)
                                     };
@@ -595,16 +594,18 @@ impl StreamingSegmentedStorage {
         Ok(())
     }
 
-    fn load_index_directory_from_file(index_path: &str) -> std::io::Result<(Vec<IndexBlock>, u64, u64, u64)> {
+    fn load_index_directory_from_file(
+        index_path: &str,
+    ) -> std::io::Result<(Vec<IndexBlock>, u64, u64, u64)> {
         use std::io::Read;
-        
+
         let mut file = std::fs::File::open(index_path)?;
         let mut buffer = Vec::new();
         file.read_to_end(&mut buffer)?;
 
         // Index file format: each block is stored as consecutive (timestamp, offset) pairs (16 bytes each)
         // We need to reconstruct the IndexBlock directory structure
-        
+
         if buffer.is_empty() {
             return Ok((Vec::new(), 0, u64::MAX, 0));
         }
@@ -619,21 +620,26 @@ impl StreamingSegmentedStorage {
         // Note: This is a simplified reconstruction - in practice you'd want to store block boundaries
         let entries_per_block = 1000; // From config.entries_per_index_block
         let mut current_block_start = 0;
-        
+
         while current_block_start < buffer.len() {
-            let block_size = std::cmp::min(entries_per_block * 16, buffer.len() - current_block_start);
+            let block_size =
+                std::cmp::min(entries_per_block * 16, buffer.len() - current_block_start);
             let block_end = current_block_start + block_size;
             let block_entries = block_end - current_block_start;
             let entry_count = (block_entries / 16) as u32;
-            
+
             if entry_count == 0 {
                 break;
             }
 
             //Read first and last timestamp of this block
-            let first_ts = u64::from_le_bytes(buffer[current_block_start..current_block_start+8].try_into().unwrap());
+            let first_ts = u64::from_le_bytes(
+                buffer[current_block_start..current_block_start + 8].try_into().unwrap(),
+            );
             let last_entry_start = current_block_start + ((entry_count - 1) as usize * 16);
-            let last_ts = u64::from_le_bytes(buffer[last_entry_start..last_entry_start+8].try_into().unwrap());
+            let last_ts = u64::from_le_bytes(
+                buffer[last_entry_start..last_entry_start + 8].try_into().unwrap(),
+            );
 
             global_min_ts = global_min_ts.min(first_ts);
             global_max_ts = global_max_ts.max(last_ts);

@@ -68,17 +68,29 @@ fn main() -> Result<(), Box<dyn Error>> {
         // 10% range performance
         let range_10_times: Vec<f64> =
             analysis_results.iter().map(|r| r.range_10_percent_times[0]).collect();
-        analyze_and_print(&format!("10% Range Query ({} quads)", actual_quads), &range_10_times, "ms");
+        analyze_and_print(
+            &format!("10% Range Query ({} quads)", actual_quads),
+            &range_10_times,
+            "ms",
+        );
 
         // 50% range performance
         let range_50_times: Vec<f64> =
             analysis_results.iter().map(|r| r.range_50_percent_times[0]).collect();
-        analyze_and_print(&format!("50% Range Query ({} quads)", actual_quads), &range_50_times, "ms");
+        analyze_and_print(
+            &format!("50% Range Query ({} quads)", actual_quads),
+            &range_50_times,
+            "ms",
+        );
 
         // 100% range performance
         let range_100_times: Vec<f64> =
             analysis_results.iter().map(|r| r.range_100_percent_times[0]).collect();
-        analyze_and_print(&format!("100% Range Query ({} quads)", actual_quads), &range_100_times, "ms");
+        analyze_and_print(
+            &format!("100% Range Query ({} quads)", actual_quads),
+            &range_100_times,
+            "ms",
+        );
 
         println!();
     }
@@ -199,8 +211,10 @@ fn run_range_query_benchmark(
 
     // Debug: Print timestamp range
     if observations == 2000 {
-        println!("DEBUG 10K: min_timestamp={}, max_timestamp={}, time_range={}", 
-                 min_timestamp, max_timestamp, time_range);
+        println!(
+            "DEBUG 10K: min_timestamp={}, max_timestamp={}, time_range={}",
+            min_timestamp, max_timestamp, time_range
+        );
     }
 
     // 10% range query - query 10% of the total time range
@@ -222,12 +236,12 @@ fn run_range_query_benchmark(
     // 100% range query - query entire time range
     let range_100_start = min_timestamp;
     let range_100_end = max_timestamp;
-    
+
     // Debug: Print query parameters
     if observations == 2000 {
         println!("DEBUG 10K: 100% query from {} to {}", range_100_start, range_100_end);
     }
-    
+
     let range_100_start_time = Instant::now();
     let range_100_results = storage.query_rdf(range_100_start, range_100_end)?;
     let range_100_duration = range_100_start_time.elapsed();
