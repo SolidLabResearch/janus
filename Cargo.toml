@@ -36,15 +36,3 @@ opt-level = 0
 
 [profile.test]
 opt-level = 0
-
-[[bench]]
-name = "benchmark"
-harness = false
-
-[[bench]]
-name = "write_benchmark"
-harness = false
-
-[[bench]]
-name = "analysis"
-harness = false

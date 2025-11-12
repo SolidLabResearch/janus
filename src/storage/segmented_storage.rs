@@ -1,4 +1,3 @@
-use core::time;
 use std::{
     collections::VecDeque,
     io::{BufWriter, Read, Seek, SeekFrom, Write},
@@ -162,7 +161,7 @@ impl StreamingSegmentedStorage {
         let segment_id = Self::generate_segment_id();
 
         let data_path = format!("{}/segment-{}.log", self.config.segment_base_path, segment_id);
-        let index_path = format!("{}/segment-{}.log", self.config.segment_base_path, segment_id);
+        let index_path = format!("{}/segment-{}.idx", self.config.segment_base_path, segment_id);
 
         let mut data_file = BufWriter::new(std::fs::File::create(&data_path)?);
         let mut index_file = BufWriter::new(std::fs::File::create(&index_path)?);
@@ -259,6 +258,7 @@ impl StreamingSegmentedStorage {
 
         {
             let segments = self.segments.read().unwrap();
+            
             for segment in segments.iter() {
                 if self.segment_overlaps(segment, start_timestamp, end_timestamp) {
                     let segment_results =
@@ -349,7 +349,7 @@ impl StreamingSegmentedStorage {
             // Parse the entries.
 
             for chunk in buffer.chunks_exact(16) {
-                let timestamp = u64::from_be_bytes(chunk[0..8].try_into().unwrap());
+                let timestamp = u64::from_le_bytes(chunk[0..8].try_into().unwrap());
                 let offset = u64::from_be_bytes(chunk[8..16].try_into().unwrap());
                 sparse_entries.push((timestamp, offset));
             }
@@ -555,18 +555,26 @@ impl StreamingSegmentedStorage {
                         if let Ok(segment_id) = id_str.parse::<u64>() {
                             // Try to load the segment metadata by reading the data file
                             let data_path = format!("{}/segment-{}.log", segment_dir, segment_id);
-                            let index_path = format!("{}/segment-{}.log", segment_dir, segment_id);
+                            let index_path = format!("{}/segment-{}.idx", segment_dir, segment_id);
 
                             if let Ok(_metadata) = fs::metadata(&data_path) {
-                                // For now, create a basic segment metadata with wide timestamp bounds
-                                // In a full implementation, we'd parse the index file to get exact bounds
+                                // Load index directory if index file exists
+                                let (index_directory, start_ts, end_ts, record_count) = 
+                                    if fs::metadata(&index_path).is_ok() {
+                                        Self::load_index_directory_from_file(&index_path).unwrap_or_else(|_| {
+                                            (Vec::new(), 0, u64::MAX, 0)
+                                        })
+                                    } else {
+                                        (Vec::new(), 0, u64::MAX, 0)
+                                    };
+
                                 let segment = EnhancedSegmentMetadata {
-                                    start_timstamp: 0, // Wide range to ensure overlap checks pass
-                                    end_timestamp: u64::MAX,
+                                    start_timstamp: start_ts,
+                                    end_timestamp: end_ts,
                                     data_path,
                                     index_path,
-                                    record_count: 0, // Will be determined during scanning
-                                    index_directory: Vec::new(), // Empty - will fall back to full scan
+                                    record_count,
+                                    index_directory,
                                 };
                                 segments.push(segment);
                             }
@@ -585,6 +593,64 @@ impl StreamingSegmentedStorage {
         }
 
         Ok(())
+    }
+
+    fn load_index_directory_from_file(index_path: &str) -> std::io::Result<(Vec<IndexBlock>, u64, u64, u64)> {
+        use std::io::Read;
+        
+        let mut file = std::fs::File::open(index_path)?;
+        let mut buffer = Vec::new();
+        file.read_to_end(&mut buffer)?;
+
+        // Index file format: each block is stored as consecutive (timestamp, offset) pairs (16 bytes each)
+        // We need to reconstruct the IndexBlock directory structure
+        
+        if buffer.is_empty() {
+            return Ok((Vec::new(), 0, u64::MAX, 0));
+        }
+
+        let mut index_directory = Vec::new();
+        let mut file_offset = 0u64;
+        let mut global_min_ts = u64::MAX;
+        let mut global_max_ts = 0u64;
+        let mut total_records = 0u64;
+
+        // Read all entries to reconstruct blocks
+        // Note: This is a simplified reconstruction - in practice you'd want to store block boundaries
+        let entries_per_block = 1000; // From config.entries_per_index_block
+        let mut current_block_start = 0;
+        
+        while current_block_start < buffer.len() {
+            let block_size = std::cmp::min(entries_per_block * 16, buffer.len() - current_block_start);
+            let block_end = current_block_start + block_size;
+            let block_entries = block_end - current_block_start;
+            let entry_count = (block_entries / 16) as u32;
+            
+            if entry_count == 0 {
+                break;
+            }
+
+            //Read first and last timestamp of this block
+            let first_ts = u64::from_le_bytes(buffer[current_block_start..current_block_start+8].try_into().unwrap());
+            let last_entry_start = current_block_start + ((entry_count - 1) as usize * 16);
+            let last_ts = u64::from_le_bytes(buffer[last_entry_start..last_entry_start+8].try_into().unwrap());
+
+            global_min_ts = global_min_ts.min(first_ts);
+            global_max_ts = global_max_ts.max(last_ts);
+            total_records += entry_count as u64;
+
+            index_directory.push(IndexBlock {
+                min_timestamp: first_ts,
+                max_timestamp: last_ts,
+                file_offset,
+                entry_count,
+            });
+
+            file_offset += block_size as u64;
+            current_block_start = block_end;
+        }
+
+        Ok((index_directory, global_min_ts, global_max_ts, total_records))
     }
 
     pub fn shutdown(&mut self) -> std::io::Result<()> {

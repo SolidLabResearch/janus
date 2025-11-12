@@ -19,7 +19,7 @@ const SPARSE_INTERVAL: usize = 1000;
 const SEGMENT_BASE_PATH: &str = "data/rdf_benchmark";
 
 fn benchmark_segmented_storage_rdf() -> std::io::Result<()> {
-    // println!("🚀 RDF Segmented Storage Benchmark");
+    // println!("RDF Segmented Storage Benchmark");
     // println!("==================================");
 
     // Clean up and create directories
@@ -43,7 +43,7 @@ fn benchmark_segmented_storage_rdf() -> std::io::Result<()> {
     // storage.record_memory("before_writing");
 
     // Benchmark writing 1 million RDF events
-    // println!("\n📝 Writing 1,000,000 RDF events...");
+    // println!("\nWriting 1,000,000 RDF events...");
     let start_time = Instant::now();
     let base_timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
 
@@ -75,7 +75,7 @@ fn benchmark_segmented_storage_rdf() -> std::io::Result<()> {
     let write_duration = start_time.elapsed();
     let write_throughput = 1_000_000.0 / write_duration.as_secs_f64();
 
-    // println!("✅ Write completed!");
+    // println!("\nWrite completed!");
     // println!("   Duration: {:.3} seconds", write_duration.as_secs_f64());
     // println!("   Throughput: {:.0} events/sec", write_throughput);
 
@@ -84,7 +84,7 @@ fn benchmark_segmented_storage_rdf() -> std::io::Result<()> {
     // storage.record_memory("after_background_flush");
 
     // Benchmark reading different amounts of data
-    // println!("\n🔍 Reading Benchmarks");
+    // println!("\nReading Benchmarks");
     // println!("====================");
 
     let read_sizes = vec![100, 1_000, 10_000, 100_000, 1_000_000];
@@ -120,7 +120,7 @@ fn benchmark_segmented_storage_rdf() -> std::io::Result<()> {
     storage.shutdown()?;
 
     // Print memory statistics
-    // println!("\n📊 Memory Usage Statistics");
+    // println!("\nMemory Usage Statistics");
     // println!("==========================");
     // let memory_stats = storage.get_memory_stats();
     // // println!("Peak memory: {}", MemoryTracker::format_bytes(memory_stats.peak_bytes));
@@ -157,7 +157,7 @@ fn benchmark_segmented_storage_rdf() -> std::io::Result<()> {
     //     }
     // }
 
-    // println!("\n🎉 Benchmark completed successfully!");
+    // println!("\nBenchmark completed successfully!");
     Ok(())
 }
 

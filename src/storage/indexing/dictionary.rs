@@ -142,7 +142,7 @@ mod tests {
         assert_eq!(decoded_event.graph, "http://example.org/graph1");
         assert_eq!(decoded_event.timestamp, 1234567890);
 
-        println!("✅ Clean API test passed!");
+        println!("Clean API test passed!");
         println!(
             "Original: {} {} {} in {} at timestamp {}",
             rdf_event.subject,

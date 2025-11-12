@@ -399,4 +399,4 @@ This project is licensed under the MIT License - see [LICENCE.md](LICENCE.md) fo
 
 ---
 
-Happy coding with Janus! 🚀
+Happy coding with Janus!
