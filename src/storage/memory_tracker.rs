@@ -58,6 +58,7 @@ impl MemoryTracker {
     }
 
     /// Get current memory statistics
+    #[allow(clippy::cast_precision_loss)]
     pub fn get_stats(&self) -> MemoryStats {
         let current = self.current_memory_bytes.load(Ordering::Relaxed);
         let peak = self.peak_memory_bytes.load(Ordering::Relaxed);
@@ -157,12 +158,13 @@ impl MemoryTracker {
     }
 
     #[cfg(target_os = "macos")]
+    #[allow(dead_code)]
     fn get_memory_macos(&self) -> usize {
         use std::mem;
         use std::ptr;
 
         #[repr(C)]
-        struct task_basic_info {
+        struct TaskBasicInfo {
             virtual_size: u32,
             resident_size: u32,
             policy: u32,
@@ -170,25 +172,27 @@ impl MemoryTracker {
         }
 
         extern "C" {
+            #[allow(dead_code)]
             fn mach_task_self() -> u32;
+            #[allow(dead_code)]
             fn task_info(
                 target_task: u32,
                 flavor: u32,
-                task_info_out: *mut task_basic_info,
+                task_info_out: *mut TaskBasicInfo,
                 task_info_outCnt: *mut u32,
             ) -> i32;
         }
 
         const TASK_BASIC_INFO: u32 = 5;
-        let mut info: task_basic_info = unsafe { mem::zeroed() };
-        let mut count = (mem::size_of::<task_basic_info>() / mem::size_of::<u32>()) as u32;
+        let mut info: TaskBasicInfo = unsafe { mem::zeroed() };
+        let mut count = (mem::size_of::<TaskBasicInfo>() / mem::size_of::<u32>()) as u32;
 
         let result = unsafe {
             task_info(
                 mach_task_self(),
                 TASK_BASIC_INFO,
-                &mut info as *mut task_basic_info,
-                &mut count,
+                &raw mut info,
+                &raw mut count,
             )
         };
 
@@ -219,6 +223,7 @@ impl MemoryTracker {
     }
 
     /// Format bytes in human-readable format
+    #[allow(clippy::cast_precision_loss)]
     pub fn format_bytes(bytes: usize) -> String {
         const UNITS: &[&str] = &["B", "KB", "MB", "GB"];
         let mut size = bytes as f64;

@@ -108,6 +108,7 @@ impl StreamingSegmentedStorage {
         self.write(encoded_event)
     }
 
+    #[allow(dead_code)]
     fn should_flush(&self) -> bool {
         let batch_buffer = self.batch_buffer.read().unwrap();
 

@@ -3,6 +3,7 @@ use janus::storage::util::StreamingConfig;
 use std::error::Error;
 use std::time::Instant;
 
+#[allow(clippy::manual_div_ceil)]
 #[derive(Debug)]
 struct BenchmarkResults {
     range_10_percent_times: Vec<f64>,
@@ -10,6 +11,7 @@ struct BenchmarkResults {
     range_100_percent_times: Vec<f64>,
 }
 
+#[allow(clippy::manual_div_ceil)]
 fn main() -> Result<(), Box<dyn Error>> {
     println!("Realistic Range Query Benchmark by Range Size");
     println!("================================================");
@@ -142,12 +144,12 @@ fn run_range_query_benchmark(
 
         // Sensor data - rotating through different sensors
         let sensor = format!(
-            "https://dahcc.idlab.ugent.be/Homelab/SensorsAndActuators/70:ee:50:67:30:{}",
-            format!("{:02x}", (i % 256) as u8)
+            "https://dahcc.idlab.ugent.be/Homelab/SensorsAndActuators/70:ee:50:67:30:{:02x}",
+            (i % 256) as u8
         );
 
         // Property type - rotating through different measurement types
-        let properties = vec![
+        let properties = [
             "org.dyamand.types.common.AtmosphericPressure",
             "org.dyamand.types.common.Temperature",
             "org.dyamand.types.common.Humidity",
@@ -155,7 +157,7 @@ fn run_range_query_benchmark(
         ];
         let property = format!(
             "https://dahcc.idlab.ugent.be/Homelab/SensorsAndActuators/{}",
-            properties[(i % 4) as usize]
+            properties[i % 4]
         );
 
         // Dataset

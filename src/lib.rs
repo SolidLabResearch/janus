@@ -46,6 +46,7 @@
 #![allow(clippy::unused_self)]
 #![allow(clippy::needless_pass_by_value)]
 #![allow(clippy::case_sensitive_file_extension_comparisons)]
+#![allow(clippy::manual_div_ceil)]
 #![allow(clippy::if_not_else)]
 #![allow(clippy::must_use_candidate)]
 #![allow(clippy::redundant_closure_for_method_calls)]

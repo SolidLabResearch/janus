@@ -5,16 +5,20 @@
 use janus::core::Event;
 use janus::indexing::shared::LogWriter;
 use janus::storage::indexing::{dense, sparse};
-use janus::storage::memory_tracker::MemoryTracker;
 use janus::storage::segmented_storage::StreamingSegmentedStorage;
 use janus::storage::util::StreamingConfig;
 use std::fs;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+#[allow(dead_code)]
 const DATA_DIR: &str = "data/benchmark";
+#[allow(dead_code)]
 const LOG_FILE: &str = "data/benchmark/log.dat";
+#[allow(dead_code)]
 const DENSE_INDEX_FILE: &str = "data/benchmark/dense.idx";
+#[allow(dead_code)]
 const SPARSE_INDEX_FILE: &str = "data/benchmark/sparse.idx";
+#[allow(dead_code)]
 const SPARSE_INTERVAL: usize = 1000;
 const SEGMENT_BASE_PATH: &str = "data/rdf_benchmark";
 
@@ -48,7 +52,7 @@ fn benchmark_segmented_storage_rdf() -> std::io::Result<()> {
     let base_timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
 
     for i in 0..1_000_000u64 {
-        let timestamp = base_timestamp + i * 1; // 1ms intervals
+        let timestamp = base_timestamp + i; // 1ms intervals
         let subject = format!("http://example.org/person/person_{}", i % 10000);
         let predicate = match i % 10 {
             0..=3 => "http://example.org/knows",
@@ -73,7 +77,7 @@ fn benchmark_segmented_storage_rdf() -> std::io::Result<()> {
     }
 
     let write_duration = start_time.elapsed();
-    let write_throughput = 1_000_000.0 / write_duration.as_secs_f64();
+    let _write_throughput = 1_000_000.0 / write_duration.as_secs_f64();
 
     // println!("\nWrite completed!");
     // println!("   Duration: {:.3} seconds", write_duration.as_secs_f64());
@@ -100,7 +104,7 @@ fn benchmark_segmented_storage_rdf() -> std::io::Result<()> {
         let results = storage.query_rdf(query_start_ts, query_end_ts)?;
 
         let query_duration = start_time.elapsed();
-        let read_throughput = results.len() as f64 / query_duration.as_secs_f64();
+        let _read_throughput = results.len() as f64 / query_duration.as_secs_f64();
 
         // println!("   Results found: {}", results.len());
         // println!("   Query time: {:.3} ms", query_duration.as_millis());
@@ -161,6 +165,7 @@ fn benchmark_segmented_storage_rdf() -> std::io::Result<()> {
     Ok(())
 }
 
+#[allow(dead_code)]
 fn setup_data(number_records: u64) -> std::io::Result<()> {
     let _ = fs::remove_dir_all(DATA_DIR);
     fs::create_dir_all(DATA_DIR)?;
@@ -183,17 +188,18 @@ fn setup_data(number_records: u64) -> std::io::Result<()> {
     Ok(())
 }
 
+#[allow(dead_code)]
 fn benchmark_indexing() -> std::io::Result<()> {
     // println!("Indexing Benchmark");
 
     let start = Instant::now();
     dense::build_dense_index(LOG_FILE, DENSE_INDEX_FILE)?;
-    let dense_time = start.elapsed();
+    let _dense_time = start.elapsed();
     // println!("Dense index build time: {:.3} ms", dense_time.as_secs_f64() * 1000.0);
 
     let start = Instant::now();
     sparse::build_sparse_index(LOG_FILE, SPARSE_INDEX_FILE, &SPARSE_INTERVAL)?;
-    let sparse_time = start.elapsed();
+    let _sparse_time = start.elapsed();
     // println!("Sparse index build time: {:.3} ms", sparse_time.as_secs_f64() * 1000.0);
 
     let dense_reader = dense::DenseIndexReader::open(DENSE_INDEX_FILE)?;
@@ -210,6 +216,7 @@ fn benchmark_indexing() -> std::io::Result<()> {
     Ok(())
 }
 
+#[allow(dead_code)]
 fn benchmark_queries() -> std::io::Result<()> {
     // println!("Query Benchmark");
     let dense_reader = dense::DenseIndexReader::open(DENSE_INDEX_FILE)?;
@@ -223,7 +230,7 @@ fn benchmark_queries() -> std::io::Result<()> {
         (0u64, 1000000u64, "1M records"),
     ];
 
-    for (timestamp_start, timestamp_end, description) in query_ranges {
+    for (timestamp_start, timestamp_end, _description) in query_ranges {
         // println!("\n Query: {} from {} to {}", description, timestamp_start, timestamp_end);
 
         let start = Instant::now();
@@ -297,7 +304,6 @@ fn benchmark_storage_performance() -> std::io::Result<()> {
             sparse_interval: 100,
             entries_per_index_block: 512,
             segment_base_path: format!("./benchmark_data_{}", num_records),
-            ..Default::default()
         };
 
         // Clean up any existing data
@@ -329,7 +335,7 @@ fn benchmark_storage_performance() -> std::io::Result<()> {
         }
 
         let write_duration = write_start.elapsed();
-        let write_throughput = num_records as f64 / write_duration.as_secs_f64();
+        let _write_throughput = num_records as f64 / write_duration.as_secs_f64();
 
         // println!("Write Performance:");
         // println!("  Duration: {:.3}s", write_duration.as_secs_f64());
@@ -341,7 +347,7 @@ fn benchmark_storage_performance() -> std::io::Result<()> {
 
         // println!("\nQuery Performance:");
 
-        for (fraction, description) in query_ranges {
+        for (fraction, _description) in query_ranges {
             let query_count = 100.min(num_records / 10); // Run 100 queries or 10% of records, whichever is smaller
             let mut query_times = Vec::new();
             let mut total_records_read = 0;
@@ -365,16 +371,16 @@ fn benchmark_storage_performance() -> std::io::Result<()> {
             }
 
             let avg_query_time = query_times.iter().sum::<f64>() / query_times.len() as f64;
-            let queries_per_sec = 1.0 / avg_query_time;
+            let _queries_per_sec = 1.0 / avg_query_time;
             let total_query_time = query_times.iter().sum::<f64>();
-            let records_per_sec = if total_query_time > 0.0 {
+            let _records_per_sec = if total_query_time > 0.0 {
                 total_records_read as f64 / total_query_time
             } else {
                 0.0
             };
-            let avg_records_per_query = total_records_read as f64 / query_count as f64;
-            let min_time = query_times.iter().cloned().fold(f64::INFINITY, f64::min);
-            let max_time = query_times.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+            let _avg_records_per_query = total_records_read as f64 / query_count as f64;
+            let _min_time = query_times.iter().cloned().fold(f64::INFINITY, f64::min);
+            let _max_time = query_times.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
 
             // println!("  {} queries ({}):", description, query_count);
             // println!("    Avg query time: {:.3}ms", avg_query_time * 1000.0);

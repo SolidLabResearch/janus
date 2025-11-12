@@ -3,12 +3,18 @@ use crate::storage::indexing::{dense, sparse};
 use std::fs;
 use std::time::Instant;
 
+#[allow(dead_code)]
 const DATA_DIR: &str = "data/benchmark";
+#[allow(dead_code)]
 const LOG_FILE: &str = "data/benchmark/log.dat";
+#[allow(dead_code)]
 const DENSE_INDEX_FILE: &str = "data/benchmark/dense.idx";
+#[allow(dead_code)]
 const SPARSE_INDEX_FILE: &str = "data/benchmark/sparse.idx";
+#[allow(dead_code)]
 const SPARSE_INTERVAL: usize = 1000;
 
+#[allow(dead_code)]
 fn setup_data(number_records: u64) -> std::io::Result<()> {
     let _ = fs::remove_dir_all(DATA_DIR);
     fs::create_dir_all(DATA_DIR)?;
@@ -31,6 +37,8 @@ fn setup_data(number_records: u64) -> std::io::Result<()> {
     Ok(())
 }
 
+#[allow(dead_code)]
+#[allow(clippy::cast_precision_loss)]
 fn benchmark_indexing() -> std::io::Result<()> {
     println!("Indexing Benchmark");
 
@@ -58,6 +66,7 @@ fn benchmark_indexing() -> std::io::Result<()> {
     Ok(())
 }
 
+#[allow(dead_code)]
 fn benchmark_queries() -> std::io::Result<()> {
     println!("Query Benchmark");
     let dense_reader = dense::DenseIndexReader::open(DENSE_INDEX_FILE)?;
@@ -67,8 +76,8 @@ fn benchmark_queries() -> std::io::Result<()> {
         (0u64, 100u64, "100 records"),
         (5000u64, 5100u64, "100 records (mid-range)"),
         (0u64, 10000u64, "10K records"),
-        (0u64, 100000u64, "100K records"),
-        (0u64, 1000000u64, "1M records"),
+        (0u64, 100_000u64, "100K records"),
+        (0u64, 1_000_000u64, "1M records"),
     ];
 
     for (timestamp_start, timestamp_end, description) in query_ranges {
@@ -111,6 +120,7 @@ fn benchmark_queries() -> std::io::Result<()> {
     Ok(())
 }
 
+#[allow(dead_code)]
 fn main() -> std::io::Result<()> {
     println!("RDF Indexing Benchmark : Dense vs Sparse");
     println!("Setting up data...");

@@ -137,12 +137,12 @@ fn run_single_benchmark(
 
         // Sensor data - rotating through different sensors
         let sensor = format!(
-            "https://dahcc.idlab.ugent.be/Homelab/SensorsAndActuators/70:ee:50:67:30:{}",
-            format!("{:02x}", (i % 256) as u8)
+            "https://dahcc.idlab.ugent.be/Homelab/SensorsAndActuators/70:ee:50:67:30:{:02x}",
+            (i % 256) as u8
         );
 
         // Property type - rotating through different measurement types
-        let properties = vec![
+        let properties = [
             "org.dyamand.types.common.AtmosphericPressure",
             "org.dyamand.types.common.Temperature",
             "org.dyamand.types.common.Humidity",

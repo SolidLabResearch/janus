@@ -174,7 +174,7 @@ fn test_dictionary_persistence() -> std::io::Result<()> {
 
     // Create and populate dictionary
     let mut dict = Dictionary::new();
-    let uris = vec![
+    let uris = [
         "https://example.org/resource/event001",
         "http://www.w3.org/ns/saref#hasValue",
         "http://www.w3.org/2001/XMLSchema#dateTime",
@@ -251,7 +251,7 @@ fn test_iot_sensor_events_with_dictionary() -> std::io::Result<()> {
     let mut dict = Dictionary::new();
 
     // Define common IoT RDF predicates and graph URIs
-    let predicates = vec![
+    let predicates = [
         "http://www.w3.org/ns/saref#hasTimestamp",
         "http://www.w3.org/ns/saref#hasValue",
         "http://www.w3.org/ns/ssn#observedBy",
@@ -318,7 +318,7 @@ fn test_sparse_index_with_dictionary_integration() -> std::io::Result<()> {
 
     // Define RDF components
     let predicates =
-        vec!["http://www.w3.org/ns/saref#hasTimestamp", "http://www.w3.org/ns/saref#hasValue"];
+        ["http://www.w3.org/ns/saref#hasTimestamp", "http://www.w3.org/ns/saref#hasValue"];
 
     let predicate_ids: Vec<u32> = predicates.iter().map(|p| dict.encode(p)).collect();
 
@@ -406,7 +406,7 @@ fn test_rdf_namespace_reuse() {
     let mut dict = Dictionary::new();
 
     // Common RDF namespace URIs that should be reused
-    let common_namespaces = vec![
+    let common_namespaces = [
         "http://www.w3.org/1999/02/22-rdf-syntax-ns#",
         "http://www.w3.org/2000/01/rdf-schema#",
         "http://www.w3.org/2001/XMLSchema#",
@@ -513,7 +513,7 @@ fn test_dictionary_space_savings() {
     let mut dict = Dictionary::new();
 
     // Calculate space used by raw URIs
-    let uris = vec![
+    let uris = [
         "https://solid.ti.rw.fau.de/public/ns/stream#event001",
         "http://www.w3.org/ns/saref#hasTimestamp",
         "2025-11-05T10:30:00Z",

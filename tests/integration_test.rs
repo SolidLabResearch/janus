@@ -8,7 +8,7 @@ use janus::{Error, Result};
 #[test]
 fn test_basic_functionality() {
     // TODO: Add integration tests
-    assert!(true);
+    // assert!(true); // Removed as it's always true
 }
 
 #[test]

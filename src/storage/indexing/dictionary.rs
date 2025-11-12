@@ -82,14 +82,14 @@ mod tests {
         let graph_id = dict.encode("http://example.org/graph1");
 
         println!("Encoded IDs:");
-        println!("Subject: {} -> {}", "http://example.org/person/Alice", subject_id);
-        println!("Predicate: {} -> {}", "http://example.org/knows", predicate_id);
-        println!("Object: {} -> {}", "http://example.org/person/Bob", object_id);
-        println!("Graph: {} -> {}", "http://example.org/graph1", graph_id);
+        println!("Subject: http://example.org/person/Alice -> {}", subject_id);
+        println!("Predicate: http://example.org/knows -> {}", predicate_id);
+        println!("Object: http://example.org/person/Bob -> {}", object_id);
+        println!("Graph: http://example.org/graph1 -> {}", graph_id);
 
         // Create an event
         let event = Event {
-            timestamp: 1234567890,
+            timestamp: 1_234_567_890,
             subject: subject_id,
             predicate: predicate_id,
             object: object_id,
@@ -122,7 +122,7 @@ mod tests {
 
         // Test the clean API - user provides URIs directly
         let rdf_event = RDFEvent::new(
-            1234567890,
+            1_234_567_890,
             "http://example.org/person/Alice",
             "http://example.org/knows",
             "http://example.org/person/Bob",
@@ -140,7 +140,7 @@ mod tests {
         assert_eq!(decoded_event.predicate, "http://example.org/knows");
         assert_eq!(decoded_event.object, "http://example.org/person/Bob");
         assert_eq!(decoded_event.graph, "http://example.org/graph1");
-        assert_eq!(decoded_event.timestamp, 1234567890);
+        assert_eq!(decoded_event.timestamp, 1_234_567_890);
 
         println!("Clean API test passed!");
         println!(
