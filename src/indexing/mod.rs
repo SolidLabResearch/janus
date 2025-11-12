@@ -1,6 +1,3 @@
-#[doc=""]
+//! Legacy indexing utilities - most functionality moved to storage::indexing
+
 pub mod shared;
-#[doc=""]
-pub mod dense;
-#[doc=""]
-pub mod sparse;

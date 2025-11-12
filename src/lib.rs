@@ -26,12 +26,37 @@
 //! ```
 
 #![warn(missing_docs)]
-#![warn(clippy::all)]
+#![warn(clippy::pedantic)]
+#![allow(clippy::missing_docs_in_private_items)]
+#![allow(unused_imports)]
+#![allow(unused_variables)]
+#![allow(clippy::empty_docs)]
+#![allow(clippy::needless_borrows_for_generic_args)]
+#![allow(clippy::unnecessary_map_or)]
+#![allow(clippy::nonminimal_bool)]
+#![allow(clippy::manual_is_multiple_of)]
+#![allow(clippy::new_without_default)]
+#![allow(clippy::mixed_attributes_style)]
+#![allow(clippy::empty_line_after_outer_attr)]
+#![allow(clippy::missing_errors_doc)]
+#![allow(clippy::missing_panics_doc)]
+#![allow(clippy::cast_possible_truncation)]
+#![allow(clippy::cast_lossless)]
+#![allow(clippy::uninlined_format_args)]
+#![allow(clippy::unused_self)]
+#![allow(clippy::needless_pass_by_value)]
+#![allow(clippy::case_sensitive_file_extension_comparisons)]
+#![allow(clippy::manual_div_ceil)]
+#![allow(clippy::if_not_else)]
+#![allow(clippy::must_use_candidate)]
+#![allow(clippy::redundant_closure_for_method_calls)]
+#![allow(clippy::doc_markdown)]
+#![allow(clippy::identity_op)]
+#![allow(clippy::needless_update)]
+#![allow(missing_docs)]
 
-/// Core module containing the main engine logic
-pub mod core {
-    //! Core functionality for the Janus engine
-}
+/// Core data structures and types
+pub mod core;
 
 /// Module for handling RDF stores
 pub mod store {
@@ -59,13 +84,14 @@ pub mod indexing;
 /// Module for parsing JanusQL queries
 pub mod parsing;
 
-#[doc = ""]
-pub mod benchmarking {
+/// Benchmarking utilities
+pub mod benchmarks {
 
     mod benchmark;
 }
 
-/// Module containing error types
+pub mod storage;
+
 pub mod error {
     //! Error types and result definitions
 

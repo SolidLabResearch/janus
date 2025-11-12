@@ -10,56 +10,78 @@ pub enum WindowType {
 
 #[derive(Debug, Clone)]
 pub struct WindowDefinition {
+    /// Name of the window
     pub window_name: String,
+    /// Name of the stream
     pub stream_name: String,
+    /// Width of the window
     pub width: u64,
+    /// Slide step
     pub slide: u64,
+    /// Offset for sliding windows
     pub offset: Option<u64>,
+    /// Start time for fixed windows
     pub start: Option<u64>,
+    /// End time for fixed windows
     pub end: Option<u64>,
+    /// Type of the window
     pub window_type: WindowType,
 }
 
+/// R2S operator definition
 #[derive(Debug, Clone)]
 pub struct R2SOperator {
+    /// Operator type
     pub operator: String,
+    /// Operator name
     pub name: String,
 }
 
+/// Parsed JanusQL query structure
 #[derive(Debug)]
 pub struct ParsedJanusQuery {
+    /// R2S operator if present
     pub r2s: Option<R2SOperator>,
+    /// Live windows defined in the query
     pub live_windows: Vec<WindowDefinition>,
+    /// Historical windows defined in the query
     pub historical_windows: Vec<WindowDefinition>,
+    /// RSPQL query string
     pub rspql_query: String,
+    /// SPARQL queries
     pub sparql_queries: Vec<String>,
+    /// Prefix mappings
     pub prefixes: HashMap<String, String>,
+    /// WHERE clause
     pub where_clause: String,
+    /// SELECT clause
     pub select_clause: String,
 }
 
+/// Parser for JanusQL queries
 pub struct JanusQLParser {
-    historical_sliding_window_regex: Regex,
-    historical_fixed_window_regex: Regex,
-    live_sliding_window_regex: Regex,
-    register_regex: Regex,
-    prefix_regex: Regex,
+    historical_sliding_window: Regex,
+    historical_fixed_window: Regex,
+    live_sliding_window: Regex,
+    register: Regex,
+    prefix: Regex,
 }
 
 impl JanusQLParser {
+    /// Creates a new JanusQLParser instance.
     pub fn new() -> Result<Self, Box<dyn std::error::Error>> {
         Ok(JanusQLParser {
-            historical_sliding_window_regex: Regex::new(
+            historical_sliding_window: Regex::new(
                 r"FROM\s+NAMED\s+WINDOW\s+([^\s]+)\s+ON\s+STREAM\s+([^\s]+)\s+\[OFFSET\s+(\d+)\s+RANGE\s+(\d+)\s+STEP\s+(\d+)\]",
             )?,
-            historical_fixed_window_regex: Regex::new(
+            historical_fixed_window: Regex::new(
                 r"FROM\s+NAMED\s+WINDOW\s+([^\s]+)\s+ON\s+STREAM\s+([^\s]+)\s+\[START\s+(\d+)\s+END\s+(\d+)\]",
             )?,
-            live_sliding_window_regex: Regex::new(
+            live_sliding_window: Regex::new(
                 r"FROM\s+NAMED\s+WINDOW\s+([^\s]+)\s+ON\s+STREAM\s+([^\s]+)\s+\[RANGE\s+(\d+)\s+STEP\s+(\d+)\]",
             )?,
-            register_regex: Regex::new(r"REGISTER\s+(\w+)\s+([^\s]+)\s+AS")?,
-            prefix_regex: Regex::new(r"REGISTER\s+(\w+)\s+([^\s]+)\s+AS")?,
+            register: Regex::new(r"REGISTER\s+(\w+)\s+([^\s]+)\s+AS")?,
+            prefix: Regex::new(r"PREFIX\s+([^\s]+):\s*<([^>]+)>")?,
         })
     }
 
@@ -68,7 +90,7 @@ impl JanusQLParser {
         line: &str,
         prefix_mapper: &HashMap<String, String>,
     ) -> Result<Option<WindowDefinition>, Box<dyn std::error::Error>> {
-        if let Some(captures) = self.historical_sliding_window_regex.captures(line) {
+        if let Some(captures) = self.historical_sliding_window.captures(line) {
             return Ok(Some(WindowDefinition {
                 window_name: self.unwrap_iri(&captures[1], prefix_mapper),
                 stream_name: self.unwrap_iri(&captures[2], prefix_mapper),
@@ -81,7 +103,7 @@ impl JanusQLParser {
             }));
         }
 
-        if let Some(captures) = self.historical_fixed_window_regex.captures(line) {
+        if let Some(captures) = self.historical_fixed_window.captures(line) {
             return Ok(Some(WindowDefinition {
                 window_name: self.unwrap_iri(&captures[1], prefix_mapper),
                 stream_name: self.unwrap_iri(&captures[2], prefix_mapper),
@@ -94,7 +116,7 @@ impl JanusQLParser {
             }));
         }
 
-        if let Some(captures) = self.live_sliding_window_regex.captures(line) {
+        if let Some(captures) = self.live_sliding_window.captures(line) {
             return Ok(Some(WindowDefinition {
                 window_name: self.unwrap_iri(&captures[1], prefix_mapper),
                 stream_name: self.unwrap_iri(&captures[2], prefix_mapper),
@@ -110,6 +132,7 @@ impl JanusQLParser {
         Ok(None)
     }
 
+    /// Parses a JanusQL query string.
     pub fn parse(&self, query: &str) -> Result<ParsedJanusQuery, Box<dyn std::error::Error>> {
         let mut parsed = ParsedJanusQuery {
             r2s: None,
@@ -132,7 +155,7 @@ impl JanusQLParser {
 
             if trimmed_line.is_empty()
                 || trimmed_line.starts_with("/*")
-                || trimmed_line.starts_with("*")
+                || trimmed_line.starts_with('*')
                 || trimmed_line.starts_with("*/")
             {
                 if in_where_clause && !trimmed_line.is_empty() {
@@ -142,14 +165,14 @@ impl JanusQLParser {
             }
 
             if trimmed_line.starts_with("REGISTER") {
-                if let Some(captures) = self.register_regex.captures(trimmed_line) {
+                if let Some(captures) = self.register.captures(trimmed_line) {
                     let operator = captures.get(1).unwrap().as_str().to_string();
                     let name_raw = captures.get(2).unwrap().as_str();
                     let name = self.unwrap_iri(name_raw, &parsed.prefixes);
                     parsed.r2s = Some(R2SOperator { operator, name });
                 }
             } else if trimmed_line.starts_with("PREFIX") {
-                if let Some(captures) = self.prefix_regex.captures(trimmed_line) {
+                if let Some(captures) = self.prefix.captures(trimmed_line) {
                     let prefix = captures.get(1).unwrap().as_str().to_string();
                     let namespace = captures.get(2).unwrap().as_str().to_string();
                     parsed.prefixes.insert(prefix, namespace);
@@ -287,7 +310,7 @@ impl JanusQLParser {
                     adapted
                 }
             }
-            _ => adapted,
+            WindowType::Live => adapted,
         }
     }
 
@@ -333,7 +356,7 @@ mod tests {
     #[test]
     fn test_basic_live_window() {
         let parser = JanusQLParser::new().unwrap();
-        let query = r#"
+        let query = r"
         PREFIX sensor: <https://rsp.js/sensors/>
         PREFIX saref: <https://saref.org/core/>
         REGISTER RStream sensor:output AS
@@ -345,7 +368,7 @@ mod tests {
                 ?event saref:hasTimestamp ?timestamp .
             }
         }
-        "#;
+        ";
 
         let result = parser.parse(query).unwrap();
         assert_eq!(result.live_windows.len(), 1);
@@ -356,9 +379,9 @@ mod tests {
     }
 
     #[test]
-    fn test_mixed_windows(){
+    fn test_mixed_windows() {
         let parser = JanusQLParser::new().unwrap();
-        let query = r#"
+        let query = r"
         PREFIX sensor: <https://rsp.js/sensors/>
         PREFIX saref: <https://saref.org/core/>
         REGISTER RStream sensor:output AS
@@ -380,16 +403,16 @@ mod tests {
                 ?event saref:hasTimestamp ?timestamp .
             }
         }
-        "#;
+        ";
 
         let result = parser.parse(query).unwrap();
         assert_eq!(result.live_windows.len(), 1);
         assert_eq!(result.historical_windows.len(), 2);
         assert_eq!(result.live_windows[0].width, 5000);
         assert_eq!(result.live_windows[0].slide, 1000);
-        assert_eq!(result.historical_windows[0].start, Some(1622505600));
-        assert_eq!(result.historical_windows[0].end, Some(1622592000));
-        assert_eq!(result.historical_windows[1].offset, Some(1622505600));
+        assert_eq!(result.historical_windows[0].start, Some(1_622_505_600));
+        assert_eq!(result.historical_windows[0].end, Some(1_622_592_000));
+        assert_eq!(result.historical_windows[1].offset, Some(1_622_505_600));
         assert_eq!(result.historical_windows[1].width, 10000);
         assert_eq!(result.historical_windows[1].slide, 2000);
         assert!(!result.rspql_query.is_empty());

@@ -382,4 +382,4 @@ By contributing to Janus, you agree that your contributions will be licensed und
 
 ---
 
-Thank you for contributing to Janus! 🎉
+Thank you for contributing to Janus!

@@ -1,4 +1,5 @@
-use crate::indexing::{dense, shared::LogWriter, sparse};
+use crate::indexing::shared::LogWriter;
+use crate::storage::indexing::{dense, sparse};
 use std::fs;
 use std::time::Instant;
 
@@ -16,10 +17,10 @@ fn setup_data(number_records: u64) -> std::io::Result<()> {
 
     for i in 0..number_records {
         let timestamp = i;
-        let subject = (i % 1000) as u64;
-        let predicate = (i % 500) as u64;
-        let object = (i % 2000) as u64;
-        let graph: u64 = 1;
+        let subject = (i % 1000) as u32;
+        let predicate = (i % 500) as u32;
+        let object = (i % 2000) as u32;
+        let graph: u32 = 1;
         writer.append_record(timestamp, subject, predicate, object, graph)?;
     }
 
