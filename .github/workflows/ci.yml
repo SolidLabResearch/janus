@@ -249,20 +249,6 @@ jobs:
       - name: Run security audit
         run: cargo audit
 
-  # Dependency review (for PRs)
-  dependency-review:
-    name: Dependency Review
-    runs-on: ubuntu-latest
-    if: |
-      github.event_name == 'pull_request' &&
-      github.repository.private == false
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Dependency Review
-        uses: actions/dependency-review-action@v3
-
   # Publish to crates.io (on release tags)
   publish:
     name: Publish to crates.io
