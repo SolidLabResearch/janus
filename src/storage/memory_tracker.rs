@@ -187,14 +187,8 @@ impl MemoryTracker {
         let mut info: TaskBasicInfo = unsafe { mem::zeroed() };
         let mut count = (mem::size_of::<TaskBasicInfo>() / mem::size_of::<u32>()) as u32;
 
-        let result = unsafe {
-            task_info(
-                mach_task_self(),
-                TASK_BASIC_INFO,
-                &raw mut info,
-                &raw mut count,
-            )
-        };
+        let result =
+            unsafe { task_info(mach_task_self(), TASK_BASIC_INFO, &raw mut info, &raw mut count) };
 
         if result == 0 {
             info.resident_size as usize
