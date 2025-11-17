@@ -78,17 +78,8 @@ pub mod config {
     //! Configuration structures and utilities
 }
 
-/// Module for indexing functionality
-pub mod indexing;
-
 /// Module for parsing JanusQL queries
 pub mod parsing;
-
-/// Benchmarking utilities
-pub mod benchmarks {
-
-    mod benchmark;
-}
 
 pub mod storage;
 

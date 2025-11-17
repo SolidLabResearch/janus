@@ -29,9 +29,6 @@ Cargo.lock
 coverage/
 tarpaulin-report.html
 
-# Benchmark results
-benches/results/
-
 # Documentation build
 target/doc/
 
@@ -45,7 +42,6 @@ Thumbs.db
 
 # RDF Store data
 fuseki-config/databases/
-*.lock
 
 # Docker volumes
 *.db

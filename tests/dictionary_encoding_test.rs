@@ -23,11 +23,43 @@
 //! - Datatype ID → "http://www.w3.org/2001/XMLSchema#double" (if needed)
 
 use janus::core::encoding::{decode_record, encode_record, RECORD_SIZE};
-use janus::indexing::shared::LogWriter;
 use janus::storage::indexing::dictionary::Dictionary;
 use janus::storage::indexing::sparse::{build_sparse_index, SparseReader};
-use std::fs;
+use std::fs::{self, File};
+use std::io::Write;
 use std::path::Path;
+
+/// Simple log writer for test purposes (legacy indexing module was deleted)
+struct LogWriter {
+    log_file: File,
+    record_count: u64,
+}
+
+impl LogWriter {
+    fn create(path: &str) -> std::io::Result<Self> {
+        let log_file = File::create(path)?;
+        Ok(Self { log_file, record_count: 0 })
+    }
+
+    fn append_record(
+        &mut self,
+        timestamp: u64,
+        subject: u32,
+        predicate: u32,
+        object: u32,
+        graph: u32,
+    ) -> std::io::Result<()> {
+        let mut buffer = [0u8; RECORD_SIZE];
+        encode_record(&mut buffer, timestamp, subject, predicate, object, graph);
+        self.log_file.write_all(&buffer)?;
+        self.record_count += 1;
+        Ok(())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.log_file.flush()
+    }
+}
 
 #[test]
 fn test_rdf_syntax_to_dictionary_mapping() {

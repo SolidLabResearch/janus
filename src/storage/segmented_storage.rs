@@ -28,6 +28,7 @@ pub struct StreamingSegmentedStorage {
     config: StreamingConfig,
 }
 
+// Implementation of the Segmented Storage System with Two-Level Indexing and Background Flushing to store the RDF Stream events.
 impl StreamingSegmentedStorage {
     #[doc = ""]
     pub fn new(config: StreamingConfig) -> std::io::Result<Self> {
@@ -51,7 +52,7 @@ impl StreamingSegmentedStorage {
         Ok(storage)
     }
 
-    #[doc = ""]
+    #[doc = "Start the background flushing thread for the storage system."]
     pub fn start_background_flushing(&mut self) {
         let batch_buffer_clone = Arc::clone(&self.batch_buffer);
         let segments_clone = Arc::clone(&self.segments);
@@ -70,6 +71,7 @@ impl StreamingSegmentedStorage {
         self.flush_handle = Some(handle);
     }
 
+    // Write an event into the storage system
     pub fn write(&self, event: Event) -> std::io::Result<()> {
         let event_size = std::mem::size_of::<Event>();
 
@@ -108,25 +110,12 @@ impl StreamingSegmentedStorage {
         self.write(encoded_event)
     }
 
-    #[allow(dead_code)]
-    fn should_flush(&self) -> bool {
-        let batch_buffer = self.batch_buffer.read().unwrap();
-
-        batch_buffer.events.len() >= self.config.max_batch_events.try_into().unwrap()
-            || batch_buffer.total_bytes > self.config.max_batch_bytes
-            || batch_buffer.oldest_timestamp_bound.map_or(false, |oldest| {
-                let current_timestamp = Self::current_timestamp();
-
-                // Use saturating subtraction to avoid underflow if oldest > current_timestamp
-                current_timestamp.saturating_sub(oldest)
-                    >= self.config.max_batch_age_seconds * 1_000
-            })
-    }
-
+    // Get the current timestamp in milliseconds since UNIX_EPOCH
     fn current_timestamp() -> u64 {
         SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64
     }
 
+    // Flush the current batch buffer to a new segment
     fn flush_batch_buffer_to_segment(&self) -> std::io::Result<()> {
         // Automatically extract events from the batch buffer.
 
@@ -153,6 +142,7 @@ impl StreamingSegmentedStorage {
         Ok(())
     }
 
+    /// Create a segment with two-level indexing from the given events
     fn create_segment_with_two_level_index(
         &self,
         mut events: Vec<Event>,
@@ -230,6 +220,7 @@ impl StreamingSegmentedStorage {
         })
     }
 
+    /// Flush an index block to the index file
     fn flush_index_block(
         &self,
         index_file: &mut BufWriter<std::fs::File>,
@@ -240,6 +231,7 @@ impl StreamingSegmentedStorage {
         Self::flush_index_block_static(index_file, entries, min_ts, max_ts)
     }
 
+    // Query events within a timestamp range from the storage system but result in encoded Events and not RDFEvents.
     pub fn query(&self, start_timestamp: u64, end_timestamp: u64) -> std::io::Result<Vec<Event>> {
         let mut results = Vec::new();
 
@@ -256,7 +248,6 @@ impl StreamingSegmentedStorage {
         }
 
         // Then querying the relevant segment with a two level indexing
-
         {
             let segments = self.segments.read().unwrap();
 
@@ -285,6 +276,7 @@ impl StreamingSegmentedStorage {
         Ok(encoded_events.into_iter().map(|event| event.decode(&dict)).collect())
     }
 
+    // Query a segment using two-level indexing
     fn query_segment_two_level(
         &self,
         segment: &EnhancedSegmentMetadata,
@@ -310,6 +302,7 @@ impl StreamingSegmentedStorage {
             let sparse_entries =
                 self.load_relevant_index_blocks(&segment.index_path, &relevant_blocks)?;
 
+            // If no entries loaded, return empty result
             if sparse_entries.is_empty() {
                 return Ok(Vec::new());
             }
@@ -332,6 +325,7 @@ impl StreamingSegmentedStorage {
         }
     }
 
+    // Load only the relevant index blocks from disk
     fn load_relevant_index_blocks(
         &self,
         index_path: &str,
@@ -360,6 +354,7 @@ impl StreamingSegmentedStorage {
         Ok(sparse_entries)
     }
 
+    // Scan data file from a given offset to retrieve events within the timestamp range
     fn scan_data_from_offset(
         &self,
         data_path: &str,
@@ -387,6 +382,7 @@ impl StreamingSegmentedStorage {
         Ok(results)
     }
 
+    // Check if a segment overlaps with the given timestamp range
     fn segment_overlaps(
         &self,
         segment: &EnhancedSegmentMetadata,
@@ -396,6 +392,9 @@ impl StreamingSegmentedStorage {
         segment.start_timstamp <= end_ts && segment.end_timestamp >= start_ts
     }
 
+    // Start the background flush loop that periodically checks and flushes the batch buffer if needed.
+    // This runs in a separate thread and checks the flush conditions based on the configuration.
+    // Good for high-throughput scenarios where synchronous flushing may be a bottleneck as this runs in the background asynchronously.
     fn background_flush_loop(
         batch_buffer: Arc<RwLock<BatchBuffer>>,
         segments: Arc<RwLock<Vec<EnhancedSegmentMetadata>>>,
@@ -430,6 +429,8 @@ impl StreamingSegmentedStorage {
         }
     }
 
+    // Flush the batch buffer to a new segment in the background thread.
+    // This function is called by the background flush loop.
     fn flush_background(
         batch_buffer: Arc<RwLock<BatchBuffer>>,
         segments: Arc<RwLock<Vec<EnhancedSegmentMetadata>>>,
@@ -595,6 +596,7 @@ impl StreamingSegmentedStorage {
         Ok(())
     }
 
+    // Loading the index directory from an existing index file on disk
     fn load_index_directory_from_file(
         index_path: &str,
     ) -> std::io::Result<(Vec<IndexBlock>, u64, u64, u64)> {
@@ -660,6 +662,7 @@ impl StreamingSegmentedStorage {
         Ok((index_directory, global_min_ts, global_max_ts, total_records))
     }
 
+    // Shutdown the storage system gracefully, ensuring all data is flushed to disk.
     pub fn shutdown(&mut self) -> std::io::Result<()> {
         *self.shutdown_signal.lock().unwrap() = true;
 
@@ -673,10 +676,12 @@ impl StreamingSegmentedStorage {
         Ok(())
     }
 
+    // Serialize an event to fixed-size byte array
     fn serialize_event_to_fixed_size(&self, event: &Event) -> Vec<u8> {
         Self::serialize_event_to_fixed_size_static(event)
     }
 
+    // Static version of serialize_event_to_fixed_size for use in static contexts
     fn serialize_event_to_fixed_size_static(event: &Event) -> Vec<u8> {
         let mut record = [0u8; RECORD_SIZE];
         encode_record(
@@ -690,6 +695,7 @@ impl StreamingSegmentedStorage {
         record.to_vec()
     }
 
+    // Static version of flush_index_block for use in static contexts
     fn flush_index_block_static(
         index_file: &mut BufWriter<std::fs::File>,
         entries: &[(u64, u64)],
@@ -710,7 +716,7 @@ impl StreamingSegmentedStorage {
             entry_count: entries.len() as u32,
         })
     }
-
+    // Generate a unique segment ID based on the current timestamp
     fn generate_segment_id() -> u64 {
         SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64
     }
