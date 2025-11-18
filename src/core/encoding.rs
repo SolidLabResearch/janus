@@ -33,6 +33,7 @@ pub fn decode_record(buffer: &[u8; RECORD_SIZE]) -> (u64, u32, u32, u32, u32) {
     (timestamp, subject, predicate, object, graph)
 }
 
+/// Implement encoding and decoding methods for RDFEvent and Event to facilitate conversions and byte serialization.
 impl RDFEvent {
     /// Encode this RDF event to an internal Event using a dictionary
     pub fn encode(&self, dict: &mut Dictionary) -> Event {
@@ -46,6 +47,7 @@ impl RDFEvent {
     }
 }
 
+/// Implement methods for the internal Event struct for decoding and byte serialization.
 impl Event {
     /// Decode this internal Event to an RDFEvent using a dictionary
     pub fn decode(&self, dict: &Dictionary) -> RDFEvent {

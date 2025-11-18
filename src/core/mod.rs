@@ -12,7 +12,7 @@ pub struct Event {
     pub graph: u32,     // 4 bytes - dictionary-encoded (usually <100 unique)
 }
 
-/// User-facing RDF event with URI strings
+/// User-facing RDF event with URI strings which is presented to client requesting for the data.
 #[derive(Debug, Clone)]
 pub struct RDFEvent {
     pub timestamp: u64,
@@ -22,6 +22,7 @@ pub struct RDFEvent {
     pub graph: String,
 }
 
+/// Implement methods for RDFEvent struct.
 impl RDFEvent {
     pub fn new(timestamp: u64, subject: &str, predicate: &str, object: &str, graph: &str) -> Self {
         Self {
