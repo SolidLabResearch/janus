@@ -15,6 +15,60 @@ Janus achieves high-throughput RDF stream processing with dictionary encoding an
 
 For detailed benchmark results, see [BENCHMARK_RESULTS.md](./BENCHMARK_RESULTS.md).
 
+## Development
+
+### Prerequisites
+
+- Rust (stable toolchain)
+- Cargo
+
+### Building
+
+```bash
+# Debug build
+make build
+
+# Release build (optimized)
+make release
+```
+
+### Testing
+
+```bash
+# Run all tests
+make test
+
+# Run tests with verbose output
+make test-verbose
+```
+
+### Code Quality
+
+Before pushing to the repository, run the CI/CD checks locally:
+
+```bash
+# Run all CI/CD checks (formatting, linting, tests, build)
+make ci-check
+
+# Or use the script directly
+./ci-check.sh
+```
+
+This will run:
+- ✅ **rustfmt** - Code formatting check
+- ✅ **clippy** - Lint checks with warnings as errors
+- ✅ **tests** - Full test suite
+- ✅ **build** - Compilation check
+
+Individual checks can also be run:
+
+```bash
+make fmt        # Format code
+make fmt-check  # Check formatting
+make lint       # Run Clippy
+make check      # Run formatting and linting checks
+```
+
 ## Licence 
 
 This code is copyrighted by Ghent University - imec and released under the MIT Licence

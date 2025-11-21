@@ -1,10 +1,11 @@
 use crate::querying::kolibrie_adapter::KolibrieAdapter;
 use crate::querying::oxigraph_adapter::OxigraphAdapter;
 use crate::querying::query_processing::QueryProcessor;
-use oxigraph::model::{Literal, NamedNode, Quad};
+use oxigraph::model::{GraphName, Literal, NamedNode, Quad};
 use rsp_rs::QuadContainer;
 use std::collections::HashSet;
 
+#[allow(dead_code)]
 fn main() {
     let query = "SELECT ?s WHERE { ?s ?p ?o }";
 

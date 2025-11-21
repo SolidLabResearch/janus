@@ -1,6 +1,6 @@
 use crate::querying::query_processing::{self, SparqlEngine};
 use oxigraph::model::Quad;
-use oxigraph::sparql::QueryResults;
+use oxigraph::sparql::{QueryResults, SparqlEvaluator};
 use oxigraph::store::Store;
 use rsp_rs::QuadContainer;
 use std::fmt;
@@ -31,6 +31,7 @@ impl From<oxigraph::sparql::QueryEvaluationError> for OxigraphError {
 }
 
 pub struct OxigraphAdapter {
+    #[allow(dead_code)]
     store: OxigraphStore,
 }
 
@@ -64,7 +65,6 @@ impl SparqlEngine for OxigraphAdapter {
         }
 
         // Execute the query using the new SparqlEvaluator API
-        use oxigraph::sparql::SparqlEvaluator;
         let evaluator = SparqlEvaluator::new();
         let parsed_query =
             evaluator.parse_query(query).map_err(|e| OxigraphError(e.to_string()))?;
@@ -140,8 +140,8 @@ mod tests {
 
     #[test]
     fn test_oxigraph_adapter_creation() {
-        let adapter = OxigraphAdapter::new();
-        assert!(true, "Adapter should be created successfully");
+        let _adapter = OxigraphAdapter::new();
+        // Adapter created successfully
     }
 
     #[test]
@@ -166,12 +166,12 @@ mod tests {
         let container = create_test_container();
 
         // Query to select subjects that know someone
-        let query = r#"
+        let query = r"
             PREFIX ex: <http://example.org/>
             SELECT ?s WHERE {
                 ?s ex:knows ?o
             }
-        "#;
+        ";
 
         let results = adapter.execute_query(query, &container);
         assert!(results.is_ok(), "Query with filter should succeed");
@@ -186,12 +186,12 @@ mod tests {
         let container = create_test_container();
 
         // ASK query to check if Alice knows Bob
-        let query = r#"
+        let query = r"
             PREFIX ex: <http://example.org/>
             ASK {
                 ex:alice ex:knows ex:bob
             }
-        "#;
+        ";
 
         let results = adapter.execute_query(query, &container);
         assert!(results.is_ok(), "ASK query should succeed");
@@ -207,12 +207,12 @@ mod tests {
         let container = create_test_container();
 
         // ASK query that should return false
-        let query = r#"
+        let query = r"
             PREFIX ex: <http://example.org/>
             ASK {
                 ex:alice ex:knows ex:charlie
             }
-        "#;
+        ";
 
         let results = adapter.execute_query(query, &container);
         assert!(results.is_ok(), "ASK query should succeed");
@@ -231,7 +231,7 @@ mod tests {
         let container = create_test_container();
 
         // CONSTRUCT query to create new triples
-        let query = r#"
+        let query = r"
             PREFIX ex: <http://example.org/>
             CONSTRUCT {
                 ?s ex:knows ?o
@@ -239,7 +239,7 @@ mod tests {
             WHERE {
                 ?s ex:knows ?o
             }
-        "#;
+        ";
 
         let results = adapter.execute_query(query, &container);
         assert!(results.is_ok(), "CONSTRUCT query should succeed");
@@ -304,12 +304,12 @@ mod tests {
         let container = create_test_container();
 
         // Query to count the number of 'knows' relationships
-        let query = r#"
+        let query = r"
             PREFIX ex: <http://example.org/>
             SELECT (COUNT(?s) AS ?count) WHERE {
                 ?s ex:knows ?o
             }
-        "#;
+        ";
 
         let results = adapter.execute_query(query, &container);
         assert!(results.is_ok(), "COUNT query should succeed");
@@ -329,10 +329,10 @@ mod tests {
         assert!(results1.is_ok(), "First query should succeed");
 
         // Second query
-        let query2 = r#"
+        let query2 = r"
             PREFIX ex: <http://example.org/>
             SELECT ?s WHERE { ?s ex:knows ?o }
-        "#;
+        ";
         let results2 = adapter.execute_query(query2, &container);
         assert!(results2.is_ok(), "Second query should succeed");
 
