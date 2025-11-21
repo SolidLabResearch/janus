@@ -83,6 +83,8 @@ pub mod parsing;
 
 pub mod storage;
 
+pub mod querying;
+
 pub mod error {
     //! Error types and result definitions
 
