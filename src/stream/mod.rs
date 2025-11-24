@@ -4,4 +4,5 @@ pub mod operators {
     pub mod hs2r;
 }
 
+pub mod comparator;
 pub mod live_stream_processing;
