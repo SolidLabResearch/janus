@@ -25,6 +25,8 @@ impl WindowStats {
             return None;
         }
 
+        #[allow(clippy::cast_precision_loss)]
+        // Safe: window.len() is small (default 10) and f64 can represent integers up to 2^53 exactly
         let n = window.len() as f64;
         let count = window.len();
 
@@ -41,9 +43,9 @@ impl WindowStats {
         // m = \frac{N \sum(xy) - \sum x \sum y}{N \sum(x^2) - (\sum x)^2}
         let sum_x: f64 = window.iter().map(|dp| dp.timestamp).sum();
         let sum_xy: f64 = window.iter().map(|dp| dp.timestamp * dp.value).sum();
-        let sum_x2: f64 = window.iter().map(|dp| dp.timestamp.powi(2)).sum();
+        let sum_x_squared: f64 = window.iter().map(|dp| dp.timestamp.powi(2)).sum();
 
-        let denominator = n * sum_x2 - sum_x.powi(2);
+        let denominator = n * sum_x_squared - sum_x.powi(2);
 
         let slope = if denominator.abs() < f64::EPSILON {
             0.0 // Avoid division by zero if all timestamps are identical or N=1
