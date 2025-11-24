@@ -55,10 +55,10 @@ make ci-check
 ```
 
 This will run:
-- ✅ **rustfmt** - Code formatting check
-- ✅ **clippy** - Lint checks with warnings as errors
-- ✅ **tests** - Full test suite
-- ✅ **build** - Compilation check
+- **rustfmt** - Code formatting check
+- **clippy** - Lint checks with warnings as errors
+- **tests** - Full test suite
+- **build** - Compilation check
 
 Individual checks can also be run:
 

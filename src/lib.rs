@@ -64,9 +64,7 @@ pub mod store {
 }
 
 /// Module for stream processing
-pub mod stream {
-    //! RDF stream processing functionality
-}
+pub mod stream;
 
 /// Module for query parsing and execution
 pub mod query {
@@ -84,7 +82,6 @@ pub mod parsing;
 pub mod storage;
 
 pub mod querying;
-
 pub mod error {
     //! Error types and result definitions
 
