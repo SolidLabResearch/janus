@@ -14,7 +14,7 @@ graph TD
     API -->|Encode| Dictionary[Dictionary Encoding]
     Dictionary -->|Event IDs| BatchBuffer[Batch Buffer]
     
-    subgraph Storage Engine
+    subgraph StorageSystem [Storage Engine]
         BatchBuffer -->|Flush| SegmentedStorage[Segmented Storage]
         SegmentedStorage -->|Write| DataFile[Data File .log]
         SegmentedStorage -->|Index| IndexFile[Index File .idx]
@@ -23,10 +23,10 @@ graph TD
     end
     
     Query[Query Request] -->|Parse| Parser[JanusQL Parser]
-    Parser -->|Execute| StorageEngine
+    Parser -->|Execute| SegmentedStorage
     
-    StorageEngine -->|Search| BatchBuffer
-    StorageEngine -->|Search| InMemoryIndex
+    SegmentedStorage -->|Search| BatchBuffer
+    SegmentedStorage -->|Search| InMemoryIndex
     InMemoryIndex -->|Locate| IndexFile
     IndexFile -->|Locate| DataFile
     
