@@ -1,12 +1,12 @@
 use crate::core::Event;
 use crate::parsing::janusql_parser::WindowDefinition;
 use crate::storage::segmented_storage::StreamingSegmentedStorage;
-use std::sync::Arc;
+use std::rc::Rc;
 
 /// Operator for processing historical data with a fixed window.
 /// Unlike sliding windows, this queries a single fixed time range [start, end].
 pub struct HistoricalFixedWindowOperator {
-    storage: Arc<StreamingSegmentedStorage>,
+    storage: Rc<StreamingSegmentedStorage>,
     window_def: WindowDefinition,
     has_yielded: bool,
 }
@@ -18,7 +18,7 @@ impl HistoricalFixedWindowOperator {
     ///
     /// * `storage` - The storage backend to query.
     /// * `window_def` - The window definition with start and end timestamps.
-    pub fn new(storage: Arc<StreamingSegmentedStorage>, window_def: WindowDefinition) -> Self {
+    pub fn new(storage: Rc<StreamingSegmentedStorage>, window_def: WindowDefinition) -> Self {
         HistoricalFixedWindowOperator { storage, window_def, has_yielded: false }
     }
 }
@@ -75,7 +75,7 @@ mod tests {
         let _ = fs::remove_dir_all(test_dir);
 
         let config = create_test_config(test_dir);
-        let storage = Arc::new(StreamingSegmentedStorage::new(config).unwrap());
+        let storage = Rc::new(StreamingSegmentedStorage::new(config).unwrap());
 
         // Write events at timestamps 100, 200, 300, 400, 500, 600
         for i in 1..=6 {

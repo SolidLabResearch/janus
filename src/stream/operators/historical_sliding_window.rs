@@ -1,12 +1,12 @@
 use crate::core::Event;
 use crate::parsing::janusql_parser::WindowDefinition;
 use crate::storage::segmented_storage::StreamingSegmentedStorage;
-use std::sync::Arc;
+use std::rc::Rc;
 
 /// Operator for processing historical data with a sliding window.
 /// It iterates over the storage and yields events for each window.
 pub struct HistoricalSlidingWindowOperator {
-    storage: Arc<StreamingSegmentedStorage>,
+    storage: Rc<StreamingSegmentedStorage>,
     window_def: WindowDefinition,
     current_start: u64,
     end_bound: u64,
@@ -19,7 +19,7 @@ impl HistoricalSlidingWindowOperator {
     ///
     /// * `storage` - The storage backend to query.
     /// * `window_def` - The window definition (width, slide, offset, etc.).
-    pub fn new(storage: Arc<StreamingSegmentedStorage>, window_def: WindowDefinition) -> Self {
+    pub fn new(storage: Rc<StreamingSegmentedStorage>, window_def: WindowDefinition) -> Self {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
@@ -98,7 +98,7 @@ mod tests {
         let _ = fs::remove_dir_all(test_dir); // Clean up before test
 
         let config = create_test_config(test_dir);
-        let storage = Arc::new(StreamingSegmentedStorage::new(config).unwrap());
+        let storage = Rc::new(StreamingSegmentedStorage::new(config).unwrap());
 
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)

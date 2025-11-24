@@ -5,7 +5,7 @@ All notable changes to the Janus project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [Unreleased] - 2025-11-24
 
 ### Added
 - **Historical Sliding Window Operator** (`src/stream/operators/historical_sliding_window.rs`)
@@ -33,6 +33,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Window end clamping to prevent querying future data in sliding windows
 - Type consistency across window operators
+- **Clippy warnings**: Replaced `Arc` with `Rc` in window operators and tests since they don't use threading
+  - Fixed `arc_with_non_send_sync` lint errors
+  - All CI checks now pass (rustfmt, clippy, tests, build)
 
 ## [0.1.0] - Initial Release
 

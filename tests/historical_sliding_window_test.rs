@@ -3,7 +3,7 @@ use janus::storage::segmented_storage::StreamingSegmentedStorage;
 use janus::storage::util::StreamingConfig;
 use janus::stream::operators::historical_sliding_window::HistoricalSlidingWindowOperator;
 use std::fs;
-use std::sync::Arc;
+use std::rc::Rc;
 
 fn create_test_config(path: &str) -> StreamingConfig {
     StreamingConfig {
@@ -22,7 +22,7 @@ fn test_historical_sliding_window_with_real_iris() {
     let _ = fs::remove_dir_all(test_dir);
 
     let config = create_test_config(test_dir);
-    let storage = Arc::new(StreamingSegmentedStorage::new(config).unwrap());
+    let storage = Rc::new(StreamingSegmentedStorage::new(config).unwrap());
 
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -102,7 +102,7 @@ fn test_historical_sliding_window_foaf_example() {
     let _ = fs::remove_dir_all(test_dir);
 
     let config = create_test_config(test_dir);
-    let storage = Arc::new(StreamingSegmentedStorage::new(config).unwrap());
+    let storage = Rc::new(StreamingSegmentedStorage::new(config).unwrap());
 
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

@@ -3,7 +3,7 @@ use janus::storage::segmented_storage::StreamingSegmentedStorage;
 use janus::storage::util::StreamingConfig;
 use janus::stream::operators::historical_fixed_window::HistoricalFixedWindowOperator;
 use std::fs;
-use std::sync::Arc;
+use std::rc::Rc;
 
 fn create_test_config(path: &str) -> StreamingConfig {
     StreamingConfig {
@@ -22,7 +22,7 @@ fn test_historical_fixed_window_with_real_iris() {
     let _ = fs::remove_dir_all(test_dir);
 
     let config = create_test_config(test_dir);
-    let storage = Arc::new(StreamingSegmentedStorage::new(config).unwrap());
+    let storage = Rc::new(StreamingSegmentedStorage::new(config).unwrap());
 
     // Write events with real RDF IRIs representing IoT device events
     let devices = [
@@ -107,7 +107,7 @@ fn test_historical_fixed_window_semantic_web() {
     let _ = fs::remove_dir_all(test_dir);
 
     let config = create_test_config(test_dir);
-    let storage = Arc::new(StreamingSegmentedStorage::new(config).unwrap());
+    let storage = Rc::new(StreamingSegmentedStorage::new(config).unwrap());
 
     // Semantic web example: Publications and authors
     let publications = [
