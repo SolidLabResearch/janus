@@ -81,7 +81,11 @@ pub mod config {
 /// Module for parsing JanusQL queries
 pub mod parsing;
 
+pub mod api;
+
 pub mod storage;
+
+pub mod registry;
 
 pub mod querying;
 pub mod error {

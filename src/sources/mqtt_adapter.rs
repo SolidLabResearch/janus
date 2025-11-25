@@ -32,12 +32,14 @@ impl MqttSource {
 
 impl StreamSource for MqttSource {
     fn subscribe(
-            &self,
-            topics: Vec<String>,
-            callback: Arc<dyn Fn(RDFEvent) + Send + Sync>,
-        ) -> Result<(), StreamError> {
+        &self,
+        topics: Vec<String>,
+        callback: Arc<dyn Fn(RDFEvent) + Send + Sync>,
+    ) -> Result<(), StreamError> {
         for topic in topics {
-            self.client.subscribe(&topic, QoS::AtLeastOnce).map_err(|e| StreamError::SubscriptionError(e.to_string()))?;
+            self.client
+                .subscribe(&topic, QoS::AtLeastOnce)
+                .map_err(|e| StreamError::SubscriptionError(e.to_string()))?;
         }
 
         // TODO : Here we would normally handle incoming messages and invoke the callback.
@@ -45,6 +47,8 @@ impl StreamSource for MqttSource {
     }
 
     fn stop(&self) -> Result<(), StreamError> {
-        self.client.disconnect().map_err(|e| StreamError::ConnectionError(e.to_string()))
+        self.client
+            .disconnect()
+            .map_err(|e| StreamError::ConnectionError(e.to_string()))
     }
 }
