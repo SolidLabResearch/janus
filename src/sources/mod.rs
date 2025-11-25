@@ -1,3 +1,4 @@
+#[cfg(not(windows))]
 pub mod kafka_adapter;
 pub mod mqtt_adapter;
 pub mod stream_ingestion_pipeline;

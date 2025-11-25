@@ -1,3 +1,4 @@
+#[cfg(not(windows))]
 use crate::core::RDFEvent;
 use crate::sources::stream_source::{StreamError, StreamSource};
 use rdkafka::config::ClientConfig;
