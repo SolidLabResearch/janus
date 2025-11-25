@@ -63,6 +63,8 @@ pub mod store {
     //! RDF store implementations and interfaces
 }
 
+pub mod sources;
+
 /// Module for stream processing
 pub mod stream;
 

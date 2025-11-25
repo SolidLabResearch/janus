@@ -1,7 +1,6 @@
 use std::{
     collections::VecDeque,
     io::{BufWriter, Read, Seek, SeekFrom, Write},
-    rc::Rc,
     sync::{Arc, Mutex, RwLock},
     thread::JoinHandle,
     time::{Duration, SystemTime, UNIX_EPOCH},
@@ -22,7 +21,7 @@ use crate::{
 pub struct StreamingSegmentedStorage {
     batch_buffer: Arc<RwLock<BatchBuffer>>,
     segments: Arc<RwLock<Vec<EnhancedSegmentMetadata>>>,
-    dictionary: Rc<RwLock<Dictionary>>,
+    dictionary: Arc<RwLock<Dictionary>>,
     flush_handle: Option<JoinHandle<()>>,
     shutdown_signal: Arc<Mutex<bool>>,
     config: StreamingConfig,
@@ -43,7 +42,7 @@ impl StreamingSegmentedStorage {
             })),
 
             segments: Arc::new(RwLock::new(Vec::new())),
-            dictionary: Rc::new(RwLock::new(Dictionary::new())),
+            dictionary: Arc::new(RwLock::new(Dictionary::new())),
             flush_handle: None,
             shutdown_signal: Arc::new(Mutex::new(false)),
             config,
@@ -106,6 +105,15 @@ impl StreamingSegmentedStorage {
         let encoded_event = {
             let mut dict = self.dictionary.write().unwrap();
             rdf_event.encode(&mut dict)
+        };
+        self.write(encoded_event)
+    }
+
+    /// User-friendly API: Write an RDFEvent directly
+    pub fn write_rdf_event(&self, event: RDFEvent) -> std::io::Result<()> {
+        let encoded_event = {
+            let mut dict = self.dictionary.write().unwrap();
+            event.encode(&mut dict)
         };
         self.write(encoded_event)
     }
