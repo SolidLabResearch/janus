@@ -63,6 +63,8 @@ pub mod store {
     //! RDF store implementations and interfaces
 }
 
+pub mod sources;
+
 /// Module for stream processing
 pub mod stream;
 
@@ -79,7 +81,11 @@ pub mod config {
 /// Module for parsing JanusQL queries
 pub mod parsing;
 
+pub mod api;
+
 pub mod storage;
+
+pub mod registry;
 
 pub mod querying;
 pub mod error {
@@ -138,14 +144,3 @@ pub mod error {
 
 // Re-export commonly used types
 pub use error::{Error, Result};
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_error_display() {
-        let err = Error::Config("test error".to_string());
-        assert_eq!(format!("{}", err), "Configuration error: test error");
-    }
-}

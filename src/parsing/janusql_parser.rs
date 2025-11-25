@@ -41,7 +41,7 @@ pub struct R2SOperator {
 }
 
 /// Parsed JanusQL query structure containing all components extracted from the query.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ParsedJanusQuery {
     /// R2S operator if present
     pub r2s: Option<R2SOperator>,
