@@ -18,6 +18,7 @@ rsp-rs = "0.3.1"
 oxigraph = "0.5"
 rumqttc = "0.25.1"
 serde_json = "1.0.145"
+tokio = "1.48.0"
 
 [target.'cfg(not(windows))'.dependencies]
 rdkafka = "0.38.0"

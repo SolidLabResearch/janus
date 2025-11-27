@@ -83,6 +83,8 @@ pub mod parsing;
 
 pub mod api;
 
+pub mod stream_bus;
+
 pub mod storage;
 
 pub mod registry;
