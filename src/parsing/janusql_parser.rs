@@ -244,9 +244,14 @@ impl JanusQLParser {
             ));
         }
 
-        // Adding WHERE clause
+        // Adding WHERE clause with only live window patterns
         if !parsed.where_clause.is_empty() {
-            lines.push(parsed.where_clause.clone());
+            let adapted_where = self.adapt_where_clause_for_live(
+                &parsed.where_clause,
+                &parsed.live_windows,
+                &parsed.prefixes,
+            );
+            lines.push(adapted_where);
         }
         lines.join("\n")
     }
@@ -268,55 +273,208 @@ impl JanusQLParser {
 
             lines.push(String::new());
 
-            // Adding the SELECT clause.
-            if !parsed.select_clause.is_empty() {
-                lines.push(parsed.select_clause.clone());
-            }
-
-            lines.push(String::new());
-
-            // Adding the WHERE clause for the historical window.
-            let where_clause = self.adapt_where_clause_for_historical(
+            // Generate WHERE clause and extract bound variables
+            let (where_clause, bound_vars) = self.generate_where_and_extract_vars(
                 &parsed.where_clause,
                 window,
                 &parsed.prefixes,
             );
+
+            // Clean SELECT clause based on bound variables
+            if !parsed.select_clause.is_empty() {
+                let clean_select = self.filter_select_clause(&parsed.select_clause, &bound_vars);
+                lines.push(clean_select);
+            }
+
+            lines.push(String::new());
             lines.push(where_clause);
             queries.push(lines.join("\n"));
         }
         queries
     }
 
-    fn adapt_where_clause_for_historical(
+    fn generate_where_and_extract_vars(
         &self,
         where_clause: &str,
         window: &WindowDefinition,
-        _prefixes: &HashMap<String, String>,
-    ) -> String {
-        // Replacing the window with graph.
-        let adapted = where_clause.replace("WINDOW ", "GRAPH ");
+        prefixes: &HashMap<String, String>,
+    ) -> (String, std::collections::HashSet<String>) {
+        let window_uri = &window.window_name;
+        let mut prefixed_name = None;
+        for (prefix, uri_base) in prefixes {
+            if window_uri.starts_with(uri_base) {
+                let local_name = &window_uri[uri_base.len()..];
+                prefixed_name = Some(format!("{}:{}", prefix, local_name));
+                break;
+            }
+        }
 
-        match window.window_type {
-            WindowType::HistoricalFixed => {
-                if let (Some(start), Some(end)) = (window.start, window.end) {
-                    let filter_clause =
-                        format!("\n FILTER(?timestamp >= {} && ?timestamp <= {})", start, end);
-                    adapted.replace("}&", &format!("{}\n}}", filter_clause))
-                } else {
-                    adapted
+        let window_identifier = prefixed_name.as_ref().unwrap_or(window_uri);
+        let window_pattern = format!("WINDOW {} {{", window_identifier);
+        let mut bound_vars = std::collections::HashSet::new();
+
+        let where_string = if let Some(start_pos) = where_clause.find(&window_pattern) {
+            let after_opening = start_pos + window_pattern.len();
+            let mut brace_count = 1;
+            let mut end_pos = after_opening;
+            let chars: Vec<char> = where_clause[after_opening..].chars().collect();
+
+            for (i, ch) in chars.iter().enumerate() {
+                if *ch == '{' {
+                    brace_count += 1;
+                } else if *ch == '}' {
+                    brace_count -= 1;
+                    if brace_count == 0 {
+                        end_pos = after_opening + i;
+                        break;
+                    }
                 }
             }
-            WindowType::HistoricalSliding => {
-                if let Some(offset) = window.offset {
-                    let filter_clause = format!("\n FILTER(?timestamp >= {})", offset);
-                    adapted.replace("}&", &format!("{}\n}}", filter_clause))
-                } else {
-                    adapted
+
+            let inner_pattern = where_clause[after_opening..end_pos].trim();
+            
+            // Extract variables from inner pattern
+            let var_regex = Regex::new(r"\?[\w]+").unwrap();
+            for cap in var_regex.captures_iter(inner_pattern) {
+                bound_vars.insert(cap[0].to_string());
+            }
+
+            let stream_uri = self.wrap_iri(&window.stream_name, prefixes);
+            format!("WHERE {{\n  GRAPH {} {{\n    {}\n  }}\n}}", stream_uri, inner_pattern)
+        } else {
+            where_clause.to_string()
+        };
+
+        (where_string, bound_vars)
+    }
+
+    fn filter_select_clause(&self, select_clause: &str, allowed_vars: &std::collections::HashSet<String>) -> String {
+        if allowed_vars.is_empty() {
+            return select_clause.to_string();
+        }
+
+        let trimmed = select_clause.trim();
+        if !trimmed.to_uppercase().starts_with("SELECT") {
+            return select_clause.to_string();
+        }
+
+        let content = trimmed[6..].trim();
+        
+        // Regex to capture projection items:
+        // 1. Aliased expressions: (expression AS ?var) - handle nested parens by matching until AS ?var)
+        // 2. Simple variables: ?var
+        let item_regex = Regex::new(r"(\(.*?\s+AS\s+\?[\w]+\))|(\?[\w]+)").unwrap();
+        let var_regex = Regex::new(r"\?[\w]+").unwrap();
+
+        let mut kept_items = Vec::new();
+
+        for cap in item_regex.captures_iter(content) {
+            let item = cap[0].to_string();
+            
+            // Check if item uses allowed variables
+            let mut is_valid = false;
+            
+            // If it's an expression, check if input vars are allowed
+            // Note: We check if ANY of the variables inside are bound.
+            // For AVG(?a), if ?a is bound, we keep it.
+            // If it's a simple var ?a, check if bound.
+            
+            let mut vars_in_item = Vec::new();
+            for var_cap in var_regex.captures_iter(&item) {
+                vars_in_item.push(var_cap[0].to_string());
+            }
+            
+            // Special case: AS ?alias - the alias is a new variable, not a bound one.
+            // But usually expressions are like (AVG(?a) AS ?b). ?a must be bound.
+            // We only care about input variables.
+            // A simple heuristic: check if at least one variable in the item (excluding the alias if possible) is bound.
+            // Since parsing "AS ?alias" is hard with regex, we just check if ANY variable in the item is bound.
+            // If the item is just "?alias" (output of previous), it might be tricky if this is a subquery.
+            // But here we are filtering the top-level SELECT.
+            
+            for var in vars_in_item {
+                if allowed_vars.contains(&var) {
+                    is_valid = true;
+                    break;
                 }
             }
-            WindowType::Live => adapted,
+
+            if is_valid {
+                kept_items.push(item);
+            }
+        }
+
+        if kept_items.is_empty() {
+             // Fallback: if nothing matches, return original (might fail) or SELECT *
+             // Given the issue, returning "SELECT *" might be safer if pattern is not empty,
+             // but "SELECT *" is invalid if we have GROUP BY (implied by AVG).
+             // Let's return original and hope for best if filtering failed.
+             return select_clause.to_string();
+        }
+
+        format!("SELECT {}", kept_items.join(" "))
+    }
+
+    fn adapt_where_clause_for_live(
+        &self,
+        where_clause: &str,
+        live_windows: &[WindowDefinition],
+        prefixes: &HashMap<String, String>,
+    ) -> String {
+        // Extract patterns for all live windows and combine them
+        let mut where_patterns = Vec::new();
+
+        for window in live_windows {
+            // Find the window name in prefixed form
+            let window_uri = &window.window_name;
+            let mut prefixed_name = None;
+            for (prefix, uri_base) in prefixes {
+                if window_uri.starts_with(uri_base) {
+                    let local_name = &window_uri[uri_base.len()..];
+                    prefixed_name = Some(format!("{}:{}", prefix, local_name));
+                    break;
+                }
+            }
+
+            let window_identifier = prefixed_name.as_ref().unwrap_or(window_uri);
+            let window_pattern = format!("WINDOW {} {{", window_identifier);
+
+            if let Some(start_pos) = where_clause.find(&window_pattern) {
+                let after_opening = start_pos + window_pattern.len();
+
+                // Find matching closing brace
+                let mut brace_count = 1;
+                let mut end_pos = after_opening;
+                let chars: Vec<char> = where_clause[after_opening..].chars().collect();
+
+                for (i, ch) in chars.iter().enumerate() {
+                    if *ch == '{' {
+                        brace_count += 1;
+                    } else if *ch == '}' {
+                        brace_count -= 1;
+                        if brace_count == 0 {
+                            end_pos = after_opening + i;
+                            break;
+                        }
+                    }
+                }
+
+                let inner_pattern = where_clause[after_opening..end_pos].trim();
+                where_patterns
+                    .push(format!("WINDOW {} {{\n    {}\n  }}", window_identifier, inner_pattern));
+            }
+        }
+
+        if where_patterns.is_empty() {
+            // Fallback to original
+            where_clause.to_string()
+        } else {
+            // Combine all live window patterns
+            format!("WHERE {{\n  {}\n}}", where_patterns.join("\n  "))
         }
     }
+
+
 
     fn unwrap_iri(&self, prefixed_iri: &str, prefix_mapper: &HashMap<String, String>) -> String {
         let trimmed = prefixed_iri.trim();

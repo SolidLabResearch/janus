@@ -259,3 +259,278 @@ fn test_oxigraph_error_from_storage_error() {
     let error = OxigraphError::from(oxigraph::store::StorageError::Other("test".into()));
     assert!(error.to_string().contains("Oxigraph error"));
 }
+
+// Tests for execute_query_bindings
+
+#[test]
+fn test_execute_query_bindings_simple_select() {
+    let adapter = OxigraphAdapter::new();
+    let container = create_test_container();
+
+    let query = r"
+        PREFIX ex: <http://example.org/>
+        SELECT ?s ?o WHERE {
+            ?s ex:knows ?o
+        }
+    ";
+
+    let bindings = adapter.execute_query_bindings(query, &container);
+    assert!(bindings.is_ok(), "Query bindings execution should succeed");
+
+    let bindings = bindings.unwrap();
+    assert_eq!(bindings.len(), 2, "Should return 2 bindings (Alice->Bob, Bob->Charlie)");
+
+    // Verify structure of bindings
+    for binding in &bindings {
+        assert!(binding.contains_key("s"), "Binding should contain 's' variable");
+        assert!(binding.contains_key("o"), "Binding should contain 'o' variable");
+    }
+}
+
+#[test]
+fn test_execute_query_bindings_with_literals() {
+    let adapter = OxigraphAdapter::new();
+    let container = create_test_container();
+
+    let query = r"
+        PREFIX ex: <http://example.org/>
+        SELECT ?person ?age WHERE {
+            ?person ex:age ?age
+        }
+    ";
+
+    let bindings = adapter.execute_query_bindings(query, &container);
+    assert!(bindings.is_ok(), "Query with literals should succeed");
+
+    let bindings = bindings.unwrap();
+    assert_eq!(bindings.len(), 2, "Should return 2 bindings (Alice and Bob ages)");
+
+    // Verify each binding has both variables
+    for binding in &bindings {
+        assert!(binding.contains_key("person"), "Should have 'person' variable");
+        assert!(binding.contains_key("age"), "Should have 'age' variable");
+
+        let age = binding.get("age").unwrap();
+        assert!(age == "\"30\"" || age == "\"25\"", "Age should be either 30 or 25");
+    }
+}
+
+#[test]
+fn test_execute_query_bindings_single_variable() {
+    let adapter = OxigraphAdapter::new();
+    let container = create_test_container();
+
+    let query = "SELECT ?s WHERE { ?s ?p ?o }";
+
+    let bindings = adapter.execute_query_bindings(query, &container);
+    assert!(bindings.is_ok(), "Single variable query should succeed");
+
+    let bindings = bindings.unwrap();
+    assert_eq!(bindings.len(), 4, "Should return 4 bindings");
+
+    // Verify each binding has only the 's' variable
+    for binding in &bindings {
+        assert_eq!(binding.len(), 1, "Each binding should have exactly 1 variable");
+        assert!(binding.contains_key("s"), "Binding should contain 's' variable");
+    }
+}
+
+#[test]
+fn test_execute_query_bindings_with_filter() {
+    let adapter = OxigraphAdapter::new();
+    let container = create_test_container();
+
+    let query = r#"
+        PREFIX ex: <http://example.org/>
+        SELECT ?person ?age WHERE {
+            ?person ex:age ?age .
+            FILTER(?age > "25")
+        }
+    "#;
+
+    let bindings = adapter.execute_query_bindings(query, &container);
+    assert!(bindings.is_ok(), "Query with filter should succeed");
+
+    let bindings = bindings.unwrap();
+    assert_eq!(bindings.len(), 1, "Should return 1 binding (only Alice is > 25)");
+
+    let binding = &bindings[0];
+    assert!(binding.get("person").unwrap().contains("alice"), "Person should be Alice");
+    assert_eq!(binding.get("age").unwrap(), "\"30\"", "Age should be 30");
+}
+
+#[test]
+fn test_execute_query_bindings_empty_result() {
+    let adapter = OxigraphAdapter::new();
+    let container = create_test_container();
+
+    // Query that matches nothing
+    let query = r"
+        PREFIX ex: <http://example.org/>
+        SELECT ?s WHERE {
+            ?s ex:nonexistent ?o
+        }
+    ";
+
+    let bindings = adapter.execute_query_bindings(query, &container);
+    assert!(bindings.is_ok(), "Query with no results should succeed");
+
+    let bindings = bindings.unwrap();
+    assert!(bindings.is_empty(), "Should return empty bindings list");
+}
+
+#[test]
+fn test_execute_query_bindings_empty_container() {
+    let adapter = OxigraphAdapter::new();
+    let empty_container = QuadContainer::new(HashSet::new(), 1000);
+
+    let query = "SELECT ?s ?p ?o WHERE { ?s ?p ?o }";
+
+    let bindings = adapter.execute_query_bindings(query, &empty_container);
+    assert!(bindings.is_ok(), "Query on empty container should succeed");
+
+    let bindings = bindings.unwrap();
+    assert!(bindings.is_empty(), "Should return empty bindings for empty container");
+}
+
+#[test]
+fn test_execute_query_bindings_ask_query_returns_empty() {
+    let adapter = OxigraphAdapter::new();
+    let container = create_test_container();
+
+    // ASK queries don't return bindings
+    let query = r"
+        PREFIX ex: <http://example.org/>
+        ASK {
+            ex:alice ex:knows ex:bob
+        }
+    ";
+
+    let bindings = adapter.execute_query_bindings(query, &container);
+    assert!(bindings.is_ok(), "ASK query should succeed");
+
+    let bindings = bindings.unwrap();
+    assert!(
+        bindings.is_empty(),
+        "ASK queries should return empty bindings (use execute_query instead)"
+    );
+}
+
+#[test]
+fn test_execute_query_bindings_construct_query_returns_empty() {
+    let adapter = OxigraphAdapter::new();
+    let container = create_test_container();
+
+    // CONSTRUCT queries don't return bindings
+    let query = r"
+        PREFIX ex: <http://example.org/>
+        CONSTRUCT {
+            ?s ex:knows ?o
+        }
+        WHERE {
+            ?s ex:knows ?o
+        }
+    ";
+
+    let bindings = adapter.execute_query_bindings(query, &container);
+    assert!(bindings.is_ok(), "CONSTRUCT query should succeed");
+
+    let bindings = bindings.unwrap();
+    assert!(
+        bindings.is_empty(),
+        "CONSTRUCT queries should return empty bindings (use execute_query instead)"
+    );
+}
+
+#[test]
+fn test_execute_query_bindings_invalid_query() {
+    let adapter = OxigraphAdapter::new();
+    let container = create_test_container();
+
+    let query = "INVALID SPARQL QUERY";
+
+    let bindings = adapter.execute_query_bindings(query, &container);
+    assert!(bindings.is_err(), "Invalid query should return an error");
+
+    let error = bindings.unwrap_err();
+    assert!(error.to_string().contains("Oxigraph error"), "Error should be an OxigraphError");
+}
+
+#[test]
+fn test_execute_query_bindings_multiple_variables() {
+    let adapter = OxigraphAdapter::new();
+    let container = create_test_container();
+
+    let query = r"
+        PREFIX ex: <http://example.org/>
+        SELECT ?s ?p ?o WHERE {
+            ?s ?p ?o
+        }
+    ";
+
+    let bindings = adapter.execute_query_bindings(query, &container);
+    assert!(bindings.is_ok(), "Query with multiple variables should succeed");
+
+    let bindings = bindings.unwrap();
+    assert_eq!(bindings.len(), 4, "Should return 4 bindings (one per quad)");
+
+    // Verify each binding has all three variables
+    for binding in &bindings {
+        assert_eq!(binding.len(), 3, "Each binding should have exactly 3 variables");
+        assert!(binding.contains_key("s"), "Should have 's' variable");
+        assert!(binding.contains_key("p"), "Should have 'p' variable");
+        assert!(binding.contains_key("o"), "Should have 'o' variable");
+    }
+}
+
+#[test]
+fn test_execute_query_bindings_with_aggregation() {
+    let adapter = OxigraphAdapter::new();
+    let container = create_test_container();
+
+    let query = r"
+        PREFIX ex: <http://example.org/>
+        SELECT (COUNT(?s) AS ?count) WHERE {
+            ?s ex:knows ?o
+        }
+    ";
+
+    let bindings = adapter.execute_query_bindings(query, &container);
+    assert!(bindings.is_ok(), "Query with aggregation should succeed");
+
+    let bindings = bindings.unwrap();
+    assert_eq!(bindings.len(), 1, "Aggregation should return 1 binding");
+
+    let binding = &bindings[0];
+    assert!(binding.contains_key("count"), "Should have 'count' variable");
+    assert_eq!(
+        binding.get("count").unwrap(),
+        "\"2\"^^<http://www.w3.org/2001/XMLSchema#integer>",
+        "Count should be 2"
+    );
+}
+
+#[test]
+fn test_execute_query_bindings_comparison_with_execute_query() {
+    let adapter = OxigraphAdapter::new();
+    let container = create_test_container();
+
+    let query = r"
+        PREFIX ex: <http://example.org/>
+        SELECT ?s WHERE {
+            ?s ex:knows ?o
+        }
+    ";
+
+    // Execute with both methods
+    let debug_results = adapter.execute_query(query, &container).unwrap();
+    let bindings = adapter.execute_query_bindings(query, &container).unwrap();
+
+    // Both should return the same number of results
+    assert_eq!(
+        debug_results.len(),
+        bindings.len(),
+        "Both methods should return same number of results"
+    );
+    assert_eq!(bindings.len(), 2, "Should have 2 results");
+}

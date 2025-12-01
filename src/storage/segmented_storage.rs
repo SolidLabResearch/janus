@@ -33,6 +33,25 @@ impl StreamingSegmentedStorage {
     pub fn new(config: StreamingConfig) -> std::io::Result<Self> {
         std::fs::create_dir_all(&config.segment_base_path)?;
 
+        // Load or create dictionary
+        let dict_path = std::path::Path::new(&config.segment_base_path).join("dictionary.bin");
+        let dictionary = if dict_path.exists() {
+            println!("Loading existing dictionary from {:?}", dict_path);
+            match Dictionary::load_from_file(&dict_path) {
+                Ok(dict) => {
+                    println!("✓ Dictionary loaded with {} entries", dict.size());
+                    dict
+                }
+                Err(e) => {
+                    eprintln!("Warning: Failed to load dictionary: {}, creating new one", e);
+                    Dictionary::new()
+                }
+            }
+        } else {
+            println!("Creating new dictionary");
+            Dictionary::new()
+        };
+
         let storage = Self {
             batch_buffer: Arc::new(RwLock::new(BatchBuffer {
                 events: VecDeque::new(),
@@ -42,7 +61,7 @@ impl StreamingSegmentedStorage {
             })),
 
             segments: Arc::new(RwLock::new(Vec::new())),
-            dictionary: Arc::new(RwLock::new(Dictionary::new())),
+            dictionary: Arc::new(RwLock::new(dictionary)),
             flush_handle: None,
             shutdown_signal: Arc::new(Mutex::new(false)),
             config,
@@ -57,6 +76,7 @@ impl StreamingSegmentedStorage {
         let segments_clone = Arc::clone(&self.segments);
         let shutdown_clone = Arc::clone(&self.shutdown_signal);
         let config_clone = self.config.clone();
+        let dictionary_clone = Arc::clone(&self.dictionary);
 
         let handle = std::thread::spawn(move || {
             Self::background_flush_loop(
@@ -64,10 +84,16 @@ impl StreamingSegmentedStorage {
                 segments_clone,
                 shutdown_clone,
                 config_clone,
+                dictionary_clone,
             );
         });
 
         self.flush_handle = Some(handle);
+    }
+
+    /// Get a reference to the dictionary for decoding events
+    pub fn get_dictionary(&self) -> &Arc<RwLock<Dictionary>> {
+        &self.dictionary
     }
 
     // Write an event into the storage system
@@ -118,6 +144,22 @@ impl StreamingSegmentedStorage {
         self.write(encoded_event)
     }
 
+    /// Force flush the current batch buffer to disk
+    /// This is useful when you need to ensure data is persisted immediately
+    pub fn flush(&self) -> std::io::Result<()> {
+        self.flush_batch_buffer_to_segment()?;
+        self.save_dictionary()?;
+        Ok(())
+    }
+
+    /// Save the dictionary to disk
+    fn save_dictionary(&self) -> std::io::Result<()> {
+        let dict_path = std::path::Path::new(&self.config.segment_base_path).join("dictionary.bin");
+        let dict = self.dictionary.read().unwrap();
+        dict.save_to_file(&dict_path)?;
+        Ok(())
+    }
+
     // Get the current timestamp in milliseconds since UNIX_EPOCH
     fn current_timestamp() -> u64 {
         SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64
@@ -147,6 +189,10 @@ impl StreamingSegmentedStorage {
             let mut segments = self.segments.write().unwrap();
             segments.push(segment);
         }
+
+        // Save dictionary after each flush
+        self.save_dictionary()?;
+
         Ok(())
     }
 
@@ -310,9 +356,14 @@ impl StreamingSegmentedStorage {
             let sparse_entries =
                 self.load_relevant_index_blocks(&segment.index_path, &relevant_blocks)?;
 
-            // If no entries loaded, return empty result
+            // If no entries loaded, fall back to full scan
             if sparse_entries.is_empty() {
-                return Ok(Vec::new());
+                return self.scan_data_from_offset(
+                    &segment.data_path,
+                    0,
+                    start_timestamp,
+                    end_timestamp,
+                );
             }
 
             // Step 3 : Binary search the loaded entries
@@ -408,6 +459,7 @@ impl StreamingSegmentedStorage {
         segments: Arc<RwLock<Vec<EnhancedSegmentMetadata>>>,
         shutdown_signal: Arc<Mutex<bool>>,
         config: StreamingConfig,
+        dictionary: Arc<RwLock<Dictionary>>,
     ) {
         while !*shutdown_signal.lock().unwrap() {
             std::thread::sleep(Duration::from_millis(100));
@@ -428,9 +480,12 @@ impl StreamingSegmentedStorage {
 
             if should_flush {
                 // TODO : Add better error handling here in this case
-                if let Err(e) =
-                    Self::flush_background(batch_buffer.clone(), segments.clone(), &config)
-                {
+                if let Err(e) = Self::flush_background(
+                    batch_buffer.clone(),
+                    segments.clone(),
+                    config.clone(),
+                    dictionary.clone(),
+                ) {
                     eprintln!("Background flush failed: {}", e);
                 }
             }
@@ -442,7 +497,8 @@ impl StreamingSegmentedStorage {
     fn flush_background(
         batch_buffer: Arc<RwLock<BatchBuffer>>,
         segments: Arc<RwLock<Vec<EnhancedSegmentMetadata>>>,
-        config: &StreamingConfig,
+        config: StreamingConfig,
+        dictionary: Arc<RwLock<Dictionary>>,
     ) -> std::io::Result<()> {
         // Automatically extract events from the batch buffer.
 
@@ -537,6 +593,11 @@ impl StreamingSegmentedStorage {
             // Keep segments sorted by start timestamp
             segments.sort_by_key(|s| s.start_timstamp);
         }
+
+        // Save dictionary after flush
+        let dict_path = std::path::Path::new(&config.segment_base_path).join("dictionary.bin");
+        let dict = dictionary.read().unwrap();
+        dict.save_to_file(&dict_path)?;
 
         Ok(())
     }

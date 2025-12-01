@@ -1,0 +1,734 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Janus RDF Stream Processing - Demo Dashboard</title>
+        <style>
+            * {
+                margin: 0;
+                padding: 0;
+                box-sizing: border-box;
+            }
+
+            body {
+                font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                min-height: 100vh;
+                padding: 20px;
+            }
+
+            .container {
+                max-width: 1200px;
+                margin: 0 auto;
+            }
+
+            .header {
+                background: white;
+                padding: 30px;
+                border-radius: 10px;
+                box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+                margin-bottom: 20px;
+                text-align: center;
+            }
+
+            .header h1 {
+                color: #333;
+                margin-bottom: 10px;
+            }
+
+            .header p {
+                color: #666;
+                font-size: 14px;
+            }
+
+            .controls {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 20px;
+                margin-bottom: 20px;
+            }
+
+            .control-panel {
+                background: white;
+                padding: 25px;
+                border-radius: 10px;
+                box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            }
+
+            .control-panel h2 {
+                color: #333;
+                margin-bottom: 15px;
+                font-size: 18px;
+                border-bottom: 2px solid #667eea;
+                padding-bottom: 10px;
+            }
+
+            .button-group {
+                display: flex;
+                gap: 10px;
+                margin-top: 15px;
+            }
+
+            button {
+                flex: 1;
+                padding: 12px 20px;
+                font-size: 14px;
+                font-weight: 600;
+                border: none;
+                border-radius: 6px;
+                cursor: pointer;
+                transition: all 0.3s ease;
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
+            }
+
+            button:disabled {
+                opacity: 0.5;
+                cursor: not-allowed;
+            }
+
+            .btn-start {
+                background: #10b981;
+                color: white;
+            }
+
+            .btn-start:hover:not(:disabled) {
+                background: #059669;
+                transform: translateY(-2px);
+                box-shadow: 0 4px 8px rgba(16, 185, 129, 0.3);
+            }
+
+            .btn-stop {
+                background: #ef4444;
+                color: white;
+            }
+
+            .btn-stop:hover:not(:disabled) {
+                background: #dc2626;
+                transform: translateY(-2px);
+                box-shadow: 0 4px 8px rgba(239, 68, 68, 0.3);
+            }
+
+            .status-box {
+                background: #f9fafb;
+                padding: 15px;
+                border-radius: 6px;
+                margin-top: 15px;
+                min-height: 120px;
+            }
+
+            .status-box h3 {
+                font-size: 14px;
+                color: #666;
+                margin-bottom: 10px;
+            }
+
+            .metric {
+                display: flex;
+                justify-content: space-between;
+                padding: 5px 0;
+                font-size: 13px;
+            }
+
+            .metric-label {
+                color: #666;
+            }
+
+            .metric-value {
+                font-weight: 600;
+                color: #333;
+            }
+
+            .results-panel {
+                background: white;
+                padding: 25px;
+                border-radius: 10px;
+                box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            }
+
+            .results-panel h2 {
+                color: #333;
+                margin-bottom: 15px;
+                font-size: 18px;
+                border-bottom: 2px solid #667eea;
+                padding-bottom: 10px;
+            }
+
+            .results-container {
+                max-height: 400px;
+                overflow-y: auto;
+                background: #f9fafb;
+                border-radius: 6px;
+                padding: 10px;
+            }
+
+            .result-item {
+                background: white;
+                padding: 12px;
+                margin-bottom: 10px;
+                border-radius: 6px;
+                border-left: 4px solid #667eea;
+                box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+            }
+
+            .result-item.historical {
+                border-left-color: #3b82f6;
+            }
+
+            .result-item.live {
+                border-left-color: #10b981;
+            }
+
+            .result-header {
+                display: flex;
+                justify-content: space-between;
+                margin-bottom: 8px;
+                font-size: 12px;
+            }
+
+            .result-source {
+                font-weight: 600;
+                text-transform: uppercase;
+                padding: 2px 8px;
+                border-radius: 4px;
+                font-size: 11px;
+            }
+
+            .result-source.historical {
+                background: #dbeafe;
+                color: #1e40af;
+            }
+
+            .result-source.live {
+                background: #d1fae5;
+                color: #065f46;
+            }
+
+            .result-timestamp {
+                color: #666;
+            }
+
+            .result-bindings {
+                font-size: 13px;
+                background: #f9fafb;
+                padding: 8px;
+                border-radius: 4px;
+                font-family: "Courier New", monospace;
+                color: #333;
+                white-space: pre-wrap;
+                word-break: break-all;
+            }
+
+            .alert {
+                padding: 12px 15px;
+                border-radius: 6px;
+                margin-top: 15px;
+                font-size: 13px;
+            }
+
+            .alert-success {
+                background: #d1fae5;
+                color: #065f46;
+                border-left: 4px solid #10b981;
+            }
+
+            .alert-error {
+                background: #fee2e2;
+                color: #991b1b;
+                border-left: 4px solid #ef4444;
+            }
+
+            .alert-info {
+                background: #dbeafe;
+                color: #1e40af;
+                border-left: 4px solid #3b82f6;
+            }
+
+            .no-results {
+                text-align: center;
+                color: #999;
+                padding: 40px;
+                font-style: italic;
+            }
+
+            .loading {
+                display: inline-block;
+                width: 12px;
+                height: 12px;
+                border: 2px solid #667eea;
+                border-top-color: transparent;
+                border-radius: 50%;
+                animation: spin 0.6s linear infinite;
+                margin-left: 8px;
+            }
+
+            @keyframes spin {
+                to {
+                    transform: rotate(360deg);
+                }
+            }
+
+            .footer {
+                text-align: center;
+                color: white;
+                margin-top: 20px;
+                font-size: 12px;
+                opacity: 0.8;
+            }
+
+            @media (max-width: 768px) {
+                .controls {
+                    grid-template-columns: 1fr;
+                }
+            }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="header">
+                <h1>Janus RDF Stream Processing Engine</h1>
+                <p>
+                    Unified Live and Historical RDF Stream Processing Demo
+                    Dashboard
+                </p>
+            </div>
+
+            <div class="controls">
+                <div class="control-panel">
+                    <h2>Stream Bus Replay Control</h2>
+                    <div class="button-group">
+                        <button
+                            class="btn-start"
+                            id="startReplayBtn"
+                            onclick="startReplay()"
+                        >
+                            Start Replay
+                        </button>
+                        <button
+                            class="btn-stop"
+                            id="stopReplayBtn"
+                            onclick="stopReplay()"
+                            disabled
+                        >
+                            Stop Replay
+                        </button>
+                    </div>
+                    <div class="status-box" id="replayStatus">
+                        <h3>Replay Status</h3>
+                        <div class="metric">
+                            <span class="metric-label">Status:</span>
+                            <span class="metric-value" id="replayStatusText"
+                                >Not Running</span
+                            >
+                        </div>
+                        <div class="metric">
+                            <span class="metric-label">Elapsed Time:</span>
+                            <span class="metric-value" id="elapsedTime"
+                                >0s</span
+                            >
+                        </div>
+                        <div class="metric">
+                            <span class="metric-label">Input File:</span>
+                            <span class="metric-value" id="inputFile">-</span>
+                        </div>
+                        <div class="metric">
+                            <span class="metric-label">Broker:</span>
+                            <span class="metric-value" id="brokerType"
+                                >MQTT</span
+                            >
+                        </div>
+                    </div>
+                </div>
+
+                <div class="control-panel">
+                    <h2>Query Execution Control</h2>
+                    <div class="button-group">
+                        <button
+                            class="btn-start"
+                            id="startQueryBtn"
+                            onclick="startQuery()"
+                        >
+                            Start Query
+                        </button>
+                        <button
+                            class="btn-stop"
+                            id="stopQueryBtn"
+                            onclick="stopQuery()"
+                            disabled
+                        >
+                            Stop Query
+                        </button>
+                    </div>
+                    <div class="status-box" id="queryStatus">
+                        <h3>Query Status</h3>
+                        <div class="metric">
+                            <span class="metric-label">Status:</span>
+                            <span class="metric-value" id="queryStatusText"
+                                >Not Running</span
+                            >
+                        </div>
+                        <div class="metric">
+                            <span class="metric-label">Query ID:</span>
+                            <span class="metric-value" id="queryId"
+                                >demo_query</span
+                            >
+                        </div>
+                        <div class="metric">
+                            <span class="metric-label">Results Received:</span>
+                            <span class="metric-value" id="resultsCount"
+                                >0</span
+                            >
+                        </div>
+                        <div class="metric">
+                            <span class="metric-label">Connection:</span>
+                            <span class="metric-value" id="wsStatus"
+                                >Disconnected</span
+                            >
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="results-panel">
+                <h2>Query Results Stream</h2>
+                <div id="alertContainer"></div>
+                <div class="results-container" id="resultsContainer">
+                    <div class="no-results">
+                        No results yet. Start replay and query to see results.
+                    </div>
+                </div>
+            </div>
+
+            <div class="footer">
+                Janus RDF Stream Processing Engine - HTTP API Demo Dashboard
+            </div>
+        </div>
+
+        <script>
+            const API_BASE = "http://localhost:8080";
+            const QUERY_ID = "demo_query";
+            const JANUSQL = `
+      PREFIX ex: <http://example.org/>
+      REGISTER RStream ex:output AS
+      SELECT ?sensor ?temp
+      FROM NAMED WINDOW ex:histWindow ON STREAM ex:sensorStream [START 1000000000000 END 2000000000000]
+      FROM NAMED WINDOW ex:liveWindow ON STREAM ex:sensorStream [RANGE 5000 STEP 2000]
+      WHERE {
+        WINDOW ex:histWindow {
+          ?sensor ex:temperature ?temp .
+        }
+        WINDOW ex:liveWindow {
+          ?sensor ex:temperature ?temp .
+        }
+      }
+    `.trim();
+
+            let ws = null;
+            let replayStatusInterval = null;
+            let resultsReceived = 0;
+
+            // Start Replay
+            async function startReplay() {
+                try {
+                    showAlert("Starting stream bus replay...", "info");
+
+                    const response = await fetch(
+                        `${API_BASE}/api/replay/start`,
+                        {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({
+                                input_file: "data/sensors_correct.nq",
+                                broker_type: "mqtt",
+                                topics: ["sensors"],
+                                rate_of_publishing: 500,
+                                loop_file: true,
+                                add_timestamps: true,
+                                mqtt_config: {
+                                    host: "localhost",
+                                    port: 1883,
+                                    client_id: "janus_dashboard",
+                                    keep_alive_secs: 30,
+                                },
+                            }),
+                        },
+                    );
+
+                    const data = await response.json();
+
+                    if (response.ok) {
+                        showAlert(data.message, "success");
+                        document.getElementById("startReplayBtn").disabled =
+                            true;
+                        document.getElementById("stopReplayBtn").disabled =
+                            false;
+                        document.getElementById(
+                            "replayStatusText",
+                        ).textContent = "Running";
+                        startReplayStatusPolling();
+                    } else {
+                        showAlert(data.error, "error");
+                    }
+                } catch (error) {
+                    showAlert(`Error: ${error.message}`, "error");
+                }
+            }
+
+            // Stop Replay
+            async function stopReplay() {
+                try {
+                    showAlert("Stopping stream bus replay...", "info");
+
+                    const response = await fetch(
+                        `${API_BASE}/api/replay/stop`,
+                        {
+                            method: "POST",
+                        },
+                    );
+
+                    const data = await response.json();
+
+                    if (response.ok) {
+                        showAlert(data.message, "success");
+                        document.getElementById("startReplayBtn").disabled =
+                            false;
+                        document.getElementById("stopReplayBtn").disabled =
+                            true;
+                        document.getElementById(
+                            "replayStatusText",
+                        ).textContent = "Not Running";
+                        stopReplayStatusPolling();
+                    } else {
+                        showAlert(data.error, "error");
+                    }
+                } catch (error) {
+                    showAlert(`Error: ${error.message}`, "error");
+                }
+            }
+
+            // Start Query
+            async function startQuery() {
+                try {
+                    showAlert("Registering and starting query...", "info");
+
+                    // Register query
+                    const registerResponse = await fetch(
+                        `${API_BASE}/api/queries`,
+                        {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({
+                                query_id: QUERY_ID,
+                                janusql: JANUSQL,
+                            }),
+                        },
+                    );
+
+                    // Ignore if already registered
+                    if (
+                        !registerResponse.ok &&
+                        registerResponse.status !== 400
+                    ) {
+                        const error = await registerResponse.json();
+                        throw new Error(error.error);
+                    }
+
+                    // Start query
+                    const startResponse = await fetch(
+                        `${API_BASE}/api/queries/${QUERY_ID}/start`,
+                        {
+                            method: "POST",
+                        },
+                    );
+
+                    const data = await startResponse.json();
+
+                    if (startResponse.ok) {
+                        showAlert(data.message, "success");
+                        document.getElementById("startQueryBtn").disabled =
+                            true;
+                        document.getElementById("stopQueryBtn").disabled =
+                            false;
+                        document.getElementById("queryStatusText").textContent =
+                            "Running";
+                        connectWebSocket();
+                    } else {
+                        showAlert(data.error, "error");
+                    }
+                } catch (error) {
+                    showAlert(`Error: ${error.message}`, "error");
+                }
+            }
+
+            // Stop Query
+            async function stopQuery() {
+                try {
+                    showAlert("Stopping query...", "info");
+
+                    const response = await fetch(
+                        `${API_BASE}/api/queries/${QUERY_ID}`,
+                        {
+                            method: "DELETE",
+                        },
+                    );
+
+                    const data = await response.json();
+
+                    if (response.ok) {
+                        showAlert(data.message, "success");
+                        document.getElementById("startQueryBtn").disabled =
+                            false;
+                        document.getElementById("stopQueryBtn").disabled = true;
+                        document.getElementById("queryStatusText").textContent =
+                            "Stopped";
+                        if (ws) {
+                            ws.close();
+                            ws = null;
+                        }
+                    } else {
+                        showAlert(data.error, "error");
+                    }
+                } catch (error) {
+                    showAlert(`Error: ${error.message}`, "error");
+                }
+            }
+
+            // WebSocket Connection
+            function connectWebSocket() {
+                ws = new WebSocket(
+                    `ws://localhost:8080/api/queries/${QUERY_ID}/results`,
+                );
+
+                ws.onopen = () => {
+                    document.getElementById("wsStatus").textContent =
+                        "Connected";
+                    showAlert(
+                        "WebSocket connected - streaming results",
+                        "success",
+                    );
+                };
+
+                ws.onmessage = (event) => {
+                    const result = JSON.parse(event.data);
+                    displayResult(result);
+                    resultsReceived++;
+                    document.getElementById("resultsCount").textContent =
+                        resultsReceived;
+                };
+
+                ws.onerror = (error) => {
+                    document.getElementById("wsStatus").textContent = "Error";
+                    showAlert("WebSocket error occurred", "error");
+                };
+
+                ws.onclose = () => {
+                    document.getElementById("wsStatus").textContent =
+                        "Disconnected";
+                    showAlert("WebSocket connection closed", "info");
+                };
+            }
+
+            // Replay Status Polling
+            function startReplayStatusPolling() {
+                replayStatusInterval = setInterval(async () => {
+                    try {
+                        const response = await fetch(
+                            `${API_BASE}/api/replay/status`,
+                        );
+                        const data = await response.json();
+
+                        if (!data.is_running) {
+                            stopReplayStatusPolling();
+                            return;
+                        }
+
+                        document.getElementById("elapsedTime").textContent =
+                            `${data.elapsed_seconds.toFixed(1)}s`;
+                        document.getElementById("inputFile").textContent =
+                            "sensors_correct.nq";
+                        document.getElementById("brokerType").textContent =
+                            "MQTT + Storage";
+                    } catch (error) {
+                        console.error("Failed to fetch replay status:", error);
+                    }
+                }, 1000);
+            }
+
+            function stopReplayStatusPolling() {
+                if (replayStatusInterval) {
+                    clearInterval(replayStatusInterval);
+                    replayStatusInterval = null;
+                }
+            }
+
+            // Display Result
+            function displayResult(result) {
+                const container = document.getElementById("resultsContainer");
+
+                // Remove "no results" message
+                if (container.querySelector(".no-results")) {
+                    container.innerHTML = "";
+                }
+
+                const resultItem = document.createElement("div");
+                resultItem.className = `result-item ${result.source}`;
+
+                const timestamp = new Date(result.timestamp).toLocaleString();
+
+                resultItem.innerHTML = `
+        <div class="result-header">
+          <span class="result-source ${result.source}">${result.source}</span>
+          <span class="result-timestamp">${timestamp}</span>
+        </div>
+        <div class="result-bindings">${JSON.stringify(result.bindings, null, 2)}</div>
+      `;
+
+                container.insertBefore(resultItem, container.firstChild);
+
+                // Keep only last 50 results
+                while (container.children.length > 50) {
+                    container.removeChild(container.lastChild);
+                }
+            }
+
+            // Show Alert
+            function showAlert(message, type) {
+                const container = document.getElementById("alertContainer");
+                const alert = document.createElement("div");
+                alert.className = `alert alert-${type}`;
+                alert.textContent = message;
+
+                container.innerHTML = "";
+                container.appendChild(alert);
+
+                setTimeout(() => {
+                    alert.remove();
+                }, 5000);
+            }
+
+            // Check server connection on load
+            window.addEventListener("load", async () => {
+                try {
+                    const response = await fetch(`${API_BASE}/health`);
+                    if (response.ok) {
+                        showAlert(
+                            "Connected to Janus HTTP API server",
+                            "success",
+                        );
+                    } else {
+                        showAlert(
+                            "Server returned unexpected response",
+                            "error",
+                        );
+                    }
+                } catch (error) {
+                    showAlert(
+                        "Failed to connect to Janus server. Make sure it is running on http://localhost:8080",
+                        "error",
+                    );
+                }
+            });
+        </script>
+    </body>
+</html>

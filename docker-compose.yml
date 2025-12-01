@@ -1,0 +1,44 @@
+version: '3.8'
+
+services:
+  # Eclipse Mosquitto MQTT Broker
+  mosquitto:
+    image: eclipse-mosquitto:2.0
+    container_name: janus-mosquitto
+    ports:
+      - "1883:1883"  # MQTT
+      - "9001:9001"  # WebSocket
+    volumes:
+      - ./docker/mosquitto/config:/mosquitto/config
+      - ./docker/mosquitto/data:/mosquitto/data
+      - ./docker/mosquitto/log:/mosquitto/log
+    networks:
+      - janus-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mosquitto_sub", "-t", "$$SYS/#", "-C", "1", "-i", "healthcheck", "-W", "3"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # Optional: MQTT Web Client (HiveMQ)
+  mqtt-web-client:
+    image: hivemq/hivemq-ce:latest
+    container_name: janus-hivemq-webclient
+    ports:
+      - "8000:8000"  # Web UI
+    networks:
+      - janus-network
+    restart: unless-stopped
+    depends_on:
+      - mosquitto
+    profiles:
+      - web-client
+
+networks:
+  janus-network:
+    driver: bridge
+
+volumes:
+  mosquitto-data:
+  mosquitto-log:

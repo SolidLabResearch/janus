@@ -7,6 +7,7 @@
 //! 4. It provides replay rate defined and will replay the event.
 
 use crate::core::RDFEvent;
+use crate::parsing::rdf_parser;
 use crate::storage::segmented_storage::StreamingSegmentedStorage;
 use core::str;
 use rdkafka::config::ClientConfig;
@@ -113,7 +114,7 @@ impl StreamBusMetrics {
 
     pub fn storage_success_rate(&self) -> f64 {
         if self.events_read > 0 {
-            (self.events_stored as f64 / self.events_read as f64) * 100
+            (self.events_stored as f64 / self.events_read as f64) * 100.0
         } else {
             0.0
         }
@@ -125,11 +126,11 @@ pub struct StreamBus {
     config: StreamBusConfig,
     storage: Arc<StreamingSegmentedStorage>,
     runtime: Arc<Runtime>,
-    events_read: Arc<AtomicU64>,
-    events_published: Arc<AtomicU64>,
-    events_stored: Arc<AtomicU64>,
-    publish_errors: Arc<AtomicU64>,
-    storage_erros: Arc<AtomicU64>,
+    pub events_read: Arc<AtomicU64>,
+    pub events_published: Arc<AtomicU64>,
+    pub events_stored: Arc<AtomicU64>,
+    pub publish_errors: Arc<AtomicU64>,
+    pub storage_errors: Arc<AtomicU64>,
     should_stop: Arc<AtomicBool>,
 }
 
@@ -156,7 +157,7 @@ impl std::error::Error for StreamBusError {}
 impl StreamBus {
     pub fn new(config: StreamBusConfig, storage: Arc<StreamingSegmentedStorage>) -> Self {
         let runtime = Arc::new(
-            tokio::runtime::Builder::new_current_thread()
+            tokio::runtime::Builder::new_multi_thread()
                 .worker_threads(4)
                 .enable_all()
                 .build()
@@ -171,7 +172,7 @@ impl StreamBus {
             events_published: Arc::new(AtomicU64::new(0)),
             events_stored: Arc::new(AtomicU64::new(0)),
             publish_errors: Arc::new(AtomicU64::new(0)),
-            storage_erros: Arc::new(AtomicU64::new(0)),
+            storage_errors: Arc::new(AtomicU64::new(0)),
             should_stop: Arc::new(AtomicBool::new(false)),
         }
     }
@@ -182,26 +183,280 @@ impl StreamBus {
         println!("Input: {}", self.config.input_file);
         println!("Broker: {:?}", self.config.broker_type);
         println!("Topics: {:?}", self.config.topics);
-        println!("Rate of publishing: {} Hz", if self.config.rate_of_publishing == 0{
-            "unlimited".to_string()
-        } else {
-            self.config.rate_of_publishing.to_string()
-        });
-        
+        println!(
+            "Rate of publishing: {} Hz",
+            if self.config.rate_of_publishing == 0 {
+                "unlimited".to_string()
+            } else {
+                self.config.rate_of_publishing.to_string()
+            }
+        );
+
         println!("Loop: {}", self.config.loop_file);
         println!();
-        
-        
+
         let start_time = Instant::now();
-        
+
         match self.config.broker_type {
             BrokerType::Kafka => self.runtime.block_on(self.run_with_kafka())?,
             BrokerType::Mqtt => self.runtime.block_on(self.run_with_mqtt())?,
             BrokerType::None => self.runtime.block_on(self.run_storage_only())?,
         }
-    
+
+        // Force flush storage to ensure all data is persisted
+        println!("Flushing storage...");
+        if let Err(e) = self.storage.flush() {
+            eprintln!("Warning: Failed to flush storage: {}", e);
+        } else {
+            println!("✓ Storage flushed successfully");
+        }
+
         let elapsed = start_time.elapsed().as_secs_f64();
-        
-        Ok(StreamBusMetrics { events_read: (), events_published: (), events_stored: (), publish_errors: (), storage_errors: (), elapsed_seconds: () })
+
+        Ok(StreamBusMetrics {
+            events_read: self.events_read.load(Ordering::Relaxed),
+            events_published: self.events_published.load(Ordering::Relaxed),
+            events_stored: self.events_stored.load(Ordering::Relaxed),
+            publish_errors: self.publish_errors.load(Ordering::Relaxed),
+            storage_errors: self.storage_errors.load(Ordering::Relaxed),
+            elapsed_seconds: elapsed,
+        })
+    }
+
+    /// Start in a background thread (non-blocking)
+    pub fn start_async(&self) -> std::thread::JoinHandle<Result<StreamBusMetrics, StreamBusError>> {
+        let config = self.config.clone();
+        let storage = Arc::clone(&self.storage);
+        let events_read = Arc::clone(&self.events_read);
+        let events_published = Arc::clone(&self.events_published);
+        let events_stored = Arc::clone(&self.events_stored);
+        let publish_errors = Arc::clone(&self.publish_errors);
+        let storage_errors = Arc::clone(&self.storage_errors);
+        let should_stop = Arc::clone(&self.should_stop);
+        let runtime = Arc::clone(&self.runtime);
+
+        std::thread::spawn(move || {
+            let bus = StreamBus {
+                config,
+                storage,
+                runtime,
+                events_read,
+                events_published,
+                events_stored,
+                publish_errors,
+                storage_errors,
+                should_stop,
+            };
+            bus.start()
+        })
+    }
+
+    /// Stop the stream bus
+    pub fn stop(&self) {
+        self.should_stop.store(true, Ordering::Relaxed);
+    }
+
+    /// Get and retrieve the current metrics
+    pub fn get_metrics(&self, start_time: Instant) -> StreamBusMetrics {
+        StreamBusMetrics {
+            events_read: self.events_read.load(Ordering::Relaxed),
+            events_published: self.events_published.load(Ordering::Relaxed),
+            events_stored: self.events_stored.load(Ordering::Relaxed),
+            publish_errors: self.publish_errors.load(Ordering::Relaxed),
+            storage_errors: self.storage_errors.load(Ordering::Relaxed),
+            elapsed_seconds: start_time.elapsed().as_secs_f64(),
+        }
+    }
+
+    async fn run_with_kafka(&self) -> Result<(), StreamBusError> {
+        let kafka_config =
+            self.config.kafka_config.as_ref().ok_or(StreamBusError::ConfigError(
+                "Config of kafka is not provided".to_string(),
+            ))?;
+
+        println!("Connecting to kafka at: {}", kafka_config.bootstrap_servers);
+
+        let producer: FutureProducer = ClientConfig::new()
+            .set("bootstrap.servers", &kafka_config.bootstrap_servers)
+            .set("message.timeout.ms", &kafka_config.message_timeout_ms)
+            .set("client.id", &kafka_config.client_id)
+            .create()
+            .map_err(|e| {
+                StreamBusError::BrokerError(format!("Failed to create the kafka producer: {}", e))
+            })?;
+
+        println!("Connected to kafka!\n");
+
+        self.process_file(|event, line| {
+            let topic = self.config.topics.first().unwrap();
+            let producer_clone = producer.clone();
+            let events_published = Arc::clone(&self.events_published);
+            let publish_errors = Arc::clone(&self.publish_errors);
+
+            async move {
+                let timestamp_key = event.timestamp.to_string();
+                let record = FutureRecord::to(topic).payload(&line).key(&timestamp_key);
+
+                match producer_clone.send(record, Duration::from_secs(0)).await {
+                    Ok(_) => {
+                        events_published.fetch_add(1, Ordering::Relaxed);
+                    }
+                    Err((e, _)) => {
+                        eprintln!("X Kafka Publish Error: {:?}", e);
+                        publish_errors.fetch_add(1, Ordering::Relaxed);
+                    }
+                }
+            }
+        })
+        .await
+    }
+
+    async fn run_with_mqtt(&self) -> Result<(), StreamBusError> {
+        let mqtt_config = self
+            .config
+            .mqtt_config
+            .as_ref()
+            .ok_or(StreamBusError::ConfigError("MQTT config is not provided".to_string()))?;
+
+        println!("Connecting to the MQTT Server at {}:{}", &mqtt_config.host, mqtt_config.port);
+
+        let mut mqttoptions =
+            MqttOptions::new(&mqtt_config.client_id, &mqtt_config.host, mqtt_config.port);
+        mqttoptions.set_keep_alive(Duration::from_secs(mqtt_config.keep_alive_secs));
+
+        let (client, mut eventloop) = AsyncClient::new(mqttoptions, 100);
+
+        //Spawn event loop handler
+        tokio::spawn(async move {
+            loop {
+                match eventloop.poll().await {
+                    Ok(_) => {}
+                    Err(e) => {
+                        eprintln!("MQTT event loop error: {:?}", e);
+                        break;
+                    }
+                }
+            }
+        });
+
+        // Wait for connection
+        sleep(Duration::from_secs(1)).await;
+        println!("Connected to MQTT!\n");
+
+        self.process_file(|event, line| {
+            let topic = self.config.topics.first().unwrap().clone();
+            let client_clone = client.clone();
+            let events_published = Arc::clone(&self.events_published);
+            let publish_errors = Arc::clone(&self.publish_errors);
+
+            async move {
+                match client_clone.publish(topic, QoS::AtLeastOnce, false, line.as_bytes()).await {
+                    Ok(_) => {
+                        events_published.fetch_add(1, Ordering::Relaxed);
+                    }
+                    Err(e) => {
+                        eprintln!("X MQTT publish error: {:?}", e);
+                        publish_errors.fetch_add(1, Ordering::Relaxed);
+                    }
+                }
+            }
+        })
+        .await
+    }
+
+    async fn run_storage_only(&self) -> Result<(), StreamBusError> {
+        println!("Storage mode only\n");
+
+        self.process_file(|_event, _line| async {}).await
+    }
+
+    async fn process_file<F, Fut>(&self, publish_fn: F) -> Result<(), StreamBusError>
+    where
+        F: Fn(RDFEvent, String) -> Fut + Send + Sync,
+        Fut: std::future::Future<Output = ()> + Send,
+    {
+        let interval = if self.config.rate_of_publishing > 0 {
+            Some(Duration::from_micros(1_000_000 / self.config.rate_of_publishing))
+        } else {
+            None
+        };
+
+        let mut last_report = Instant::now();
+        let report_interval = Duration::from_secs(1);
+
+        loop {
+            let file = File::open(&self.config.input_file).map_err(|e| {
+                StreamBusError::FileError(format!("Failed to open the file: {}", e))
+            })?;
+
+            let reader = BufReader::new(file);
+
+            for line in reader.lines() {
+                if self.should_stop.load(Ordering::Relaxed) {
+                    println!("Stop signal is received");
+                    return Ok(());
+                }
+
+                let line = line.map_err(|e| {
+                    StreamBusError::FileError(format!("Failed to read the line: {}", e))
+                })?;
+
+                if line.trim().is_empty() || line.trim().starts_with("#") {
+                    continue;
+                }
+
+                match rdf_parser::parse_rdf_line(&line, self.config.add_timestamps) {
+                    Ok(event) => {
+                        self.events_read.fetch_add(1, Ordering::Relaxed);
+
+                        publish_fn(event.clone(), line.clone()).await;
+
+                        match self.storage.write_rdf_event(event) {
+                            Ok(_) => {
+                                self.events_stored.fetch_add(1, Ordering::Relaxed);
+                            }
+                            Err(e) => {
+                                eprintln!("X Storage write error: {:?}", e);
+                                self.storage_errors.fetch_add(1, Ordering::Relaxed);
+                            }
+                        }
+
+                        if let Some(delay) = interval {
+                            sleep(delay).await;
+                        }
+
+                        if last_report.elapsed() >= report_interval {
+                            let events_read = self.events_read.load(Ordering::Relaxed);
+                            let events_published = self.events_published.load(Ordering::Relaxed);
+                            let events_stored = self.events_stored.load(Ordering::Relaxed);
+                            let publish_errors = self.publish_errors.load(Ordering::Relaxed);
+                            let storage_errors = self.storage_errors.load(Ordering::Relaxed);
+
+                            println!(
+                                "Read: {} | Published: {} | Stored: {} | Errors: P={} S={}",
+                                events_read,
+                                events_published,
+                                events_stored,
+                                publish_errors,
+                                storage_errors
+                            );
+
+                            last_report = Instant::now();
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Failed to parse line: {} - Error: {}", line, e);
+                    }
+                }
+            }
+
+            if !self.config.loop_file {
+                break;
+            }
+
+            println!("Looping file...");
+        }
+
+        Ok(())
     }
 }

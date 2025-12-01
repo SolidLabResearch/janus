@@ -90,6 +90,11 @@ pub mod storage;
 pub mod registry;
 
 pub mod querying;
+
+pub mod execution;
+
+pub mod http;
+
 pub mod error {
     //! Error types and result definitions
 

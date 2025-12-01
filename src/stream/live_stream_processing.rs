@@ -70,6 +70,10 @@ impl LiveStreamProcessing {
     /// let processor = LiveStreamProcessing::new(query.to_string()).unwrap();
     /// ```
     pub fn new(rspql_query: String) -> Result<Self, LiveStreamProcessingError> {
+        println!("=== LiveStreamProcessing: Creating RSPEngine with RSP-QL ===");
+        println!("{}", rspql_query);
+        println!("=== END RSP-QL ===");
+
         let mut engine = RSPEngine::new(rspql_query);
 
         // Initialize the engine to create windows and streams
@@ -170,6 +174,10 @@ impl LiveStreamProcessing {
                 })?,
             )
             .map_err(|e| LiveStreamProcessingError(format!("Failed to add quad: {}", e)))?;
+
+        // Results are consumed by external workers via receive_result()/try_receive_result().
+        // Avoid draining the channel during event ingestion to ensure downstream consumers
+        // observe every live binding.
 
         Ok(())
     }
@@ -318,7 +326,13 @@ impl LiveStreamProcessing {
         })?;
 
         match receiver.try_recv() {
-            Ok(result) => Ok(Some(result)),
+            Ok(result) => {
+                println!(
+                    "LiveStreamProcessing.try_receive_result(): Returning result, bindings: {}",
+                    result.bindings
+                );
+                Ok(Some(result))
+            }
             Err(_) => Ok(None), // Either empty or disconnected
         }
     }
@@ -381,8 +395,24 @@ impl LiveStreamProcessing {
                 }
             }
         } else {
-            // Treat as literal
-            Term::Literal(oxigraph::model::Literal::new_simple_literal(&event.object))
+            // Treat as literal - check if it's a numeric value
+            let literal = if let Ok(_) = event.object.parse::<f64>() {
+                // It's a decimal number - create typed literal for SPARQL aggregations
+                oxigraph::model::Literal::new_typed_literal(
+                    &event.object,
+                    NamedNode::new("http://www.w3.org/2001/XMLSchema#decimal").unwrap(),
+                )
+            } else if let Ok(_) = event.object.parse::<i64>() {
+                // It's an integer
+                oxigraph::model::Literal::new_typed_literal(
+                    &event.object,
+                    NamedNode::new("http://www.w3.org/2001/XMLSchema#integer").unwrap(),
+                )
+            } else {
+                // Plain string literal
+                oxigraph::model::Literal::new_simple_literal(&event.object)
+            };
+            Term::Literal(literal)
         };
 
         // Parse graph - use default graph if empty
