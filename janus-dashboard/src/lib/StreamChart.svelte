@@ -181,7 +181,7 @@
                             const val = Number(cleanValStr);
 
                             if (!isNaN(val)) {
-                                const cleanSource = source ? source.trim().toLowerCase() : "";
+                                const cleanSource = source ? source.trim() .toLowerCase() : "";
                                 const point = { time: timestamp, value: val };
 
                                 if (cleanSource === "historical") {
