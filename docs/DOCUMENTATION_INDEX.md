@@ -3,7 +3,7 @@
 ## Getting Started
 
 1. **START_HERE.md** - 🚀 BEGIN HERE - Quick start guide
-2. **test_setup.sh** - Automated setup script
+2. **scripts/test_setup.sh** - Automated setup script
 3. **docker-compose.yml** - MQTT broker configuration
 
 ## Quick Reference

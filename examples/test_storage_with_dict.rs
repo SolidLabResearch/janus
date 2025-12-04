@@ -12,16 +12,16 @@ fn main() {
     };
 
     let storage = StreamingSegmentedStorage::new(config).expect("Failed to load storage");
-    
+
     let events = storage.query(0, u64::MAX).expect("Query failed");
-    
+
     println!("Total events in storage: {}", events.len());
-    
+
     if events.len() > 0 {
         let dict = storage.get_dictionary().read().unwrap();
         println!("\nDecoded first 5 events:");
         for (i, e) in events.iter().take(5).enumerate() {
-            println!("\nEvent {}:", i+1);
+            println!("\nEvent {}:", i + 1);
             println!("  timestamp: {}", e.timestamp);
             println!("  subject: {:?}", dict.decode(e.subject));
             println!("  predicate: {:?}", dict.decode(e.predicate));

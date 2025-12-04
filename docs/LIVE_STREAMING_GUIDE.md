@@ -47,7 +47,7 @@ docker-compose up -d mosquitto
 ### 2. Start HTTP Server
 
 ```bash
-./start_http_server.sh --clean
+./scripts/start_http_server.sh --clean
 ```
 
 ### 3. Open Dashboard
@@ -201,7 +201,7 @@ Results stream via WebSocket as JSON:
 ```bash
 # Clean storage and restart
 rm -rf data/storage/*
-./start_http_server.sh
+./scripts/start_http_server.sh
 ```
 
 ### No Live Results
@@ -266,7 +266,7 @@ docker-compose restart mosquitto
 Use the automated test script:
 
 ```bash
-./test_live_streaming.sh
+./scripts/test_live_streaming.sh
 ```
 
 This script:

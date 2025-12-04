@@ -1,8 +1,6 @@
 use janus::{
-    api::janus_api::JanusApi,
-    parsing::janusql_parser::JanusQLParser,
-    registry::query_registry::QueryRegistry,
-    storage::segmented_storage::StreamingSegmentedStorage,
+    api::janus_api::JanusApi, parsing::janusql_parser::JanusQLParser,
+    registry::query_registry::QueryRegistry, storage::segmented_storage::StreamingSegmentedStorage,
     storage::util::StreamingConfig,
 };
 use std::sync::Arc;
@@ -22,7 +20,8 @@ WHERE {
     ?sensor ex:temperature ?temp .
   }
 }
-"#.trim();
+"#
+    .trim();
 
     println!("Testing query pipeline...\n");
     println!("Query:\n{}\n", janusql);
@@ -37,15 +36,15 @@ WHERE {
     };
 
     let storage = Arc::new(StreamingSegmentedStorage::new(config).expect("Failed to load storage"));
-    
+
     let events = storage.query(0, u64::MAX).expect("Storage query failed");
     println!("Storage has {} events", events.len());
-    
+
     if events.len() > 0 {
         let dict = storage.get_dictionary().read().unwrap();
         println!("\nFirst 3 events decoded:");
         for (i, e) in events.iter().take(3).enumerate() {
-            println!("Event {}:", i+1);
+            println!("Event {}:", i + 1);
             println!("  subject: {:?}", dict.decode(e.subject));
             println!("  predicate: {:?}", dict.decode(e.predicate));
             println!("  object: {:?}", dict.decode(e.object));
@@ -83,7 +82,7 @@ WHERE {
     println!("\nWaiting for results (5 seconds)...");
     let start = std::time::Instant::now();
     let mut result_count = 0;
-    
+
     while start.elapsed().as_secs() < 5 {
         if let Some(result) = handle.try_receive() {
             result_count += 1;
@@ -92,7 +91,7 @@ WHERE {
             println!("  Timestamp: {}", result.timestamp);
             println!("  Bindings ({} items):", result.bindings.len());
             for (i, binding) in result.bindings.iter().take(3).enumerate() {
-                println!("    {}: {:?}", i+1, binding);
+                println!("    {}: {:?}", i + 1, binding);
             }
         } else {
             std::thread::sleep(std::time::Duration::from_millis(100));

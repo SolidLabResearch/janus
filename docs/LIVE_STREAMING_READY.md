@@ -45,7 +45,7 @@ WebSocket → Dashboard
 
 ```bash
 cd /Users/kushbisen/Code/janus
-./test_live_streaming.sh
+./scripts/test_live_streaming.sh
 ```
 
 This runs a complete test cycle and shows you if everything works.
@@ -56,7 +56,7 @@ This runs a complete test cycle and shows you if everything works.
 
 ```bash
 cd /Users/kushbisen/Code/janus
-./start_http_server.sh --clean
+./scripts/start_http_server.sh --clean
 ```
 
 You should see:
@@ -184,7 +184,7 @@ The live results will keep coming because `loop_file: true` continuously replays
 # Clean storage
 rm -rf data/storage/*
 # Restart server
-./start_http_server.sh
+./scripts/start_http_server.sh
 ```
 
 #### Issue: Only historical results, no live results

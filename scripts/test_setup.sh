@@ -4,6 +4,9 @@
 
 set -e
 
+# Ensure we are in the project root
+cd "$(dirname "$0")/.."
+
 echo "🔧 Janus HTTP API - Complete Setup Test"
 echo "========================================"
 echo ""

@@ -5,6 +5,9 @@
 
 set -e
 
+# Ensure we are in the project root
+cd "$(dirname "$0")/.."
+
 echo "╔════════════════════════════════════════════════════════════════╗"
 echo "║         Janus Live + Historical Streaming Test                ║"
 echo "╚════════════════════════════════════════════════════════════════╝"
@@ -252,7 +255,7 @@ echo ""
 echo -e "${GREEN}✓ All steps completed successfully${NC}"
 echo ""
 echo "To view the dashboard:"
-echo "  1. Start the server: ./start_http_server.sh"
+echo "  1. Start the server: ./scripts/start_http_server.sh"
 echo "  2. Open: examples/demo_dashboard.html in your browser"
 echo "  3. Click 'Start Replay' and wait 10 seconds"
 echo "  4. Click 'Start Query' to see results"

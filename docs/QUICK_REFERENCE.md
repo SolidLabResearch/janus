@@ -3,7 +3,7 @@
 ## Setup (3 Commands)
 
 ```bash
-./test_setup.sh                    # One-time setup
+./scripts/test_setup.sh                    # One-time setup
 docker-compose up -d mosquitto     # Start MQTT
 cargo run --bin http_server        # Start server
 ```
@@ -104,7 +104,7 @@ janus/
 ├── COMPLETE_SOLUTION.md            # Full explanation
 ├── SETUP_GUIDE.md                  # Detailed setup
 ├── README_HTTP_API.md              # API guide
-└── test_setup.sh                   # Automated setup
+└── ./scripts/test_setup.sh                   # Automated setup
 ```
 
 ## Success Checklist
@@ -119,4 +119,4 @@ janus/
 
 ---
 
-**Quick Start:** `./test_setup.sh` then `cargo run --bin http_server`
+**Quick Start:** `./scripts/test_setup.sh` then `cargo run --bin http_server`

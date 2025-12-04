@@ -136,7 +136,7 @@ Total results received: 21
 
 ### CI/CD Checks
 ```bash
-./ci-check.sh
+./scripts/ci-check.sh
 ✅ Formatting check passed!
 ✅ Clippy check passed!
 ✅ All tests passed!
@@ -323,7 +323,7 @@ cargo run --example live_stream_processing_example
 
 **CI/CD Check:**
 ```bash
-./ci-check.sh
+./scripts/ci-check.sh
 ```
 
 **Format Code:**

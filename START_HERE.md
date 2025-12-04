@@ -4,8 +4,7 @@
 
 ```bash
 # 1. Setup (one time)
-./test_setup.sh
-
+   ./scripts/test_setup.sh
 # 2. Start MQTT
 docker-compose up -d mosquitto
 

@@ -44,7 +44,7 @@ git clone https://github.com/SolidLabResearch/janus.git
 cd janus
 
 # Run automated setup
-./test_setup.sh
+./scripts/test_setup.sh
 
 # Start HTTP server (in new terminal)
 cargo run --bin http_server

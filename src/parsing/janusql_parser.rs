@@ -332,7 +332,7 @@ impl JanusQLParser {
             }
 
             let inner_pattern = where_clause[after_opening..end_pos].trim();
-            
+
             // Extract variables from inner pattern
             let var_regex = Regex::new(r"\?[\w]+").unwrap();
             for cap in var_regex.captures_iter(inner_pattern) {
@@ -348,7 +348,11 @@ impl JanusQLParser {
         (where_string, bound_vars)
     }
 
-    fn filter_select_clause(&self, select_clause: &str, allowed_vars: &std::collections::HashSet<String>) -> String {
+    fn filter_select_clause(
+        &self,
+        select_clause: &str,
+        allowed_vars: &std::collections::HashSet<String>,
+    ) -> String {
         if allowed_vars.is_empty() {
             return select_clause.to_string();
         }
@@ -359,7 +363,7 @@ impl JanusQLParser {
         }
 
         let content = trimmed[6..].trim();
-        
+
         // Regex to capture projection items:
         // 1. Aliased expressions: (expression AS ?var) - handle nested parens by matching until AS ?var)
         // 2. Simple variables: ?var
@@ -370,20 +374,20 @@ impl JanusQLParser {
 
         for cap in item_regex.captures_iter(content) {
             let item = cap[0].to_string();
-            
+
             // Check if item uses allowed variables
             let mut is_valid = false;
-            
+
             // If it's an expression, check if input vars are allowed
             // Note: We check if ANY of the variables inside are bound.
             // For AVG(?a), if ?a is bound, we keep it.
             // If it's a simple var ?a, check if bound.
-            
+
             let mut vars_in_item = Vec::new();
             for var_cap in var_regex.captures_iter(&item) {
                 vars_in_item.push(var_cap[0].to_string());
             }
-            
+
             // Special case: AS ?alias - the alias is a new variable, not a bound one.
             // But usually expressions are like (AVG(?a) AS ?b). ?a must be bound.
             // We only care about input variables.
@@ -391,7 +395,7 @@ impl JanusQLParser {
             // Since parsing "AS ?alias" is hard with regex, we just check if ANY variable in the item is bound.
             // If the item is just "?alias" (output of previous), it might be tricky if this is a subquery.
             // But here we are filtering the top-level SELECT.
-            
+
             for var in vars_in_item {
                 if allowed_vars.contains(&var) {
                     is_valid = true;
@@ -405,11 +409,11 @@ impl JanusQLParser {
         }
 
         if kept_items.is_empty() {
-             // Fallback: if nothing matches, return original (might fail) or SELECT *
-             // Given the issue, returning "SELECT *" might be safer if pattern is not empty,
-             // but "SELECT *" is invalid if we have GROUP BY (implied by AVG).
-             // Let's return original and hope for best if filtering failed.
-             return select_clause.to_string();
+            // Fallback: if nothing matches, return original (might fail) or SELECT *
+            // Given the issue, returning "SELECT *" might be safer if pattern is not empty,
+            // but "SELECT *" is invalid if we have GROUP BY (implied by AVG).
+            // Let's return original and hope for best if filtering failed.
+            return select_clause.to_string();
         }
 
         format!("SELECT {}", kept_items.join(" "))
@@ -473,8 +477,6 @@ impl JanusQLParser {
             format!("WHERE {{\n  {}\n}}", where_patterns.join("\n  "))
         }
     }
-
-
 
     fn unwrap_iri(&self, prefixed_iri: &str, prefix_mapper: &HashMap<String, String>) -> String {
         let trimmed = prefixed_iri.trim();

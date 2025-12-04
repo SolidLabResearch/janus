@@ -5,6 +5,9 @@
 
 set -e
 
+# Ensure we are in the project root
+cd "$(dirname "$0")/.."
+
 echo "╔════════════════════════════════════════════════════════════════╗"
 echo "║         Janus HTTP Server Startup Script                      ║"
 echo "╚════════════════════════════════════════════════════════════════╝"

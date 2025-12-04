@@ -51,8 +51,7 @@ Before pushing to the repository, run the CI/CD checks locally:
 make ci-check
 
 # Or use the script directly
-./ci-check.sh
-```
+   ./scripts/ci-check.sh```
 
 This will run:
 - **rustfmt** - Code formatting check

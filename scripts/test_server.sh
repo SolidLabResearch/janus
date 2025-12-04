@@ -1,4 +1,5 @@
 #!/bin/bash
+cd "$(dirname "$0")/.."
 cargo run --bin http_server &
 SERVER_PID=$!
 sleep 3
