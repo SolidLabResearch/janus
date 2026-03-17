@@ -42,6 +42,25 @@ path = "src/main.rs"
 name = "http_server"
 path = "src/bin/http_server.rs"
 
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "storage_write"
+harness = false
+
+[[bench]]
+name = "historical_fixed"
+harness = false
+
+[[bench]]
+name = "historical_sliding"
+harness = false
+
+[[bench]]
+name = "live_injection"
+harness = false
+
 [profile.release]
 opt-level = 3
 lto = true

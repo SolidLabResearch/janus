@@ -70,10 +70,6 @@ impl LiveStreamProcessing {
     /// let processor = LiveStreamProcessing::new(query.to_string()).unwrap();
     /// ```
     pub fn new(rspql_query: String) -> Result<Self, LiveStreamProcessingError> {
-        println!("=== LiveStreamProcessing: Creating RSPEngine with RSP-QL ===");
-        println!("{}", rspql_query);
-        println!("=== END RSP-QL ===");
-
         let mut engine = RSPEngine::new(rspql_query);
 
         // Initialize the engine to create windows and streams
@@ -326,13 +322,7 @@ impl LiveStreamProcessing {
         })?;
 
         match receiver.try_recv() {
-            Ok(result) => {
-                println!(
-                    "LiveStreamProcessing.try_receive_result(): Returning result, bindings: {}",
-                    result.bindings
-                );
-                Ok(Some(result))
-            }
+            Ok(result) => Ok(Some(result)),
             Err(_) => Ok(None), // Either empty or disconnected
         }
     }

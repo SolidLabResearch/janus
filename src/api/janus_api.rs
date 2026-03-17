@@ -313,12 +313,14 @@ impl JanusApi {
 
             // Spawn MQTT subscriber for each live window
             for window in &live_windows {
+                let (host, port, topic) = parse_mqtt_uri(&window.stream_name);
+
                 let config = MqttSubscriberConfig {
-                    host: "localhost".to_string(),
-                    port: 1883,
+                    host,
+                    port,
                     client_id: format!("janus_live_{}_{}", query_id.clone(), window.stream_name),
                     keep_alive_secs: 30,
-                    topic: "sensors".to_string(), // TODO: map from stream name or config
+                    topic,
                     stream_uri: window.stream_name.clone(),
                     window_graph: window.window_name.clone(),
                 };
@@ -342,31 +344,21 @@ impl JanusApi {
             let processor_for_worker = Arc::clone(&live_processor);
             let handle = thread::spawn(move || {
                 let converter = ResultConverter::new(query_id_clone);
-                println!("Live worker thread started");
-                let mut results_sent = 0;
 
-                // Continuously receive live results
                 loop {
-                    // Check for shutdown signal
                     if shutdown_rx.try_recv().is_ok() {
-                        println!("Live worker received shutdown signal");
                         break;
                     }
 
                     let processor = processor_for_worker.lock().unwrap();
                     match processor.try_receive_result() {
                         Ok(Some(binding)) => {
-                            println!("Live worker received binding: {:?}", binding);
                             let result = converter.from_live_binding(binding);
                             if tx.send(result).is_err() {
-                                println!("Live worker: channel closed, exiting");
                                 break;
                             }
-                            results_sent += 1;
-                            println!("Live worker sent result #{}", results_sent);
                         }
                         Ok(None) => {
-                            // No result available, release lock and sleep briefly
                             drop(processor);
                             thread::sleep(std::time::Duration::from_millis(10));
                         }
@@ -376,7 +368,6 @@ impl JanusApi {
                         }
                     }
                 }
-                println!("Live worker thread exiting. Sent {} results", results_sent);
             });
 
             shutdown_senders.push(shutdown_tx);
@@ -459,5 +450,93 @@ impl JanusApi {
         running_map
             .get(query_id)
             .and_then(|running| running.status.read().ok().map(|s| s.clone()))
+    }
+}
+
+/// Parses an MQTT stream URI into `(host, port, topic)`.
+///
+/// Handles `mqtt://host:port/topic` and `mqtts://host:port/topic` directly.
+/// For any other URI scheme (e.g. `http://example.org/sensors`) it falls back
+/// to `localhost:1883` with the last path segment as the topic, keeping all
+/// existing queries backward compatible.
+fn parse_mqtt_uri(stream_uri: &str) -> (String, u16, String) {
+    if stream_uri.starts_with("mqtt://") || stream_uri.starts_with("mqtts://") {
+        let without_scheme =
+            stream_uri.trim_start_matches("mqtts://").trim_start_matches("mqtt://");
+
+        let (authority, path) = if let Some(slash) = without_scheme.find('/') {
+            (&without_scheme[..slash], &without_scheme[slash + 1..])
+        } else {
+            (without_scheme, "")
+        };
+
+        let (host, port) = if let Some(colon) = authority.rfind(':') {
+            let port = authority[colon + 1..].parse::<u16>().unwrap_or(1883);
+            (authority[..colon].to_string(), port)
+        } else {
+            (authority.to_string(), 1883u16)
+        };
+
+        let topic = if path.is_empty() {
+            "default".to_string()
+        } else {
+            path.to_string()
+        };
+        return (host, port, topic);
+    }
+
+    // Non-mqtt URI: derive topic from last path segment, use localhost:1883.
+    let topic = stream_uri
+        .trim_end_matches('/')
+        .rsplit('/')
+        .next()
+        .filter(|s| !s.is_empty())
+        .unwrap_or(stream_uri)
+        .to_string();
+    ("localhost".to_string(), 1883u16, topic)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_mqtt_uri;
+
+    #[test]
+    fn test_parse_mqtt_uri_with_port() {
+        let (host, port, topic) = parse_mqtt_uri("mqtt://mybroker:1884/temperature");
+        assert_eq!(host, "mybroker");
+        assert_eq!(port, 1884);
+        assert_eq!(topic, "temperature");
+    }
+
+    #[test]
+    fn test_parse_mqtt_uri_default_port() {
+        let (host, port, topic) = parse_mqtt_uri("mqtt://mybroker/sensors");
+        assert_eq!(host, "mybroker");
+        assert_eq!(port, 1883);
+        assert_eq!(topic, "sensors");
+    }
+
+    #[test]
+    fn test_parse_mqtts_uri() {
+        let (host, port, topic) = parse_mqtt_uri("mqtts://secure-broker:8883/readings");
+        assert_eq!(host, "secure-broker");
+        assert_eq!(port, 8883);
+        assert_eq!(topic, "readings");
+    }
+
+    #[test]
+    fn test_parse_http_uri_fallback() {
+        let (host, port, topic) = parse_mqtt_uri("http://example.org/sensors");
+        assert_eq!(host, "localhost");
+        assert_eq!(port, 1883);
+        assert_eq!(topic, "sensors");
+    }
+
+    #[test]
+    fn test_parse_http_uri_fallback_trailing_slash() {
+        let (host, port, topic) = parse_mqtt_uri("http://example.org/sensors/");
+        assert_eq!(host, "localhost");
+        assert_eq!(port, 1883);
+        assert_eq!(topic, "sensors");
     }
 }
