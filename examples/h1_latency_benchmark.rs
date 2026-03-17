@@ -274,7 +274,7 @@ fn run_isolation_test() -> Vec<(u64, f64, f64)> {
 
     let rspql = r#"
         PREFIX ex: <http://test.org/>
-        REGISTER RStream ex:iso_out AS SELECT (COUNT(*) AS ?cnt)
+        REGISTER RStream ex:iso_out AS SELECT ?s ?p ?o
         FROM NAMED WINDOW ex:iso_win ON STREAM ex:live_stream [RANGE 5000 STEP 5000]
         WHERE { WINDOW ex:iso_win { ?s ?p ?o } }
     "#;
@@ -290,25 +290,32 @@ fn run_isolation_test() -> Vec<(u64, f64, f64)> {
         let bg_handle = std::thread::spawn(move || {
             let executor = HistoricalExecutor::new(storage_clone, OxigraphAdapter::new());
             let sparql_query = "SELECT * WHERE { ?s ?p ?o } LIMIT 100";
-            let interval = if bg_rate > 0 {
-                std::time::Duration::from_millis(1000 / bg_rate)
+            // Always use a short sleep so the stop flag is checked promptly.
+            // For bg_rate=0 we still sleep but never issue queries.
+            let query_interval = if bg_rate > 0 {
+                Some(std::time::Duration::from_millis(1000 / bg_rate))
             } else {
-                std::time::Duration::from_secs(9999)
+                None
             };
 
             while !stop_clone.load(std::sync::atomic::Ordering::Relaxed) {
-                let window_def = WindowDefinition {
-                    window_name: "bg_window".to_string(),
-                    stream_name: "bg_stream".to_string(),
-                    width: 0,
-                    slide: 0,
+                if let Some(interval) = query_interval {
+                    let window_def = WindowDefinition {
+                        window_name: "bg_window".to_string(),
+                        stream_name: "bg_stream".to_string(),
+                        width: 0,
+                        slide: 0,
                     offset: None,
                     start: Some(1_000_000),
                     end: Some(2_000_000),
                     window_type: WindowType::HistoricalFixed,
                 };
                 let _ = executor.execute_fixed_window(&window_def, sparql_query).ok();
-                std::thread::sleep(interval);
+                    std::thread::sleep(interval);
+                } else {
+                    // bg_rate=0: no queries, just sleep briefly to allow stop-flag polling
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                }
             }
         });
 
