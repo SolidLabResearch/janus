@@ -752,6 +752,15 @@ impl StreamingSegmentedStorage {
         if let Some(handle) = self.flush_handle.take() {
             handle.join().unwrap();
         }
+
+        // Save dictionary to disk
+        let dict_path = format!("{}/dictionary.bin", self.config.segment_base_path);
+        self.dictionary
+            .read()
+            .unwrap()
+            .save_to_file(std::path::Path::new(&dict_path))
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+
         Ok(())
     }
 
