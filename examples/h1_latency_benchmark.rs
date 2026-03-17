@@ -272,9 +272,12 @@ fn run_isolation_test() -> Vec<(u64, f64, f64)> {
     let mut results = Vec::new();
     let background_rates = vec![0u64, 1, 5, 10];
 
-    let rspql = "PREFIX ex: <http://test.org/> REGISTER RStream ex:out AS SELECT (COUNT(*) AS ?cnt) \
-                 FROM NAMED WINDOW ex:w ON STREAM ex:s [RANGE 5000 STEP 5000] \
-                 WHERE { WINDOW ex:w { ?s ?p ?o } }";
+    let rspql = r#"
+        PREFIX ex: <http://test.org/>
+        REGISTER RStream ex:iso_out AS SELECT (COUNT(*) AS ?cnt)
+        FROM NAMED WINDOW ex:iso_win ON STREAM ex:live_stream [RANGE 5000 STEP 5000]
+        WHERE { WINDOW ex:iso_win { ?s ?p ?o } }
+    "#;
 
     for bg_rate in background_rates {
         println!("  Testing {} background queries/sec...", bg_rate);
@@ -313,7 +316,7 @@ fn run_isolation_test() -> Vec<(u64, f64, f64)> {
         let mut live_times: Vec<f64> = Vec::new();
         let mut proc = LiveStreamProcessing::new(rspql.to_string())
             .expect("LSP init failed");
-        proc.register_stream("http://test.org/s").expect("Register failed");
+        proc.register_stream("http://test.org/live_stream").expect("Register failed");
         proc.start_processing().expect("Start failed");
 
         let base_ts = 3_000_000u64;
@@ -322,7 +325,7 @@ fn run_isolation_test() -> Vec<(u64, f64, f64)> {
             let window_offset = cycle * 10_000;
             for i in 0..10u64 {
                 let evt = make_test_rdf_event(i, base_ts + window_offset + i * 100);
-                let _ = proc.add_event("http://test.org/s", evt).ok();
+                let _ = proc.add_event("http://test.org/live_stream", evt).ok();
             }
             // Sentinel past window boundary to trigger close
             let sentinel = make_test_rdf_event(
@@ -330,7 +333,7 @@ fn run_isolation_test() -> Vec<(u64, f64, f64)> {
                 base_ts + window_offset + 10 * 100 + 6000,
             );
             let t = Instant::now();
-            let _ = proc.add_event("http://test.org/s", sentinel).ok();
+            let _ = proc.add_event("http://test.org/live_stream", sentinel).ok();
 
             // Poll up to 5 seconds
             let mut got_result = false;

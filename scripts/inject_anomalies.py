@@ -42,13 +42,17 @@ def parse_nquads(file_path: str) -> List[Tuple[str, int]]:
 def extract_timestamp_from_line(line: str) -> int:
     """Extract timestamp from N-Quads line.
 
-    Looks for timestamps in quoted strings or URIs in the quad.
-    Very permissive - returns 0 if no timestamp found.
+    Handles two formats:
+    1. Trailing comment: <sub> <pred> <obj> <graph> . #1001000
+    2. 13-digit epoch ms embedded in URIs/strings
     """
     try:
-        # Look for numeric timestamps in the line
-        # Example: <http://example.org/obs/123456> or similar
         import re
+        # Format 1: trailing #timestamp comment (our synthetic data format)
+        trail = re.search(r'#(\d+)\s*$', line)
+        if trail:
+            return int(trail.group(1))
+        # Format 2: 13-digit epoch timestamps in URIs or quoted strings
         matches = re.findall(r'["\']?(\d{13})["\']?', line)
         if matches:
             return int(matches[0])
@@ -252,8 +256,13 @@ def main():
     parser.add_argument("--spec", required=True, help="Anomaly specification JSON file")
     parser.add_argument("--output", required=True, help="Output N-Quads file (with anomalies)")
     parser.add_argument("--ground-truth", required=True, help="Output ground truth JSON file")
+    parser.add_argument("--seed", type=int, default=0,
+                        help="Random seed; shifts anomaly start timestamps for reproducible variation")
 
     args = parser.parse_args()
+
+    import random
+    rng = random.Random(args.seed)
 
     # Load input
     print(f"Loading {args.input}...")
@@ -265,6 +274,17 @@ def main():
     with open(args.spec, 'r') as f:
         spec = json.load(f)
     print(f"  Loaded {len(spec.get('anomalies', []))} anomalies")
+
+    # Apply seed-based timestamp offset for reproducible variation
+    # Each seed shifts all anomaly timestamps by seed * 100_000 ms
+    if args.seed != 0:
+        offset_ms = args.seed * 100_000
+        spec = json.loads(json.dumps(spec))  # deep copy
+        for anomaly in spec.get("anomalies", []):
+            for key in ("start_timestamp", "timestamp"):
+                if key in anomaly:
+                    anomaly[key] = anomaly[key] + offset_ms
+        print(f"  Applied seed offset: +{offset_ms} ms")
 
     # Apply anomalies
     print("Applying anomalies...")
