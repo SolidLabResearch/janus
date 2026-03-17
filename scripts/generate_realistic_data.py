@@ -1,30 +1,53 @@
+#!/usr/bin/env python3
+import argparse
 import random
 import math
+import os
 
-# Generate 1000 data points
-num_points = 1000
-base_temp = 23.0
 
-with open("data/realistic_sensors.nq", "w") as f:
-    for i in range(num_points):
-        # Use a dummy timestamp (will be replaced by server during replay)
-        timestamp = 1000 * i
+def main():
+    parser = argparse.ArgumentParser(description='Generate realistic sensor data as N-Quads')
+    parser.add_argument('--size', type=int, default=1000, help='Number of events to generate')
+    parser.add_argument('--output', type=str, default='data/realistic_sensors.nq', help='Output file path')
+    args = parser.parse_args()
 
-        # Create a sine wave + random noise pattern
-        # Sine wave period: 100 points
-        sine_component = 2.0 * math.sin(i * 2 * math.pi / 100)
+    num_points = args.size
+    output_path = args.output
+    base_temp = 23.0
+    base_ts = 1_000_000  # Start timestamp in milliseconds, 1s intervals
 
-        # Random noise: +/- 0.5
-        noise = random.uniform(-0.5, 0.5)
+    out_dir = os.path.dirname(output_path)
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
 
-        # Sensor 1: Base + Sine + Noise
-        val1 = base_temp + sine_component + noise
-        f.write(f"{timestamp} <http://example.org/sensor1> <http://example.org/temperature> \"{val1:.2f}\"^^<http://www.w3.org/2001/XMLSchema#decimal> <http://example.org/sensorStream> .\n")
+    with open(output_path, "w") as f:
+        for i in range(num_points):
+            timestamp = base_ts + i * 1000  # 1-second intervals
 
-        # Sensor 2: Base + Cosine + Noise (slightly different phase)
-        cosine_component = 2.0 * math.cos(i * 2 * math.pi / 100)
-        noise2 = random.uniform(-0.5, 0.5)
-        val2 = base_temp + cosine_component + noise2
-        f.write(f"{timestamp} <http://example.org/sensor2> <http://example.org/temperature> \"{val2:.2f}\"^^<http://www.w3.org/2001/XMLSchema#decimal> <http://example.org/sensorStream> .\n")
+            # Sine wave + noise for sensor 1
+            sine_component = 2.0 * math.sin(i * 2 * math.pi / 100)
+            noise = random.uniform(-0.5, 0.5)
+            val1 = base_temp + sine_component + noise
+            f.write(
+                f"<http://example.org/sensor1> "
+                f"<http://example.org/temperature> "
+                f"\"{val1:.2f}\"^^<http://www.w3.org/2001/XMLSchema#decimal> "
+                f"<http://example.org/sensorStream> . #{timestamp}\n"
+            )
 
-print(f"Generated data/realistic_sensors.nq with {num_points} points")
+            # Cosine wave + noise for sensor 2
+            cosine_component = 2.0 * math.cos(i * 2 * math.pi / 100)
+            noise2 = random.uniform(-0.5, 0.5)
+            val2 = base_temp + cosine_component + noise2
+            f.write(
+                f"<http://example.org/sensor2> "
+                f"<http://example.org/temperature> "
+                f"\"{val2:.2f}\"^^<http://www.w3.org/2001/XMLSchema#decimal> "
+                f"<http://example.org/sensorStream> . #{timestamp}\n"
+            )
+
+    print(f"Generated {output_path} with {num_points} points")
+
+
+if __name__ == '__main__':
+    main()
