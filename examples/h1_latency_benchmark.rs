@@ -269,6 +269,10 @@ fn run_isolation_test() -> Vec<(u64, f64, f64)> {
     let dataset_path = format!("data/h1_dataset_{}.nq", dataset_size);
     load_nquads(&dataset_path, &storage);
 
+    // Use same timestamp anchor as run_single: just past the historical data
+    let (_, max_ts) = read_timestamp_range(&dataset_path);
+    let base_ts = max_ts + 1_000_000; // 1 second past end of historical data
+
     let mut results = Vec::new();
     let background_rates = vec![0u64, 1, 5, 10];
 
@@ -325,8 +329,6 @@ fn run_isolation_test() -> Vec<(u64, f64, f64)> {
             .expect("LSP init failed");
         proc.register_stream("http://test.org/live_stream").expect("Register failed");
         proc.start_processing().expect("Start failed");
-
-        let base_ts = 3_000_000u64;
 
         for cycle in 0..10u64 {
             let window_offset = cycle * 10_000;
