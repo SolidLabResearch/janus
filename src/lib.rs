@@ -95,6 +95,9 @@ pub mod execution;
 
 pub mod http;
 
+/// Benchmarking utilities and helpers
+pub mod benchmarking;
+
 pub mod error {
     //! Error types and result definitions
 
