@@ -638,7 +638,10 @@ impl StreamingSegmentedStorage {
                                 // Load index directory if index file exists
                                 let (index_directory, start_ts, end_ts, record_count) =
                                     if fs::metadata(&index_path).is_ok() {
-                                        Self::load_index_directory_from_file(&index_path)
+                                        Self::load_index_directory_from_file(
+                                            &index_path,
+                                            self.config.entries_per_index_block,
+                                        )
                                             .unwrap_or_else(|_| (Vec::new(), 0, u64::MAX, 0))
                                     } else {
                                         (Vec::new(), 0, u64::MAX, 0)
@@ -674,6 +677,7 @@ impl StreamingSegmentedStorage {
     // Loading the index directory from an existing index file on disk
     fn load_index_directory_from_file(
         index_path: &str,
+        entries_per_index_block: usize,
     ) -> std::io::Result<(Vec<IndexBlock>, u64, u64, u64)> {
         use std::io::Read;
 
@@ -696,7 +700,7 @@ impl StreamingSegmentedStorage {
 
         // Read all entries to reconstruct blocks
         // Note: This is a simplified reconstruction - in practice you'd want to store block boundaries
-        let entries_per_block = 1000; // From config.entries_per_index_block
+        let entries_per_block = entries_per_index_block;
         let mut current_block_start = 0;
 
         while current_block_start < buffer.len() {
