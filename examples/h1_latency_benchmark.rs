@@ -28,6 +28,7 @@ use janus::{
     querying::oxigraph_adapter::OxigraphAdapter,
     storage::segmented_storage::StreamingSegmentedStorage,
     storage::util::StreamingConfig,
+    stream::comparator::{ComparatorConfig, StatefulComparator},
     stream::live_stream_processing::LiveStreamProcessing,
 };
 use std::sync::Arc;
@@ -217,12 +218,25 @@ fn run_single(dataset_size: usize, event_rate: u64) -> RunResult {
         std::thread::sleep(std::time::Duration::from_millis(1));
     }
 
-    // Stage 4: Result combination (very fast, sub-millisecond)
+    // Stage 4: Real comparator timing (pre-warm window buffer, then measure)
+    let cmp_config = ComparatorConfig {
+        abs_threshold: 10.0,
+        rel_threshold: 0.2,
+        catchup_trigger: 15.0,
+        slope_epsilon: 0.1,
+        volatility_buffer: 2.0,
+        window_size: 10,
+        outlier_z_threshold: 3.0,
+    };
+    let mut comparator = StatefulComparator::new(cmp_config);
+    // Pre-warm: fill the window buffer (window_size - 1 calls)
+    for i in 0..9 {
+        let _ = comparator.update_and_compare(i as f64, 100.0 + i as f64 * 0.1, 100.0);
+    }
     let comparator_times: Vec<f64> = (0..50)
-        .map(|_| {
+        .map(|i| {
             let t = Instant::now();
-            // Simulate comparator logic
-            let _ = (100.5_f64 - 100.0_f64).abs() > 1.0;
+            let _ = comparator.update_and_compare((9 + i) as f64, 100.5, 100.0);
             t.elapsed().as_secs_f64() * 1000.0
         })
         .collect();
@@ -238,7 +252,6 @@ fn run_single(dataset_size: usize, event_rate: u64) -> RunResult {
 
 fn run_isolation_test() -> Vec<(u64, f64, f64)> {
     let dataset_size = 100_000usize;
-    let event_rate = 100u64;
 
     let tmp = tempfile::tempdir().expect("Cannot create temp dir");
     let config = StreamingConfig {
@@ -259,6 +272,10 @@ fn run_isolation_test() -> Vec<(u64, f64, f64)> {
     let mut results = Vec::new();
     let background_rates = vec![0u64, 1, 5, 10];
 
+    let rspql = "PREFIX ex: <http://test.org/> REGISTER RStream ex:out AS SELECT (COUNT(*) AS ?cnt) \
+                 FROM NAMED WINDOW ex:w ON STREAM ex:s [RANGE 5000 STEP 5000] \
+                 WHERE { WINDOW ex:w { ?s ?p ?o } }";
+
     for bg_rate in background_rates {
         println!("  Testing {} background queries/sec...", bg_rate);
 
@@ -267,7 +284,6 @@ fn run_isolation_test() -> Vec<(u64, f64, f64)> {
         let stop_clone = Arc::clone(&stop);
 
         // Spawn background historical query thread
-
         let bg_handle = std::thread::spawn(move || {
             let executor = HistoricalExecutor::new(storage_clone, OxigraphAdapter::new());
             let sparql_query = "SELECT * WHERE { ?s ?p ?o } LIMIT 100";
@@ -293,43 +309,61 @@ fn run_isolation_test() -> Vec<(u64, f64, f64)> {
             }
         });
 
-        // Measure live window latency under background load
-        let mut live_times = Vec::new();
-        for _ in 0..10 {
-            let rspql = "PREFIX ex: <http://test.org/> REGISTER RStream ex:out AS SELECT * \
-                         FROM NAMED WINDOW ex:w ON STREAM ex:s [RANGE 5000 STEP 5000] \
-                         WHERE { WINDOW ex:w { ?s ?p ?o } }";
-            let mut proc = LiveStreamProcessing::new(rspql.to_string()).ok();
-            if let Some(ref mut p) = proc {
-                let _ = p.register_stream("http://test.org/s").ok();
-                let _ = p.start_processing().ok();
-                for i in 0..10u64 {
-                    let evt = make_test_rdf_event(i, 3_000_000 + i * 100);
-                    let _ = p.add_event("http://test.org/s", evt).ok();
+        // Reuse one LiveStreamProcessing instance for all 10 cycles at this bg_rate
+        let mut live_times: Vec<f64> = Vec::new();
+        let mut proc = LiveStreamProcessing::new(rspql.to_string())
+            .expect("LSP init failed");
+        proc.register_stream("http://test.org/s").expect("Register failed");
+        proc.start_processing().expect("Start failed");
+
+        let base_ts = 3_000_000u64;
+
+        for cycle in 0..10u64 {
+            let window_offset = cycle * 10_000;
+            for i in 0..10u64 {
+                let evt = make_test_rdf_event(i, base_ts + window_offset + i * 100);
+                let _ = proc.add_event("http://test.org/s", evt).ok();
+            }
+            // Sentinel past window boundary to trigger close
+            let sentinel = make_test_rdf_event(
+                99,
+                base_ts + window_offset + 10 * 100 + 6000,
+            );
+            let t = Instant::now();
+            let _ = proc.add_event("http://test.org/s", sentinel).ok();
+
+            // Poll up to 5 seconds
+            let mut got_result = false;
+            for _ in 0..5000 {
+                if proc.try_receive_result().ok().flatten().is_some() {
+                    live_times.push(t.elapsed().as_secs_f64() * 1000.0);
+                    got_result = true;
+                    break;
                 }
-                let sentinel = make_test_rdf_event(99, 3_000_000 + 10 * 100 + 6000);
-                let t = Instant::now();
-                let _ = p.add_event("http://test.org/s", sentinel).ok();
-                for _ in 0..1000 {
-                    if p.try_receive_result().ok().flatten().is_some() {
-                        live_times.push(t.elapsed().as_secs_f64() * 1000.0);
-                        break;
-                    }
-                    std::thread::sleep(std::time::Duration::from_millis(1));
-                }
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+            if !got_result {
+                eprintln!(
+                    "WARNING: isolation cycle {} timed out at bg_rate={}",
+                    cycle, bg_rate
+                );
+                live_times.push(5000.0); // worst-case timeout
             }
         }
 
         stop.store(true, std::sync::atomic::Ordering::Relaxed);
         bg_handle.join().ok();
 
-        let (mean, std_dev) = if !live_times.is_empty() {
-            (
-                live_times.iter().sum::<f64>() / live_times.len() as f64,
-                0.0, // simplified
-            )
+        let mean = live_times.iter().sum::<f64>() / live_times.len() as f64;
+        let std_dev = if live_times.len() > 1 {
+            let var = live_times
+                .iter()
+                .map(|x| (x - mean).powi(2))
+                .sum::<f64>()
+                / live_times.len() as f64;
+            var.sqrt()
         } else {
-            (0.0, 0.0)
+            0.0
         };
 
         results.push((bg_rate, mean, std_dev));
@@ -509,6 +543,11 @@ fn write_h1_summary(results: &[(usize, u64, Vec<RunResult>)]) -> std::io::Result
         let (live_mean, live_std) = analyse_runs(&lives);
         let (comp_mean, comp_std) = analyse_runs(&comps);
         let total_mean = write_mean + hist_mean + live_mean + comp_mean;
+        let total_std = (write_std.powi(2)
+            + hist_std.powi(2)
+            + live_std.powi(2)
+            + comp_std.powi(2))
+        .sqrt();
         let hist_pct = if total_mean > 0.0 {
             (hist_mean / total_mean) * 100.0
         } else {
@@ -529,7 +568,7 @@ fn write_h1_summary(results: &[(usize, u64, Vec<RunResult>)]) -> std::io::Result
             comp_mean,
             comp_std,
             total_mean,
-            0.0, // total_std computed from component stds
+            total_std,
             hist_pct
         )?;
     }
