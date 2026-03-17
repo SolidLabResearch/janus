@@ -1,4 +1,5 @@
 use crate::{
+    core::RDFEvent,
     execution::{HistoricalExecutor, ResultConverter},
     parsing::janusql_parser::{JanusQLParser, WindowType},
     querying::oxigraph_adapter::OxigraphAdapter,
@@ -91,6 +92,8 @@ struct RunningQuery {
     shutdown_senders: Vec<Sender<()>>,
     // MQTT subscriber instances (for stopping)
     mqtt_subscribers: Vec<Arc<MqttSubscriber>>,
+    // Event sender for programmatic push_event() calls
+    event_tx: Option<Sender<(String, RDFEvent)>>,
 }
 
 #[allow(dead_code)]
@@ -272,6 +275,7 @@ impl JanusApi {
         // 5. Spawn live worker thread and MQTT subscribers (if there are live windows)
         let mut mqtt_subscribers = Vec::new();
         let mut mqtt_subscriber_handle = None;
+        let mut event_tx_for_running: Option<Sender<(String, RDFEvent)>> = None;
 
         let live_handle = if !parsed.live_windows.is_empty() && !parsed.rspql_query.is_empty() {
             let tx = result_tx.clone();
@@ -279,6 +283,9 @@ impl JanusApi {
             let query_id_clone = query_id.clone();
             let live_windows = parsed.live_windows.clone();
             let (shutdown_tx, shutdown_rx) = mpsc::channel::<()>();
+            // Create event channel for programmatic push_event() calls
+            let (event_tx, event_rx) = mpsc::channel::<(String, RDFEvent)>();
+            event_tx_for_running = Some(event_tx);
 
             // Create LiveStreamProcessing wrapped in Arc<Mutex<>> for sharing with MQTT subscriber
             let live_processor = match LiveStreamProcessing::new(rspql) {
@@ -350,6 +357,22 @@ impl JanusApi {
                         break;
                     }
 
+                    // Check for pushed events from push_event()
+                    match event_rx.try_recv() {
+                        Ok((stream_uri, event)) => {
+                            let processor = processor_for_worker.lock().unwrap();
+                            if let Err(e) = processor.add_event(&stream_uri, event) {
+                                eprintln!("Error adding pushed event: {}", e);
+                            }
+                        }
+                        Err(mpsc::TryRecvError::Disconnected) => {
+                            // Event sender dropped, but continue processing results
+                        }
+                        Err(mpsc::TryRecvError::Empty) => {
+                            // No events pending, continue to result polling
+                        }
+                    }
+
                     let processor = processor_for_worker.lock().unwrap();
                     match processor.try_receive_result() {
                         Ok(Some(binding)) => {
@@ -387,6 +410,7 @@ impl JanusApi {
             mqtt_subscriber_handle,
             shutdown_senders,
             mqtt_subscribers,
+            event_tx: event_tx_for_running,
         };
 
         {
@@ -450,6 +474,51 @@ impl JanusApi {
         running_map
             .get(query_id)
             .and_then(|running| running.status.read().ok().map(|s| s.clone()))
+    }
+
+    /// Push an RDF event to a specific stream in a running live query.
+    ///
+    /// This allows external callers to inject events into a live query that is already running.
+    /// Events are queued and processed by the live worker thread.
+    ///
+    /// # Arguments
+    ///
+    /// * `query_id` - The ID of the running query
+    /// * `stream_uri` - The URI of the stream to push to (must be registered in the query)
+    /// * `event` - The RDFEvent to push
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` if the event was successfully queued, or an error if:
+    /// - The query is not running
+    /// - The query has no live windows
+    /// - The channel is disconnected (query was stopped)
+    pub fn push_event(
+        &self,
+        query_id: &QueryId,
+        stream_uri: &str,
+        event: RDFEvent,
+    ) -> Result<(), JanusApiError> {
+        let running_map = self.running.lock().unwrap();
+        let running = running_map.get(query_id).ok_or_else(|| {
+            JanusApiError::ExecutionError(format!("Query '{}' is not running", query_id))
+        })?;
+
+        let event_tx = running.event_tx.as_ref().ok_or_else(|| {
+            JanusApiError::ExecutionError(format!(
+                "Query '{}' has no live windows; cannot push events",
+                query_id
+            ))
+        })?;
+
+        event_tx.send((stream_uri.to_string(), event)).map_err(|_| {
+            JanusApiError::ExecutionError(format!(
+                "Failed to push event to query '{}'; live worker may have stopped",
+                query_id
+            ))
+        })?;
+
+        Ok(())
     }
 }
 
