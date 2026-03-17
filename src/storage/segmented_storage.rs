@@ -1,7 +1,10 @@
 use std::{
     collections::VecDeque,
     io::{BufWriter, Read, Seek, SeekFrom, Write},
-    sync::{Arc, Mutex, RwLock},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc, Mutex, RwLock,
+    },
     thread::JoinHandle,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -26,6 +29,9 @@ pub struct StreamingSegmentedStorage {
     shutdown_signal: Arc<Mutex<bool>>,
     config: StreamingConfig,
 }
+
+/// Static counter for generating unique segment IDs
+static SEGMENT_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 // Implementation of the Segmented Storage System with Two-Level Indexing and Background Flushing to store the RDF Stream events.
 impl StreamingSegmentedStorage {
@@ -785,8 +791,13 @@ impl StreamingSegmentedStorage {
             entry_count: entries.len() as u32,
         })
     }
-    // Generate a unique segment ID based on the current timestamp
+    // Generate a unique segment ID based on the current timestamp and counter
     fn generate_segment_id() -> u64 {
-        SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64
+        let ts = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
+        let seq = SEGMENT_COUNTER.fetch_add(1, Ordering::SeqCst);
+        ts * 1_000_000 + (seq % 1_000_000)
     }
 }
