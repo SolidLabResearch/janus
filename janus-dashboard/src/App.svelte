@@ -11,14 +11,16 @@
     };
     let statusCheckInterval: number | null = null;
 
-    const getDefaultQuery = () => `PREFIX ex: <http://example.org/>
+    const getDefaultQuery = () => `PREFIX ex:   <http://example.org/>
+PREFIX stat: <https://janus.rs/stat#>
 REGISTER RStream ex:output AS
-SELECT (AVG(?temp) AS ?avgTemp)
+SELECT (SAMPLE(?hm) AS ?histMean) (AVG(?temp) AS ?avgTemp)
 FROM NAMED WINDOW ex:histWindow ON STREAM ex:sensorStream [START 0 END ${Date.now() + 86400000}]
 FROM NAMED WINDOW ex:liveWindow ON STREAM ex:sensorStream [RANGE 5000 STEP 2000]
 WHERE {
   WINDOW ex:histWindow {
     ?sensor ex:temperature ?temp .
+    ?sensor stat:histMean ?hm .
   }
   WINDOW ex:liveWindow {
     ?sensor ex:temperature ?temp .

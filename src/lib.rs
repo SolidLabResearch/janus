@@ -98,6 +98,9 @@ pub mod http;
 /// Benchmarking utilities and helpers
 pub mod benchmarking;
 
+/// Anomaly detection extension function system (math helpers, rules, registry, SPARQL wiring)
+pub mod anomaly;
+
 pub mod error {
     //! Error types and result definitions
 

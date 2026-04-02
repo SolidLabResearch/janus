@@ -94,6 +94,10 @@ struct RunningQuery {
     mqtt_subscribers: Vec<Arc<MqttSubscriber>>,
     // Event sender for programmatic push_event() calls
     event_tx: Option<Sender<(String, RDFEvent)>>,
+    // Per-sensor historical baseline means written by the historical worker
+    // and read by the live worker to annotate live bindings with histMean /
+    // anomaly fields.  Key: sensor IRI, Value: histMean.
+    hist_baseline: Arc<RwLock<HashMap<String, f64>>>,
 }
 
 #[allow(dead_code)]
@@ -198,6 +202,12 @@ impl JanusApi {
         let mut historical_handles = Vec::new();
         let mut shutdown_senders = Vec::new();
 
+        // Shared per-sensor historical baseline (histMean) — written by the
+        // historical worker after its first window result, read by the live
+        // worker to annotate each live binding with ?histMean / ?anomaly.
+        let hist_baseline: Arc<RwLock<HashMap<String, f64>>> =
+            Arc::new(RwLock::new(HashMap::new()));
+
         // 4. Spawn historical worker threads (one per historical window)
         for (i, window) in parsed.historical_windows.iter().enumerate() {
             // Get corresponding SPARQL query
@@ -217,16 +227,45 @@ impl JanusApi {
             let window_clone = window.clone();
             let query_id_clone = query_id.clone();
             let (shutdown_tx, shutdown_rx) = mpsc::channel::<()>();
+            let baseline_writer = Arc::clone(&hist_baseline);
 
             let handle = thread::spawn(move || {
                 let executor = HistoricalExecutor::new(storage, OxigraphAdapter::new());
                 let converter = ResultConverter::new(query_id_clone);
+
+                // Extract per-sensor histMean values from a binding set and
+                // write them into the shared baseline map.
+                let update_baseline = |bindings: &Vec<HashMap<String, String>>,
+                                       baseline: &Arc<RwLock<HashMap<String, f64>>>| {
+                    if let Ok(mut map) = baseline.write() {
+                        for row in bindings {
+                            // Accept whatever variable happens to carry the sensor
+                            // IRI and the histMean value — common names first.
+                            let sensor = row
+                                .get("sensor")
+                                .or_else(|| row.get("s"))
+                                .or_else(|| row.get("subject"))
+                                .cloned();
+                            let mean_str = row
+                                .get("histMean")
+                                .or_else(|| row.get("mean"))
+                                .or_else(|| row.get("avgTemp"))
+                                .cloned();
+                            if let (Some(s), Some(m)) = (sensor, mean_str) {
+                                if let Some(v) = parse_numeric_binding(&m) {
+                                    map.insert(s, v);
+                                }
+                            }
+                        }
+                    }
+                };
 
                 match window_clone.window_type {
                     WindowType::HistoricalFixed => {
                         // Execute once for fixed window
                         match executor.execute_fixed_window(&window_clone, &sparql_query) {
                             Ok(bindings) => {
+                                update_baseline(&bindings, &baseline_writer);
                                 let timestamp = window_clone.end.unwrap_or(0);
                                 let result =
                                     converter.from_historical_bindings(bindings, timestamp);
@@ -249,6 +288,7 @@ impl JanusApi {
 
                             match window_result {
                                 Ok(bindings) => {
+                                    update_baseline(&bindings, &baseline_writer);
                                     let timestamp = std::time::SystemTime::now()
                                         .duration_since(std::time::UNIX_EPOCH)
                                         .unwrap_or_default()
@@ -349,6 +389,7 @@ impl JanusApi {
 
             // Spawn live worker thread to receive results
             let processor_for_worker = Arc::clone(&live_processor);
+            let baseline_reader = Arc::clone(&hist_baseline);
             let handle = thread::spawn(move || {
                 let converter = ResultConverter::new(query_id_clone);
 
@@ -376,7 +417,46 @@ impl JanusApi {
                     let processor = processor_for_worker.lock().unwrap();
                     match processor.try_receive_result() {
                         Ok(Some(binding)) => {
-                            let result = converter.from_live_binding(binding);
+                            let mut result = converter.from_live_binding(binding);
+                            // Annotate each live binding with histMean and anomaly
+                            // fields derived from the historical baseline.
+                            if let Ok(baseline) = baseline_reader.read() {
+                                if !baseline.is_empty() {
+                                    for row in &mut result.bindings {
+                                        // Look up by sensor IRI if present
+                                        let sensor_key = row
+                                            .get("sensor")
+                                            .or_else(|| row.get("s"))
+                                            .cloned();
+                                        let hist_mean_val = if let Some(ref s) = sensor_key {
+                                            baseline.get(s).copied()
+                                        } else {
+                                            // Fallback: use the first (only) baseline entry
+                                            baseline.values().next().copied()
+                                        };
+                                        if let Some(hm) = hist_mean_val {
+                                            row.insert(
+                                                "histMean".to_string(),
+                                                hm.to_string(),
+                                            );
+                                            // Anomaly: live avg deviates >10% from hist mean
+                                            let live_val = row
+                                                .get("avgTemp")
+                                                .or_else(|| row.get("val"))
+                                                .or_else(|| row.get("value"))
+                                                .and_then(|v| parse_numeric_binding(v));
+                                            if let Some(lv) = live_val {
+                                                let threshold = (hm * 0.1_f64).abs();
+                                                let anomaly = (lv - hm).abs() > threshold;
+                                                row.insert(
+                                                    "anomaly".to_string(),
+                                                    anomaly.to_string(),
+                                                );
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                             if tx.send(result).is_err() {
                                 break;
                             }
@@ -411,6 +491,7 @@ impl JanusApi {
             shutdown_senders,
             mqtt_subscribers,
             event_tx: event_tx_for_running,
+            hist_baseline,
         };
 
         {
@@ -519,6 +600,19 @@ impl JanusApi {
         })?;
 
         Ok(())
+    }
+}
+
+/// Parse a numeric literal out of an Oxigraph binding string.
+///
+/// Handles both plain `"23.5"` and typed `"23.5"^^<xsd:decimal>` forms.
+fn parse_numeric_binding(s: &str) -> Option<f64> {
+    // Typed literal: `"value"^^<datatype>`
+    if s.starts_with('"') {
+        let inner = s.trim_start_matches('"').split('"').next()?;
+        inner.parse::<f64>().ok()
+    } else {
+        s.parse::<f64>().ok()
     }
 }
 

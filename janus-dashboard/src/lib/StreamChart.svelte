@@ -10,9 +10,12 @@
     let ws: WebSocket | null = null;
 
     // Mutable buffer in the scope of the script.
-    // Separate buffers for live and historical data
+    // Separate buffers for live, historical, and anomalous data.
     const liveBuffer: { time: number; value: number }[] = [];
     const histBuffer: { time: number; value: number }[] = [];
+    const anomalyBuffer: { time: number; value: number }[] = [];
+    // Latest histMean value received from the server (written by historical path).
+    let histMeanBaseline: number | null = null;
 
     onMount(() => {
         chartInstance = echarts.init(chartContainer);
@@ -109,6 +112,18 @@
                     },
                     data: [],
                 },
+                {
+                    name: "Anomaly",
+                    type: "scatter",
+                    symbolSize: 14,
+                    itemStyle: {
+                        color: "#f44336", // Red
+                        borderColor: "#fff",
+                        borderWidth: 2,
+                    },
+                    data: [],
+                    z: 10, // Render above the live line
+                },
             ],
         });
 
@@ -169,19 +184,26 @@
                             binding["?val"] ||
                             binding["?tempHist"];
 
-                        if (valStr) {
-                            // Handle typed literals like "23.5"^^<...> or "23.5"
-                            let cleanValStr = valStr;
-                            if (valStr.includes("^^")) {
-                                cleanValStr = valStr.split("^^")[0];
-                            }
-                            // Remove quotes
-                            cleanValStr = cleanValStr.replace(/['"]+/g, "");
+                        // Helper: clean a typed literal like `"23.5"^^<xsd:decimal>` → 23.5
+                        const cleanNum = (s: string): number => {
+                            let c = s;
+                            if (c.includes("^^")) c = c.split("^^")[0];
+                            c = c.replace(/['"]+/g, "");
+                            return Number(c);
+                        };
 
-                            const val = Number(cleanValStr);
+                        // Capture histMean baseline from historical bindings.
+                        const hmStr = binding["histMean"] || binding["?histMean"];
+                        if (hmStr) {
+                            const hm = cleanNum(hmStr);
+                            if (!isNaN(hm)) histMeanBaseline = hm;
+                        }
+
+                        if (valStr) {
+                            const val = cleanNum(valStr);
 
                             if (!isNaN(val)) {
-                                const cleanSource = source ? source.trim() .toLowerCase() : "";
+                                const cleanSource = source ? source.trim().toLowerCase() : "";
                                 const point = { time: timestamp, value: val };
 
                                 if (cleanSource === "historical") {
@@ -190,13 +212,17 @@
                                     // Filter out invalid points (0 timestamp or 0 value which are likely artifacts)
                                     if (point.time > 0 && point.value > 0) {
                                         liveBuffer.push(point);
+                                        // Track anomalous live points separately for red markers.
+                                        const isAnomaly =
+                                            binding["anomaly"] === "true" ||
+                                            binding["?anomaly"] === "true";
+                                        if (isAnomaly) {
+                                            anomalyBuffer.push(point);
+                                        }
                                     }
                                 }
                             } else {
-                                console.warn(
-                                    "Parsed value is NaN for:",
-                                    valStr,
-                                );
+                                console.warn("Parsed value is NaN for:", valStr);
                             }
                         }
                     });
@@ -236,25 +262,29 @@
         if (!chartInstance) return;
 
         const liveData = liveBuffer.map((d) => [d.time, d.value]);
+        const anomalyData = anomalyBuffer.map((d) => [d.time, d.value]);
 
-        // For historical data:
-        // If we have a single point (aggregate), we use it for markLine BUT NOT for the series data
-        // to avoid stretching the X-axis to the future timestamp.
-        // If we have multiple points (e.g. sliding window), we plot them.
+        // Prefer the explicit histMean baseline received from the server;
+        // fall back to a single-entry histBuffer (legacy aggregate query).
+        const baselineVal: number | null =
+            histMeanBaseline !== null
+                ? histMeanBaseline
+                : histBuffer.length === 1
+                  ? histBuffer[0].value
+                  : null;
+
         let histData: number[][] = [];
         let markLine = {};
 
-        if (histBuffer.length === 1) {
-            const val = histBuffer[0].value;
-            // Do NOT add to histData to avoid axis scaling issues with future timestamp
-            histData = [];
-
+        if (baselineVal !== null) {
+            // Single aggregate baseline — show as dashed horizontal markLine.
+            // Do NOT add to histData to avoid stretching the X-axis.
             markLine = {
                 data: [
                     {
-                        yAxis: val,
+                        yAxis: baselineVal,
                         label: {
-                            formatter: `Avg: ${val.toFixed(2)}`,
+                            formatter: `Hist avg: ${baselineVal.toFixed(2)}`,
                             position: "end",
                         },
                     },
@@ -267,6 +297,7 @@
                 symbol: "none",
             };
         } else {
+            // Multiple historical points — plot them as a line.
             histData = histBuffer.map((d) => [d.time, d.value]);
         }
 
@@ -280,6 +311,10 @@
                     name: "Historical Data",
                     data: histData,
                     markLine: markLine,
+                },
+                {
+                    name: "Anomaly",
+                    data: anomalyData,
                 },
             ],
         });
