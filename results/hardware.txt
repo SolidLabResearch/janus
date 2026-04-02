@@ -1,0 +1,2 @@
+CPU: Apple M4
+Memory: 16 GB

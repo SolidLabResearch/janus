@@ -34,7 +34,6 @@ use janus::{
 use std::sync::Arc;
 use std::time::Instant;
 
-
 const DATASET_SIZES: &[usize] = &[50_000, 100_000, 500_000];
 const EVENT_RATES_PER_SEC: &[u64] = &[50, 100, 500];
 const RUNS_PER_CONFIG: usize = 30;
@@ -123,9 +122,8 @@ fn run_single(dataset_size: usize, event_rate: u64) -> RunResult {
         sparse_interval: 1000,
     };
 
-    let storage = Arc::new(
-        StreamingSegmentedStorage::new(config.clone()).expect("Storage init failed"),
-    );
+    let storage =
+        Arc::new(StreamingSegmentedStorage::new(config.clone()).expect("Storage init failed"));
 
     // Load dataset
     let dataset_path = format!("data/h1_dataset_{}.nq", dataset_size);
@@ -165,9 +163,7 @@ fn run_single(dataset_size: usize, event_rate: u64) -> RunResult {
     };
 
     let t_hist = Instant::now();
-    let _ = executor
-        .execute_fixed_window(&window_def, sparql_query)
-        .ok();
+    let _ = executor.execute_fixed_window(&window_def, sparql_query).ok();
     let hist_retrieval_ms = t_hist.elapsed().as_secs_f64() * 1000.0;
 
     // Stage 3: Live window close latency
@@ -181,8 +177,8 @@ fn run_single(dataset_size: usize, event_rate: u64) -> RunResult {
         }
     "#;
 
-    let mut processor = LiveStreamProcessing::new(rspql_query.to_string())
-        .expect("LSP creation failed");
+    let mut processor =
+        LiveStreamProcessing::new(rspql_query.to_string()).expect("LSP creation failed");
     processor
         .register_stream("http://test.org/live_stream")
         .expect("Register failed");
@@ -191,27 +187,22 @@ fn run_single(dataset_size: usize, event_rate: u64) -> RunResult {
     // Inject events to fill window
     for i in 0..20u64 {
         let event = make_test_rdf_event(i, base_ts + 1_000_000 + i * 100);
-        processor
-            .add_event("http://test.org/live_stream", event)
-            .ok();
+        processor.add_event("http://test.org/live_stream", event).ok();
     }
 
-    // Sentinel to close window
-    let sentinel = make_test_rdf_event(99, base_ts + 1_000_000 + 20 * 100 + 6000);
+    // Use close_stream() — reliably flushes all windows (as used in integration tests)
     let t_live = Instant::now();
     processor
-        .add_event("http://test.org/live_stream", sentinel)
-        .ok();
+        .close_stream(
+            "http://test.org/live_stream",
+            (base_ts + 1_000_000 + 20 * 100 + 10_000) as i64,
+        )
+        .expect("close_stream failed");
 
     // Wait for result
     let mut live_window_ms = 100.0; // fallback
     for _ in 0..1000 {
-        if processor
-            .try_receive_result()
-            .ok()
-            .flatten()
-            .is_some()
-        {
+        if processor.try_receive_result().ok().flatten().is_some() {
             live_window_ms = t_live.elapsed().as_secs_f64() * 1000.0;
             break;
         }
@@ -242,12 +233,7 @@ fn run_single(dataset_size: usize, event_rate: u64) -> RunResult {
         .collect();
     let comparator_ms = comparator_times.iter().sum::<f64>() / comparator_times.len() as f64;
 
-    RunResult {
-        write_ms,
-        hist_retrieval_ms,
-        live_window_ms,
-        comparator_ms,
-    }
+    RunResult { write_ms, hist_retrieval_ms, live_window_ms, comparator_ms }
 }
 
 fn run_isolation_test() -> Vec<(u64, f64, f64)> {
@@ -309,12 +295,12 @@ fn run_isolation_test() -> Vec<(u64, f64, f64)> {
                         stream_name: "bg_stream".to_string(),
                         width: 0,
                         slide: 0,
-                    offset: None,
-                    start: Some(1_000_000),
-                    end: Some(2_000_000),
-                    window_type: WindowType::HistoricalFixed,
-                };
-                let _ = executor.execute_fixed_window(&window_def, sparql_query).ok();
+                        offset: None,
+                        start: Some(1_000_000),
+                        end: Some(2_000_000),
+                        window_type: WindowType::HistoricalFixed,
+                    };
+                    let _ = executor.execute_fixed_window(&window_def, sparql_query).ok();
                     std::thread::sleep(interval);
                 } else {
                     // bg_rate=0: no queries, just sleep briefly to allow stop-flag polling
@@ -323,26 +309,26 @@ fn run_isolation_test() -> Vec<(u64, f64, f64)> {
             }
         });
 
-        // Reuse one LiveStreamProcessing instance for all 10 cycles at this bg_rate
         let mut live_times: Vec<f64> = Vec::new();
-        let mut proc = LiveStreamProcessing::new(rspql.to_string())
-            .expect("LSP init failed");
-        proc.register_stream("http://test.org/live_stream").expect("Register failed");
-        proc.start_processing().expect("Start failed");
 
         for cycle in 0..10u64 {
+            // Fresh processor each cycle — stream cannot be reused after close_stream()
+            let mut proc = LiveStreamProcessing::new(rspql.to_string()).expect("LSP init failed");
+            proc.register_stream("http://test.org/live_stream").expect("Register failed");
+            proc.start_processing().expect("Start failed");
+
             let window_offset = cycle * 10_000;
             for i in 0..10u64 {
                 let evt = make_test_rdf_event(i, base_ts + window_offset + i * 100);
                 let _ = proc.add_event("http://test.org/live_stream", evt).ok();
             }
-            // Sentinel past window boundary to trigger close
-            let sentinel = make_test_rdf_event(
-                99,
-                base_ts + window_offset + 10 * 100 + 6000,
-            );
+
             let t = Instant::now();
-            let _ = proc.add_event("http://test.org/live_stream", sentinel).ok();
+            proc.close_stream(
+                "http://test.org/live_stream",
+                (base_ts + window_offset + 10 * 100 + 10_000) as i64,
+            )
+            .expect("close_stream failed");
 
             // Poll up to 5 seconds
             let mut got_result = false;
@@ -355,10 +341,7 @@ fn run_isolation_test() -> Vec<(u64, f64, f64)> {
                 std::thread::sleep(std::time::Duration::from_millis(1));
             }
             if !got_result {
-                eprintln!(
-                    "WARNING: isolation cycle {} timed out at bg_rate={}",
-                    cycle, bg_rate
-                );
+                eprintln!("WARNING: isolation cycle {} timed out at bg_rate={}", cycle, bg_rate);
                 live_times.push(5000.0); // worst-case timeout
             }
         }
@@ -368,10 +351,7 @@ fn run_isolation_test() -> Vec<(u64, f64, f64)> {
 
         let mean = live_times.iter().sum::<f64>() / live_times.len() as f64;
         let std_dev = if live_times.len() > 1 {
-            let var = live_times
-                .iter()
-                .map(|x| (x - mean).powi(2))
-                .sum::<f64>()
+            let var = live_times.iter().map(|x| (x - mean).powi(2)).sum::<f64>()
                 / live_times.len() as f64;
             var.sqrt()
         } else {
@@ -516,7 +496,8 @@ fn write_latency_csv(results: &[(usize, u64, Vec<RunResult>)]) -> std::io::Resul
 
     for (dataset_size, event_rate, runs) in results {
         for (i, run) in runs.iter().enumerate() {
-            let total = run.write_ms + run.hist_retrieval_ms + run.live_window_ms + run.comparator_ms;
+            let total =
+                run.write_ms + run.hist_retrieval_ms + run.live_window_ms + run.comparator_ms;
             writeln!(
                 file,
                 "{},{},{},{:.2},{:.2},{:.2},{:.2},{:.2}",
@@ -555,11 +536,8 @@ fn write_h1_summary(results: &[(usize, u64, Vec<RunResult>)]) -> std::io::Result
         let (live_mean, live_std) = analyse_runs(&lives);
         let (comp_mean, comp_std) = analyse_runs(&comps);
         let total_mean = write_mean + hist_mean + live_mean + comp_mean;
-        let total_std = (write_std.powi(2)
-            + hist_std.powi(2)
-            + live_std.powi(2)
-            + comp_std.powi(2))
-        .sqrt();
+        let total_std =
+            (write_std.powi(2) + hist_std.powi(2) + live_std.powi(2) + comp_std.powi(2)).sqrt();
         let hist_pct = if total_mean > 0.0 {
             (hist_mean / total_mean) * 100.0
         } else {
