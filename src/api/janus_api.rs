@@ -235,30 +235,31 @@ impl JanusApi {
 
                 // Extract per-sensor histMean values from a binding set and
                 // write them into the shared baseline map.
-                let update_baseline = |bindings: &Vec<HashMap<String, String>>,
-                                       baseline: &Arc<RwLock<HashMap<String, f64>>>| {
-                    if let Ok(mut map) = baseline.write() {
-                        for row in bindings {
-                            // Accept whatever variable happens to carry the sensor
-                            // IRI and the histMean value — common names first.
-                            let sensor = row
-                                .get("sensor")
-                                .or_else(|| row.get("s"))
-                                .or_else(|| row.get("subject"))
-                                .cloned();
-                            let mean_str = row
-                                .get("histMean")
-                                .or_else(|| row.get("mean"))
-                                .or_else(|| row.get("avgTemp"))
-                                .cloned();
-                            if let (Some(s), Some(m)) = (sensor, mean_str) {
-                                if let Some(v) = parse_numeric_binding(&m) {
-                                    map.insert(s, v);
+                let update_baseline =
+                    |bindings: &Vec<HashMap<String, String>>,
+                     baseline: &Arc<RwLock<HashMap<String, f64>>>| {
+                        if let Ok(mut map) = baseline.write() {
+                            for row in bindings {
+                                // Accept whatever variable happens to carry the sensor
+                                // IRI and the histMean value — common names first.
+                                let sensor = row
+                                    .get("sensor")
+                                    .or_else(|| row.get("s"))
+                                    .or_else(|| row.get("subject"))
+                                    .cloned();
+                                let mean_str = row
+                                    .get("histMean")
+                                    .or_else(|| row.get("mean"))
+                                    .or_else(|| row.get("avgTemp"))
+                                    .cloned();
+                                if let (Some(s), Some(m)) = (sensor, mean_str) {
+                                    if let Some(v) = parse_numeric_binding(&m) {
+                                        map.insert(s, v);
+                                    }
                                 }
                             }
                         }
-                    }
-                };
+                    };
 
                 match window_clone.window_type {
                     WindowType::HistoricalFixed => {
@@ -424,10 +425,8 @@ impl JanusApi {
                                 if !baseline.is_empty() {
                                     for row in &mut result.bindings {
                                         // Look up by sensor IRI if present
-                                        let sensor_key = row
-                                            .get("sensor")
-                                            .or_else(|| row.get("s"))
-                                            .cloned();
+                                        let sensor_key =
+                                            row.get("sensor").or_else(|| row.get("s")).cloned();
                                         let hist_mean_val = if let Some(ref s) = sensor_key {
                                             baseline.get(s).copied()
                                         } else {
@@ -435,10 +434,7 @@ impl JanusApi {
                                             baseline.values().next().copied()
                                         };
                                         if let Some(hm) = hist_mean_val {
-                                            row.insert(
-                                                "histMean".to_string(),
-                                                hm.to_string(),
-                                            );
+                                            row.insert("histMean".to_string(), hm.to_string());
                                             // Anomaly: live avg deviates >10% from hist mean
                                             let live_val = row
                                                 .get("avgTemp")
