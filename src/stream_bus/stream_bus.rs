@@ -10,7 +10,9 @@ use crate::core::RDFEvent;
 use crate::parsing::rdf_parser;
 use crate::storage::segmented_storage::StreamingSegmentedStorage;
 use core::str;
+#[cfg(not(windows))]
 use rdkafka::config::ClientConfig;
+#[cfg(not(windows))]
 use rdkafka::producer::{FutureProducer, FutureRecord};
 use rumqttc::{AsyncClient, MqttOptions, QoS};
 use std::fmt::write;
@@ -268,6 +270,7 @@ impl StreamBus {
         }
     }
 
+    #[cfg(not(windows))]
     async fn run_with_kafka(&self) -> Result<(), StreamBusError> {
         let kafka_config =
             self.config.kafka_config.as_ref().ok_or(StreamBusError::ConfigError(
@@ -309,6 +312,13 @@ impl StreamBus {
             }
         })
         .await
+    }
+
+    #[cfg(windows)]
+    async fn run_with_kafka(&self) -> Result<(), StreamBusError> {
+        Err(StreamBusError::BrokerError(
+            "Kafka broker mode is not supported on Windows builds".to_string(),
+        ))
     }
 
     async fn run_with_mqtt(&self) -> Result<(), StreamBusError> {

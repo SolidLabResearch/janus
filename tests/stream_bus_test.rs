@@ -66,7 +66,7 @@ fn test_parse_ntriples_basic() {
     };
 
     let storage = create_test_storage(&test_dir).unwrap();
-    let bus = StreamBus::new(config, storage);
+    let _bus = StreamBus::new(config, storage);
 
     let line = "<http://example.org/sensor1> <http://example.org/temperature> \"23.5\" <http://example.org/graph1> .";
     let event = rdf_parser::parse_rdf_line(line, true);
@@ -97,7 +97,7 @@ fn test_parse_ntriples_without_graph() {
     };
 
     let storage = create_test_storage(&test_dir).unwrap();
-    let bus = StreamBus::new(config, storage);
+    let _bus = StreamBus::new(config, storage);
 
     let line = "<http://example.org/alice> <http://example.org/knows> <http://example.org/bob> .";
     let event = rdf_parser::parse_rdf_line(line, true);
@@ -128,7 +128,7 @@ fn test_parse_invalid_rdf_line() {
     };
 
     let storage = create_test_storage(&test_dir).unwrap();
-    let bus = StreamBus::new(config, storage);
+    let _bus = StreamBus::new(config, storage);
 
     let invalid_line = "<http://example.org/subject> <http://example.org/predicate>";
     let result = rdf_parser::parse_rdf_line(invalid_line, true);
@@ -380,7 +380,7 @@ fn test_timestamp_parsing() {
     };
 
     let storage = create_test_storage(&test_dir).unwrap();
-    let bus_with_ts = StreamBus::new(config_with_timestamps, Arc::clone(&storage));
+    let _bus_with_ts = StreamBus::new(config_with_timestamps, Arc::clone(&storage));
 
     let line = "<http://example.org/sensor1> <http://example.org/temperature> \"23.5\" <http://example.org/graph1> .";
     let event = rdf_parser::parse_rdf_line(line, true).unwrap();
@@ -397,7 +397,7 @@ fn test_timestamp_parsing() {
         mqtt_config: None,
     };
 
-    let bus_without_ts = StreamBus::new(config_without_timestamps, storage);
+    let _bus_without_ts = StreamBus::new(config_without_timestamps, storage);
 
     let line_with_ts = "1234567890 <http://example.org/sensor1> <http://example.org/ts> \"value\" <http://example.org/graph1> .";
     let event = rdf_parser::parse_rdf_line(line_with_ts, false).unwrap();

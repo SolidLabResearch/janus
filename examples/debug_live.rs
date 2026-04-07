@@ -2,7 +2,6 @@ use janus::core::RDFEvent;
 use janus::stream::live_stream_processing::LiveStreamProcessing;
 use std::thread;
 use std::time::Duration;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 fn main() {
     println!("Starting debug_live reproduction...");

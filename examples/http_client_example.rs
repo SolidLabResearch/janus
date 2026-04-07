@@ -10,6 +10,7 @@
 //!
 //! Usage:
 //!   cargo run --example http_client_example
+#![allow(dead_code)]
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

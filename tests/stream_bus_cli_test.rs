@@ -36,11 +36,30 @@ fn create_test_rdf_file(path: &str, num_events: usize) -> std::io::Result<()> {
 }
 
 fn get_cli_binary() -> String {
-    if Path::new("target/debug/stream_bus_cli").exists() {
-        "target/debug/stream_bus_cli".to_string()
-    } else {
-        "target/release/stream_bus_cli".to_string()
+    if let Ok(path) = std::env::var("CARGO_BIN_EXE_stream_bus_cli") {
+        return path;
     }
+
+    let bin_name = if cfg!(windows) {
+        "stream_bus_cli.exe"
+    } else {
+        "stream_bus_cli"
+    };
+
+    let candidates = [
+        format!("target/debug/{bin_name}"),
+        format!("target/release/{bin_name}"),
+        format!("target/llvm-cov-target/debug/{bin_name}"),
+        format!("target/llvm-cov-target/release/{bin_name}"),
+    ];
+
+    for candidate in candidates {
+        if Path::new(&candidate).exists() {
+            return candidate;
+        }
+    }
+
+    panic!("Could not find stream_bus_cli binary in expected target locations");
 }
 
 #[test]

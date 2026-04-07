@@ -17,7 +17,7 @@ fn main() {
 
     println!("Total events in storage: {}", events.len());
 
-    if events.len() > 0 {
+    if !events.is_empty() {
         let dict = storage.get_dictionary().read().unwrap();
         println!("\nDecoded first 5 events:");
         for (i, e) in events.iter().take(5).enumerate() {

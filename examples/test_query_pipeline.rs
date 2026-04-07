@@ -40,7 +40,7 @@ WHERE {
     let events = storage.query(0, u64::MAX).expect("Storage query failed");
     println!("Storage has {} events", events.len());
 
-    if events.len() > 0 {
+    if !events.is_empty() {
         let dict = storage.get_dictionary().read().unwrap();
         println!("\nFirst 3 events decoded:");
         for (i, e) in events.iter().take(3).enumerate() {

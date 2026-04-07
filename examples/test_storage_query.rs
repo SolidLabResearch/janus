@@ -17,7 +17,7 @@ fn main() {
 
     println!("Total events in storage: {}", events.len());
 
-    if events.len() > 0 {
+    if !events.is_empty() {
         println!("\nFirst 3 events:");
         for (i, event) in events.iter().take(3).enumerate() {
             println!(
