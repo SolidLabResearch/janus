@@ -836,7 +836,7 @@ async fn main() {
         .route("/api/queries", post(register_query))
         .route("/api/queries", get(list_queries))
         .route("/api/queries/:id/start", post(start_query))
-        .route("/api/queries/:id/stop", post(stop_query))
+        .route("/api/queries/:id", delete(stop_query))
         .route("/api/queries/:id/results", get(query_results_ws))
         .layer(CorsLayer::permissive())
         .with_state(state);

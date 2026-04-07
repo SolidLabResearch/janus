@@ -61,11 +61,11 @@ Register a new JanusQL query.
 ```json
 {
   "query_id": "sensor_query_1",
-  "janusql": "SELECT ?sensor ?temp FROM HISTORICAL FIXED WINDOW [2024-01-01T00:00:00Z, 2024-01-02T00:00:00Z] WHERE { ?sensor <http://example.org/temperature> ?temp . }"
+  "janusql": "PREFIX ex: <http://example.org/> SELECT ?sensor ?temp FROM NAMED WINDOW ex:histWindow ON STREAM ex:sensorStream [START 1704067200 END 1704153600] WHERE { WINDOW ex:histWindow { ?sensor ex:temperature ?temp . } }"
 }
 ```
 
-**Response (201 Created):**
+**Response (200 OK):**
 ```json
 {
   "query_id": "sensor_query_1",
@@ -375,7 +375,7 @@ curl -X POST http://localhost:8080/api/queries \
   -H "Content-Type: application/json" \
   -d '{
     "query_id": "temp_query",
-    "janusql": "SELECT ?sensor ?temp FROM HISTORICAL FIXED WINDOW [2024-01-01T00:00:00Z, 2024-01-02T00:00:00Z] WHERE { ?sensor <http://example.org/temperature> ?temp . }"
+    "janusql": "PREFIX ex: <http://example.org/> SELECT ?sensor ?temp FROM NAMED WINDOW ex:histWindow ON STREAM ex:sensorStream [START 1704067200 END 1704153600] WHERE { WINDOW ex:histWindow { ?sensor ex:temperature ?temp . } }"
   }'
 ```
 
@@ -439,7 +439,7 @@ response = requests.post(
     f"{BASE_URL}/api/queries",
     json={
         "query_id": "my_query",
-        "janusql": "SELECT ?s ?p ?o FROM HISTORICAL FIXED WINDOW [2024-01-01T00:00:00Z, 2024-01-02T00:00:00Z] WHERE { ?s ?p ?o }"
+        "janusql": "PREFIX ex: <http://example.org/> SELECT ?s ?p ?o FROM NAMED WINDOW ex:histWindow ON STREAM ex:sensorStream [START 1704067200 END 1704153600] WHERE { WINDOW ex:histWindow { ?s ?p ?o . } }"
     }
 )
 print(f"Register: {response.json()}")
@@ -477,7 +477,7 @@ async function demo() {
   // Register a query
   const registerResponse = await axios.post(`${BASE_URL}/api/queries`, {
     query_id: 'js_query',
-    janusql: 'SELECT ?s ?p ?o FROM HISTORICAL FIXED WINDOW [2024-01-01T00:00:00Z, 2024-01-02T00:00:00Z] WHERE { ?s ?p ?o }'
+    janusql: 'PREFIX ex: <http://example.org/> SELECT ?s ?p ?o FROM NAMED WINDOW ex:histWindow ON STREAM ex:sensorStream [START 1704067200 END 1704153600] WHERE { WINDOW ex:histWindow { ?s ?p ?o . } }'
   });
   console.log('Registered:', registerResponse.data);
 
@@ -606,7 +606,7 @@ For a simple demo dashboard with "Start Replay" and "Start Query" buttons:
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             query_id: QUERY_ID,
-            janusql: 'SELECT ?sensor ?temp FROM HISTORICAL FIXED WINDOW [2024-01-01T00:00:00Z, 2024-01-02T00:00:00Z] WHERE { ?sensor <http://example.org/temperature> ?temp . }'
+            janusql: 'PREFIX ex: <http://example.org/> SELECT ?sensor ?temp FROM NAMED WINDOW ex:histWindow ON STREAM ex:sensorStream [START 1704067200 END 1704153600] WHERE { WINDOW ex:histWindow { ?sensor ex:temperature ?temp . } }'
           })
         });
 

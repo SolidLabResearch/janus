@@ -76,11 +76,11 @@ Request:
 ```json
 {
   "query_id": "sensor_query_1",
-  "janusql": "SELECT ?sensor ?temp FROM HISTORICAL FIXED WINDOW [2024-01-01T00:00:00Z, 2024-01-02T00:00:00Z] WHERE { ?sensor <http://example.org/temperature> ?temp . }"
+  "janusql": "PREFIX ex: <http://example.org/> SELECT ?sensor ?temp FROM NAMED WINDOW ex:histWindow ON STREAM ex:sensorStream [START 1704067200 END 1704153600] WHERE { WINDOW ex:histWindow { ?sensor ex:temperature ?temp . } }"
 }
 ```
 
-Response (201):
+Response (200):
 ```json
 {
   "query_id": "sensor_query_1",
@@ -322,7 +322,7 @@ const response = await fetch('http://localhost:8080/api/queries', {
   headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify({
     query_id: 'my_query',
-    janusql: 'SELECT ?s ?p ?o FROM HISTORICAL FIXED WINDOW [2024-01-01T00:00:00Z, 2024-12-31T23:59:59Z] WHERE { ?s ?p ?o }'
+    janusql: 'PREFIX ex: <http://example.org/> SELECT ?s ?p ?o FROM NAMED WINDOW ex:histWindow ON STREAM ex:sensorStream [START 1704067200 END 1735689599] WHERE { WINDOW ex:histWindow { ?s ?p ?o . } }'
   })
 });
 
@@ -349,7 +349,7 @@ import json
 # Register query
 requests.post('http://localhost:8080/api/queries', json={
     'query_id': 'my_query',
-    'janusql': 'SELECT ?s ?p ?o FROM HISTORICAL FIXED WINDOW [2024-01-01T00:00:00Z, 2024-12-31T23:59:59Z] WHERE { ?s ?p ?o }'
+    'janusql': 'PREFIX ex: <http://example.org/> SELECT ?s ?p ?o FROM NAMED WINDOW ex:histWindow ON STREAM ex:sensorStream [START 1704067200 END 1735689599] WHERE { WINDOW ex:histWindow { ?s ?p ?o . } }'
 })
 
 # Start query
@@ -373,7 +373,7 @@ ws.run_forever()
 # Register
 curl -X POST http://localhost:8080/api/queries \
   -H "Content-Type: application/json" \
-  -d '{"query_id": "test", "janusql": "SELECT ?s ?p ?o FROM HISTORICAL FIXED WINDOW [2024-01-01T00:00:00Z, 2024-12-31T23:59:59Z] WHERE { ?s ?p ?o }"}'
+  -d '{"query_id": "test", "janusql": "PREFIX ex: <http://example.org/> SELECT ?s ?p ?o FROM NAMED WINDOW ex:histWindow ON STREAM ex:sensorStream [START 1704067200 END 1735689599] WHERE { WINDOW ex:histWindow { ?s ?p ?o . } }"}'
 
 # Start
 curl -X POST http://localhost:8080/api/queries/test/start

@@ -56,7 +56,7 @@ curl -X POST http://localhost:8080/api/queries \
   -H "Content-Type: application/json" \
   -d '{
     "query_id": "test_query",
-    "janusql": "SELECT ?s ?p ?o FROM HISTORICAL FIXED WINDOW [2024-01-01T00:00:00Z, 2024-12-31T23:59:59Z] WHERE { ?s ?p ?o }"
+    "janusql": "PREFIX ex: <http://example.org/> SELECT ?s ?p ?o FROM NAMED WINDOW ex:histWindow ON STREAM ex:sensorStream [START 1704067200 END 1735689599] WHERE { WINDOW ex:histWindow { ?s ?p ?o . } }"
   }'
 ```
 
@@ -187,7 +187,7 @@ curl http://localhost:8080/api/replay/status
 # 4. Register and start query
 curl -X POST http://localhost:8080/api/queries \
   -H "Content-Type: application/json" \
-  -d '{"query_id": "analysis", "janusql": "SELECT ?sensor ?temp FROM HISTORICAL FIXED WINDOW [2024-01-01T00:00:00Z, 2024-12-31T23:59:59Z] WHERE { ?sensor <http://example.org/temperature> ?temp . FILTER(?temp > 25.0) }"}'
+  -d '{"query_id": "analysis", "janusql": "PREFIX ex: <http://example.org/> SELECT ?sensor ?temp FROM NAMED WINDOW ex:histWindow ON STREAM ex:sensorStream [START 1704067200 END 1735689599] WHERE { WINDOW ex:histWindow { ?sensor ex:temperature ?temp . FILTER(?temp > 25.0) } }"}'
 
 curl -X POST http://localhost:8080/api/queries/analysis/start
 
@@ -200,7 +200,7 @@ curl -X POST http://localhost:8080/api/queries/analysis/start
 # 1. Register live query
 curl -X POST http://localhost:8080/api/queries \
   -H "Content-Type: application/json" \
-  -d '{"query_id": "live_monitor", "janusql": "SELECT ?sensor ?temp FROM LIVE SLIDING WINDOW sensors [RANGE PT10S, SLIDE PT5S] WHERE { ?sensor <http://example.org/temperature> ?temp . }"}'
+  -d '{"query_id": "live_monitor", "janusql": "PREFIX ex: <http://example.org/> SELECT ?sensor ?temp FROM NAMED WINDOW ex:liveWindow ON STREAM ex:sensorStream [RANGE 10000 STEP 5000] WHERE { WINDOW ex:liveWindow { ?sensor ex:temperature ?temp . } }"}'
 
 # 2. Start query (before replay to catch all events)
 curl -X POST http://localhost:8080/api/queries/live_monitor/start
@@ -218,7 +218,7 @@ curl -X POST http://localhost:8080/api/replay/start \
 # Register hybrid query
 curl -X POST http://localhost:8080/api/queries \
   -H "Content-Type: application/json" \
-  -d '{"query_id": "hybrid", "janusql": "SELECT ?s ?p ?o FROM HISTORICAL FIXED WINDOW [2024-01-01T00:00:00Z, 2024-01-02T00:00:00Z] FROM LIVE SLIDING WINDOW stream [RANGE PT30S, SLIDE PT10S] WHERE { ?s ?p ?o }"}'
+  -d '{"query_id": "hybrid", "janusql": "PREFIX ex: <http://example.org/> REGISTER RStream ex:output AS SELECT ?s ?p ?o FROM NAMED WINDOW ex:histWindow ON STREAM ex:sensorStream [START 1704067200 END 1704153600] FROM NAMED WINDOW ex:liveWindow ON STREAM ex:sensorStream [RANGE 30000 STEP 10000] WHERE { WINDOW ex:histWindow { ?s ?p ?o . } WINDOW ex:liveWindow { ?s ?p ?o . } }"}'
 
 # Start replay first to populate historical data
 curl -X POST http://localhost:8080/api/replay/start \

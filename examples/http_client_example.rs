@@ -109,11 +109,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let query_request = RegisterQueryRequest {
         query_id: "sensor_query_1".to_string(),
         janusql: r#"
+            PREFIX ex: <http://example.org/>
             SELECT ?sensor ?temp ?time
-            FROM HISTORICAL FIXED WINDOW [2024-01-01T00:00:00Z, 2024-01-02T00:00:00Z]
+            FROM NAMED WINDOW ex:histWindow ON STREAM ex:sensorStream [START 1704067200 END 1704153600]
             WHERE {
-                ?sensor <http://example.org/temperature> ?temp .
-                ?sensor <http://example.org/timestamp> ?time .
+                WINDOW ex:histWindow {
+                    ?sensor ex:temperature ?temp .
+                    ?sensor ex:timestamp ?time .
+                }
             }
         "#
         .to_string(),
@@ -141,11 +144,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let live_query_request = RegisterQueryRequest {
         query_id: "live_sensor_query".to_string(),
         janusql: r#"
+            PREFIX ex: <http://example.org/>
             SELECT ?sensor ?temp
-            FROM LIVE SLIDING WINDOW sensors [RANGE PT10S, SLIDE PT5S]
+            FROM NAMED WINDOW ex:liveWindow ON STREAM ex:sensorStream [RANGE 10000 STEP 5000]
             WHERE {
-                ?sensor <http://example.org/temperature> ?temp .
-                FILTER(?temp > 25.0)
+                WINDOW ex:liveWindow {
+                    ?sensor ex:temperature ?temp .
+                    FILTER(?temp > 25.0)
+                }
             }
         "#
         .to_string(),
