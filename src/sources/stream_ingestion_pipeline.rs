@@ -13,7 +13,7 @@ impl StreamIngestionPipeline {
         StreamIngestionPipeline { storage, sources: Vec::new() }
     }
 
-    /// Adding the source for the stream ingestion pipeline (which can be MQTT, Kafka, etc.)
+    /// Adding a source for the stream ingestion pipeline (for example MQTT).
     pub fn add_source(&mut self, source: Box<dyn StreamSource>) {
         self.sources.push(source);
     }

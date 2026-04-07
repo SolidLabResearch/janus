@@ -36,6 +36,10 @@ impl Dictionary {
         self.id_to_uri.get(&id).map(|s| s.as_str())
     }
 
+    pub fn size(&self) -> usize {
+        self.string_to_id.len()
+    }
+
     pub fn save_to_file(&self, path: &Path) -> std::io::Result<()> {
         let encoded = bincode::serialize(self)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;

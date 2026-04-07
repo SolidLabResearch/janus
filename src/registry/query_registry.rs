@@ -1,8 +1,5 @@
-use std::{
-    collections::HashMap,
-    fmt::write,
-    sync::{Arc, RwLock},
-};
+use std::collections::HashMap;
+use std::sync::{Arc, RwLock};
 
 use crate::parsing::janusql_parser::ParsedJanusQuery;
 
@@ -63,7 +60,7 @@ impl QueryRegistry {
     pub fn new() -> Self {
         QueryRegistry {
             queries: Arc::new(RwLock::new(HashMap::new())),
-            config: (QueryRegistryConfig::default()),
+            config: QueryRegistryConfig::default(),
         }
     }
 
@@ -71,4 +68,123 @@ impl QueryRegistry {
     pub fn with_config(config: QueryRegistryConfig) -> Self {
         QueryRegistry { queries: Arc::new(RwLock::new(HashMap::new())), config }
     }
+
+    /// Register a query. Returns the stored metadata on success.
+    pub fn register(
+        &self,
+        query_id: QueryId,
+        query_text: String,
+        parsed: ParsedJanusQuery,
+    ) -> Result<QueryMetadata, QueryRegistryError> {
+        // Check if query ID already exists
+        {
+            let queries = self.queries.read().unwrap();
+            if queries.contains_key(&query_id) {
+                return Err(QueryRegistryError::QueryAlreadyExists(query_id));
+            }
+        }
+
+        // Check registry capacity
+        if let Some(max) = self.config.max_queries {
+            let queries = self.queries.read().unwrap();
+            if queries.len() >= max {
+                return Err(QueryRegistryError::MaxQueriesReached);
+            }
+        }
+
+        let metadata = QueryMetadata {
+            query_id: query_id.clone(),
+            query_text,
+            parsed,
+            registered_at: Self::current_timestamp(),
+            execution_count: 0,
+            subscribers: Vec::new(),
+        };
+
+        // Store the query in the registry
+        {
+            let mut queries = self.queries.write().unwrap();
+            queries.insert(query_id.clone(), metadata.clone());
+        }
+
+        Ok(metadata)
+    }
+
+    /// Find a query by the given QueryId
+    pub fn get(&self, query_id: &QueryId) -> Option<QueryMetadata> {
+        let queries = self.queries.read().unwrap();
+        queries.get(query_id).cloned()
+    }
+
+    /// Function to add the subscriber to a query
+    pub fn add_subscriber(
+        &self,
+        query_id: &QueryId,
+        subscriber_id: QueryId,
+    ) -> Result<(), QueryRegistryError> {
+        let mut queries = self.queries.write().unwrap();
+        if let Some(metadata) = queries.get_mut(query_id) {
+            metadata.subscribers.push(subscriber_id);
+            Ok(())
+        } else {
+            Err(QueryRegistryError::QueryNotFound(query_id.clone()))
+        }
+    }
+
+    pub fn increment_execution_count(&self, query_id: &QueryId) -> Result<(), QueryRegistryError> {
+        let mut queries = self.queries.write().unwrap();
+        let query = queries
+            .get_mut(query_id)
+            .ok_or_else(|| QueryRegistryError::QueryNotFound(query_id.clone()))?;
+
+        query.execution_count += 1;
+        Ok(())
+    }
+
+    /// To remove a query from the registry
+    pub fn unregister(&self, query_id: &QueryId) -> Result<QueryMetadata, QueryRegistryError> {
+        let mut queries = self.queries.write().unwrap();
+        queries
+            .remove(query_id)
+            .ok_or_else(|| QueryRegistryError::QueryNotFound(query_id.clone()))
+    }
+
+    /// Get all the registered queries by their Query IDs.
+    pub fn list_all(&self) -> Vec<QueryId> {
+        let queries = self.queries.read().unwrap();
+        queries.keys().cloned().collect()
+    }
+
+    /// Clear all queries from the registry
+    pub fn clear(&self) {
+        let mut queries = self.queries.write().unwrap();
+        queries.clear();
+    }
+
+    pub fn get_statistics(&self) -> RegistryStatistics {
+        let queries = self.queries.read().unwrap();
+        let total_queries = queries.len();
+        let total_subscribers = queries.values().map(|q| q.subscribers.len()).sum();
+
+        RegistryStatistics { total_queries, total_subscribers }
+    }
+
+    fn current_timestamp() -> u64 {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let start = SystemTime::now();
+        let since_the_epoch = start.duration_since(UNIX_EPOCH).expect("Time went backwards");
+        since_the_epoch.as_secs()
+    }
+}
+
+impl Default for QueryRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct RegistryStatistics {
+    pub total_queries: usize,
+    pub total_subscribers: usize,
 }

@@ -1,1 +1,1 @@
-pub mod query_registration;
+pub mod janus_api;

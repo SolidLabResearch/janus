@@ -1,52 +1,40 @@
-# Rust build artifacts
-target/
+# Rust
+/target/
 Cargo.lock
-
-# Debug symbols
+**/*.rs.bk
 *.pdb
 
-# Backup files
-*~
+# Test data and logs
+test_data/
+server.log
+docker/mosquitto/log/
+docker/mosquitto/data/
+data/
+
+# Python
+*.pyc
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Dashboard build artifacts
+janus-dashboard/dist/
+janus-dashboard/node_modules/
+janus-dashboard/.vscode/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Editor directories
+.vscode/
+.idea/
 *.swp
 *.swo
-*.swn
-.DS_Store
+*~
 
-# IDE and editor directories
-.idea/
-.vscode/
-*.iml
-.zed/
-
-# Environment files
-.env
-.env.local
-.env.*.local
-
-# Test coverage
-*.profraw
-*.profdata
-coverage/
-tarpaulin-report.html
-
-# Documentation build
-target/doc/
-
-# Temporary files
-tmp/
-temp/
-
-# OS specific
-.DS_Store
-Thumbs.db
-
-# RDF Store data
-fuseki-config/databases/
-
-# Docker volumes
-*.db
-*.db-shm
-*.db-wal
-
-# Data for the Benchmarking
-/data/
+# Temporary debug/test files
+debug_*.py
+tests/reproduction_test.rs
+tests/user_query_repro.rs

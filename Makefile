@@ -61,7 +61,7 @@ check: fmt-check lint ## Run all checks (formatting and linting)
 
 ci-check: ## Run full CI/CD checks locally before pushing
 	@echo "$(BLUE)Running CI/CD checks...$(NC)"
-	@./ci-check.sh
+	@./scripts/ci-check.sh
 
 clean: ## Clean build artifacts
 	@echo "$(BLUE)Cleaning build artifacts...$(NC)"

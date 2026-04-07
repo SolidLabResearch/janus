@@ -4,6 +4,9 @@
 
 set -e  # Exit on any error
 
+# Ensure we are in the project root
+cd "$(dirname "$0")/.."
+
 echo "Running CI/CD checks locally..."
 echo ""
 
