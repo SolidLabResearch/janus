@@ -3,7 +3,7 @@
     export let onChange: (val: string) => void;
 
     function handleInput(e: Event) {
-        const target = e.target as HTMLAreaElement;
+        const target = e.currentTarget as HTMLTextAreaElement;
         onChange(target.value);
     }
 </script>

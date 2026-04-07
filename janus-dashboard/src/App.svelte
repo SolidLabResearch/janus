@@ -163,12 +163,9 @@ WHERE {
         if (!queryId) return;
 
         try {
-            const response = await fetch(
-                `http://localhost:8080/api/queries/${queryId}/stop`,
-                {
-                    method: "POST",
-                },
-            );
+            const response = await fetch(`http://localhost:8080/api/queries/${queryId}`, {
+                method: "DELETE",
+            });
 
             if (response.ok) {
                 console.log("Query stopped");
