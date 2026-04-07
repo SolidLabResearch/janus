@@ -61,7 +61,6 @@ fn test_parse_ntriples_basic() {
         rate_of_publishing: 0,
         loop_file: false,
         add_timestamps: true,
-        kafka_config: None,
         mqtt_config: None,
     };
 
@@ -92,7 +91,6 @@ fn test_parse_ntriples_without_graph() {
         rate_of_publishing: 0,
         loop_file: false,
         add_timestamps: true,
-        kafka_config: None,
         mqtt_config: None,
     };
 
@@ -123,7 +121,6 @@ fn test_parse_invalid_rdf_line() {
         rate_of_publishing: 0,
         loop_file: false,
         add_timestamps: true,
-        kafka_config: None,
         mqtt_config: None,
     };
 
@@ -158,7 +155,6 @@ fn test_storage_only_mode() {
         rate_of_publishing: 0,
         loop_file: false,
         add_timestamps: true,
-        kafka_config: None,
         mqtt_config: None,
     };
 
@@ -200,7 +196,6 @@ fn test_empty_lines_and_comments_skipped() {
         rate_of_publishing: 0,
         loop_file: false,
         add_timestamps: true,
-        kafka_config: None,
         mqtt_config: None,
     };
 
@@ -236,7 +231,6 @@ fn test_rate_limiting() {
         rate_of_publishing: 100,
         loop_file: false,
         add_timestamps: true,
-        kafka_config: None,
         mqtt_config: None,
     };
 
@@ -307,7 +301,6 @@ fn test_stop_signal() {
         rate_of_publishing: 50,
         loop_file: false,
         add_timestamps: true,
-        kafka_config: None,
         mqtt_config: None,
     };
 
@@ -345,7 +338,6 @@ fn test_file_loop_mode() {
         rate_of_publishing: 100,
         loop_file: true,
         add_timestamps: true,
-        kafka_config: None,
         mqtt_config: None,
     };
 
@@ -375,7 +367,6 @@ fn test_timestamp_parsing() {
         rate_of_publishing: 0,
         loop_file: false,
         add_timestamps: true,
-        kafka_config: None,
         mqtt_config: None,
     };
 
@@ -393,7 +384,6 @@ fn test_timestamp_parsing() {
         rate_of_publishing: 0,
         loop_file: false,
         add_timestamps: false,
-        kafka_config: None,
         mqtt_config: None,
     };
 
@@ -404,16 +394,6 @@ fn test_timestamp_parsing() {
     assert_eq!(event.timestamp, 1234567890);
 
     cleanup_test_environment(&test_dir);
-}
-
-#[test]
-fn test_kafka_config_default() {
-    use janus::stream_bus::KafkaConfig;
-
-    let config = KafkaConfig::default();
-    assert_eq!(config.bootstrap_servers, "localhost:9092");
-    assert_eq!(config.client_id, "janus_stream_bus");
-    assert_eq!(config.message_timeout_ms, "5000");
 }
 
 #[test]
@@ -431,11 +411,9 @@ fn test_mqtt_config_default() {
 fn test_broker_type_variants() {
     use janus::stream_bus::BrokerType;
 
-    let kafka = BrokerType::Kafka;
     let mqtt = BrokerType::Mqtt;
     let none = BrokerType::None;
 
-    assert!(matches!(kafka, BrokerType::Kafka));
     assert!(matches!(mqtt, BrokerType::Mqtt));
     assert!(matches!(none, BrokerType::None));
 }
@@ -470,7 +448,6 @@ fn test_malformed_rdf_lines_handling() {
         rate_of_publishing: 0,
         loop_file: false,
         add_timestamps: true,
-        kafka_config: None,
         mqtt_config: None,
     };
 
@@ -507,7 +484,6 @@ fn test_large_file_processing() {
         rate_of_publishing: 0,
         loop_file: false,
         add_timestamps: true,
-        kafka_config: None,
         mqtt_config: None,
     };
 

@@ -9,7 +9,7 @@ use crate::{
     parsing::rdf_parser,
     registry::query_registry::{QueryId, QueryRegistry},
     storage::segmented_storage::StreamingSegmentedStorage,
-    stream_bus::{BrokerType, KafkaConfig, MqttConfig, StreamBus, StreamBusConfig},
+    stream_bus::{BrokerType, MqttConfig, StreamBus, StreamBusConfig},
 };
 use axum::{
     extract::{
@@ -93,7 +93,6 @@ pub struct StartReplayRequest {
     pub loop_file: bool,
     #[serde(default = "default_true")]
     pub add_timestamps: bool,
-    pub kafka_config: Option<KafkaConfigDto>,
     pub mqtt_config: Option<MqttConfigDto>,
 }
 
@@ -111,13 +110,6 @@ fn default_rate() -> u64 {
 
 fn default_true() -> bool {
     true
-}
-
-#[derive(Debug, Deserialize)]
-pub struct KafkaConfigDto {
-    pub bootstrap_servers: String,
-    pub client_id: String,
-    pub message_timeout_ms: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -418,24 +410,17 @@ async fn start_replay(
 
     // Parse broker type
     let broker_type = match payload.broker_type.to_lowercase().as_str() {
-        "kafka" => BrokerType::Kafka,
         "mqtt" => BrokerType::Mqtt,
         "none" => BrokerType::None,
         _ => {
             return Err(ApiError::BadRequest(format!(
-                "Invalid broker type: {}. Use 'kafka', 'mqtt', or 'none'",
+                "Invalid broker type: {}. Use 'mqtt' or 'none'",
                 payload.broker_type
             )))
         }
     };
 
     // Convert configs
-    let kafka_config = payload.kafka_config.map(|cfg| KafkaConfig {
-        bootstrap_servers: cfg.bootstrap_servers,
-        client_id: cfg.client_id,
-        message_timeout_ms: cfg.message_timeout_ms,
-    });
-
     let mqtt_config = payload.mqtt_config.map(|cfg| MqttConfig {
         host: cfg.host,
         port: cfg.port,
@@ -450,7 +435,6 @@ async fn start_replay(
         rate_of_publishing: payload.rate_of_publishing,
         loop_file: payload.loop_file,
         add_timestamps: payload.add_timestamps,
-        kafka_config,
         mqtt_config,
     };
 

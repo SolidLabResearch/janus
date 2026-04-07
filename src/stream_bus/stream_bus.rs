@@ -1,8 +1,8 @@
-//! Stream Bus to read the RDF data from a file and publishing to a Kafka and Streaming Storage at the same time.
+//! Stream Bus to read RDF data from a file and publish to MQTT and streaming storage.
 //!
 //! The module implements a high-throughput event bus that does the following things:
 //! 1. Will read the RDF events from the file.
-//! 2. It will publish the event to the Kafka / MQTT topic.
+//! 2. It will publish the event to the MQTT topic.
 //! 3. It will write the event to the Janus Streaming Storage.
 //! 4. It provides replay rate defined and will replay the event.
 
@@ -10,10 +10,6 @@ use crate::core::RDFEvent;
 use crate::parsing::rdf_parser;
 use crate::storage::segmented_storage::StreamingSegmentedStorage;
 use core::str;
-#[cfg(not(windows))]
-use rdkafka::config::ClientConfig;
-#[cfg(not(windows))]
-use rdkafka::producer::{FutureProducer, FutureRecord};
 use rumqttc::{AsyncClient, MqttOptions, QoS};
 use std::fmt::write;
 use std::fs::File;
@@ -26,22 +22,12 @@ use tokio::runtime::{self, Runtime};
 use tokio::time::sleep;
 
 /// Defining the Broker Type
-/// 1. Kafka
-/// 2. MQTT
-/// 3. None, in which case it won't write to a stream but rather only to the Segmented Storage.
+/// 1. MQTT
+/// 2. None, in which case it won't write to a stream but rather only to the Segmented Storage.
 #[derive(Debug, Clone)]
 pub enum BrokerType {
-    Kafka,
     Mqtt,
     None,
-}
-
-/// Defining the KafkaConfiguration
-#[derive(Debug, Clone)]
-pub struct KafkaConfig {
-    pub bootstrap_servers: String,
-    pub client_id: String,
-    pub message_timeout_ms: String,
 }
 
 /// Definining the MQTT Configuration
@@ -62,18 +48,7 @@ pub struct StreamBusConfig {
     pub rate_of_publishing: u64,
     pub loop_file: bool,
     pub add_timestamps: bool,
-    pub kafka_config: Option<KafkaConfig>,
     pub mqtt_config: Option<MqttConfig>,
-}
-
-impl Default for KafkaConfig {
-    fn default() -> Self {
-        Self {
-            bootstrap_servers: "localhost:9092".to_string(),
-            client_id: "janus_stream_bus".to_string(),
-            message_timeout_ms: "5000".to_string(),
-        }
-    }
 }
 
 impl Default for MqttConfig {
@@ -200,7 +175,6 @@ impl StreamBus {
         let start_time = Instant::now();
 
         match self.config.broker_type {
-            BrokerType::Kafka => self.runtime.block_on(self.run_with_kafka())?,
             BrokerType::Mqtt => self.runtime.block_on(self.run_with_mqtt())?,
             BrokerType::None => self.runtime.block_on(self.run_storage_only())?,
         }
@@ -268,57 +242,6 @@ impl StreamBus {
             storage_errors: self.storage_errors.load(Ordering::Relaxed),
             elapsed_seconds: start_time.elapsed().as_secs_f64(),
         }
-    }
-
-    #[cfg(not(windows))]
-    async fn run_with_kafka(&self) -> Result<(), StreamBusError> {
-        let kafka_config =
-            self.config.kafka_config.as_ref().ok_or(StreamBusError::ConfigError(
-                "Config of kafka is not provided".to_string(),
-            ))?;
-
-        println!("Connecting to kafka at: {}", kafka_config.bootstrap_servers);
-
-        let producer: FutureProducer = ClientConfig::new()
-            .set("bootstrap.servers", &kafka_config.bootstrap_servers)
-            .set("message.timeout.ms", &kafka_config.message_timeout_ms)
-            .set("client.id", &kafka_config.client_id)
-            .create()
-            .map_err(|e| {
-                StreamBusError::BrokerError(format!("Failed to create the kafka producer: {}", e))
-            })?;
-
-        println!("Connected to kafka!\n");
-
-        self.process_file(|event, line| {
-            let topic = self.config.topics.first().unwrap();
-            let producer_clone = producer.clone();
-            let events_published = Arc::clone(&self.events_published);
-            let publish_errors = Arc::clone(&self.publish_errors);
-
-            async move {
-                let timestamp_key = event.timestamp.to_string();
-                let record = FutureRecord::to(topic).payload(&line).key(&timestamp_key);
-
-                match producer_clone.send(record, Duration::from_secs(0)).await {
-                    Ok(_) => {
-                        events_published.fetch_add(1, Ordering::Relaxed);
-                    }
-                    Err((e, _)) => {
-                        eprintln!("X Kafka Publish Error: {:?}", e);
-                        publish_errors.fetch_add(1, Ordering::Relaxed);
-                    }
-                }
-            }
-        })
-        .await
-    }
-
-    #[cfg(windows)]
-    async fn run_with_kafka(&self) -> Result<(), StreamBusError> {
-        Err(StreamBusError::BrokerError(
-            "Kafka broker mode is not supported on Windows builds".to_string(),
-        ))
     }
 
     async fn run_with_mqtt(&self) -> Result<(), StreamBusError> {

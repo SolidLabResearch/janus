@@ -1,14 +1,13 @@
 //! Stream Bus CLI - Command Line tool for the Stream Bus to publish the data to a broker and storage.
 //!
 //! Usage:
-//!   stream-bus-cli --input data/sensors.nq --broker kafka --topics sensors --rate 64
 //!   stream-bus-cli --input data/sensors.nq --broker mqtt --topics sensors --rate 64 --loop-file
 //!   stream-bus-cli --input data/sensors.nq --broker none --rate 0
 
 use clap::Parser;
 use janus::storage::segmented_storage::StreamingSegmentedStorage;
 use janus::storage::util::StreamingConfig;
-use janus::stream_bus::{BrokerType, KafkaConfig, MqttConfig, StreamBus, StreamBusConfig};
+use janus::stream_bus::{BrokerType, MqttConfig, StreamBus, StreamBusConfig};
 use std::sync::Arc;
 
 #[derive(Parser, Debug)]
@@ -19,8 +18,8 @@ struct Args {
     #[arg(short, long)]
     input: String,
 
-    /// Broker type: kafka, mqtt, or none
-    #[arg(short, long, default_value = "kafka")]
+    /// Broker type: mqtt or none
+    #[arg(short, long, default_value = "mqtt")]
     broker: String,
 
     /// Topics to publish to (comma-separated)
@@ -38,10 +37,6 @@ struct Args {
     /// Add timestamps if not present
     #[arg(long)]
     add_timestamps: bool,
-
-    /// Kafka bootstrap servers
-    #[arg(long, default_value = "localhost:9092")]
-    kafka_servers: String,
 
     /// MQTT host
     #[arg(long, default_value = "localhost")]
@@ -76,12 +71,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let storage = Arc::new(storage);
 
     let broker_type = match args.broker.to_lowercase().as_str() {
-        "kafka" => BrokerType::Kafka,
         "mqtt" => BrokerType::Mqtt,
         "none" => BrokerType::None,
         _ => {
             eprintln!("Error: Unknown broker type: {}", args.broker);
-            eprintln!("Valid options: kafka, mqtt, none");
+            eprintln!("Valid options: mqtt, none");
             std::process::exit(1);
         }
     };
@@ -95,12 +89,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         rate_of_publishing: args.rate,
         loop_file: args.loop_file,
         add_timestamps: args.add_timestamps,
-        kafka_config: match broker_type {
-            BrokerType::Kafka => {
-                Some(KafkaConfig { bootstrap_servers: args.kafka_servers, ..Default::default() })
-            }
-            _ => None,
-        },
         mqtt_config: match broker_type {
             BrokerType::Mqtt => Some(MqttConfig {
                 host: args.mqtt_host,
