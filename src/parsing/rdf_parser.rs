@@ -28,7 +28,7 @@ pub fn parse_rdf_line(line: &str, add_timestamps: bool) -> Result<RDFEvent, Stri
     // Parse optional graph (URI in angle brackets)
     let (graph, _) = if !remaining.trim().is_empty() {
         match parse_uri(remaining, "graph") {
-            Ok((g, rest)) => (g.to_string(), rest),
+            Ok((g, rest)) => (g.clone(), rest),
             Err(_) => (String::new(), remaining),
         }
     } else {
