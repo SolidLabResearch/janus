@@ -41,6 +41,7 @@ path = "src/bin/http_server.rs"
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
+tempfile = "3.8"
 
 [[bench]]
 name = "storage_write"
