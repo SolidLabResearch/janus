@@ -273,6 +273,50 @@ fn test_literal_and_uri_objects() {
 }
 
 #[test]
+fn test_live_query_with_janus_extension_function() {
+    let query = r#"
+        PREFIX ex: <http://example.org/>
+        PREFIX janus: <https://janus.rs/fn#>
+        REGISTER RStream <output> AS
+        SELECT ?sensor ?reading
+        FROM NAMED WINDOW ex:w1 ON STREAM ex:stream1 [RANGE 1000 STEP 500]
+        WHERE {
+            WINDOW ex:w1 {
+                ?sensor ex:hasReading ?reading .
+                FILTER(janus:absolute_threshold_exceeded(?reading, "25", "2"))
+            }
+        }
+    "#;
+
+    let mut processor = LiveStreamProcessing::new(query.to_string()).unwrap();
+    processor.register_stream("http://example.org/stream1").unwrap();
+    processor.start_processing().unwrap();
+
+    processor
+        .add_event(
+            "http://example.org/stream1",
+            RDFEvent::new(
+                0,
+                "http://example.org/sensor-pass",
+                "http://example.org/hasReading",
+                "30",
+                "",
+            ),
+        )
+        .unwrap();
+
+    processor.close_stream("http://example.org/stream1", 3000).unwrap();
+    thread::sleep(Duration::from_millis(500));
+
+    let results = processor.collect_results(None).unwrap();
+    assert!(
+        results.iter().any(|result| result.bindings.contains("sensor-pass")),
+        "Expected at least one live result to pass the Janus extension-function filter, got {:?}",
+        results
+    );
+}
+
+#[test]
 fn test_rapid_event_stream() {
     let query = r#"
         PREFIX ex: <http://example.org/>

@@ -4,10 +4,14 @@
 //! It integrates RSP-QL query execution with Janus's RDFEvent data model.
 
 use crate::core::RDFEvent;
+use crate::extensions::query_options::build_evaluator;
 use oxigraph::model::{GraphName, NamedNode, Quad, Term};
-use rsp_rs::{BindingWithTimestamp, RDFStream, RSPEngine};
-use std::collections::HashMap;
+use oxigraph::sparql::QueryResults;
+use oxigraph::store::Store;
+use rsp_rs::{BindingWithTimestamp, RDFStream, RSPEngine, StreamType};
+use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::{Receiver, RecvError};
+use std::sync::{mpsc, Arc, Mutex};
 
 /// Live stream processing engine for RSP-QL queries
 pub struct LiveStreamProcessing {
@@ -17,6 +21,8 @@ pub struct LiveStreamProcessing {
     streams: HashMap<String, RDFStream>,
     /// Result receiver for query results
     result_receiver: Option<Receiver<BindingWithTimestamp>>,
+    /// Static quads mirrored in Janus for Janus-side live query evaluation.
+    static_data: Arc<Mutex<HashSet<Quad>>>,
     /// Flag indicating if processing has started
     processing_started: bool,
 }
@@ -81,6 +87,7 @@ impl LiveStreamProcessing {
             engine,
             streams: HashMap::new(),
             result_receiver: None,
+            static_data: Arc::new(Mutex::new(HashSet::new())),
             processing_started: false,
         })
     }
@@ -117,7 +124,7 @@ impl LiveStreamProcessing {
             return Err(LiveStreamProcessingError("Processing already started".to_string()));
         }
 
-        let receiver = self.engine.start_processing();
+        let receiver = self.register_live_callbacks()?;
         self.result_receiver = Some(receiver);
         self.processing_started = true;
 
@@ -265,7 +272,8 @@ impl LiveStreamProcessing {
     /// * `event` - RDFEvent representing static knowledge
     pub fn add_static_data(&mut self, event: RDFEvent) -> Result<(), LiveStreamProcessingError> {
         let quad = self.rdf_event_to_quad(&event)?;
-        self.engine.add_static_data(quad);
+        self.engine.add_static_data(quad.clone());
+        self.static_data.lock().unwrap().insert(quad);
         Ok(())
     }
 
@@ -418,6 +426,129 @@ impl LiveStreamProcessing {
         };
 
         Ok(Quad::new(subject, predicate, object, graph))
+    }
+
+    fn register_live_callbacks(
+        &self,
+    ) -> Result<Receiver<BindingWithTimestamp>, LiveStreamProcessingError> {
+        let parsed_query = self.engine.parsed_query().clone();
+        let sparql_query = Arc::new(parsed_query.sparql_query.clone());
+        let (tx, rx) = mpsc::channel();
+
+        let mut windows = HashMap::new();
+        for window_def in &parsed_query.s2r {
+            let window = self.engine.get_window(&window_def.window_name).ok_or_else(|| {
+                LiveStreamProcessingError(format!(
+                    "Window '{}' not found in engine",
+                    window_def.window_name
+                ))
+            })?;
+            windows.insert(window_def.window_name.clone(), window);
+        }
+        let windows = Arc::new(windows);
+        let static_data = Arc::clone(&self.static_data);
+
+        for window_def in parsed_query.s2r {
+            let window_arc = windows.get(&window_def.window_name).cloned().ok_or_else(|| {
+                LiveStreamProcessingError(format!(
+                    "Window '{}' not available for subscription",
+                    window_def.window_name
+                ))
+            })?;
+            let tx_clone = tx.clone();
+            let sparql_query = Arc::clone(&sparql_query);
+            let all_windows = Arc::clone(&windows);
+            let static_data = Arc::clone(&static_data);
+            let window_name = window_def.window_name.clone();
+            let window_width = window_def.width;
+
+            let mut window = window_arc.lock().unwrap();
+            window.subscribe(StreamType::RStream, move |mut container| {
+                let timestamp = container.last_timestamp_changed;
+
+                for (other_name, other_window_arc) in all_windows.iter() {
+                    if other_name == &window_name {
+                        continue;
+                    }
+                    if let Ok(other_window) = other_window_arc.lock() {
+                        if let Some(other_container) =
+                            other_window.get_content_from_window(timestamp)
+                        {
+                            for quad in &other_container.elements {
+                                container.add(quad.clone(), timestamp);
+                            }
+                        }
+                    }
+                }
+
+                match Self::execute_live_query(
+                    &container,
+                    &sparql_query,
+                    &static_data.lock().unwrap(),
+                ) {
+                    Ok(bindings) => {
+                        for binding in bindings {
+                            let result = BindingWithTimestamp {
+                                bindings: binding,
+                                timestamp_from: timestamp,
+                                timestamp_to: timestamp + window_width,
+                            };
+                            let _ = tx_clone.send(result);
+                        }
+                    }
+                    Err(err) => {
+                        eprintln!("Live Janus evaluation error: {}", err);
+                    }
+                }
+            });
+        }
+
+        Ok(rx)
+    }
+
+    fn execute_live_query(
+        container: &rsp_rs::QuadContainer,
+        query: &str,
+        static_data: &HashSet<Quad>,
+    ) -> Result<Vec<String>, LiveStreamProcessingError> {
+        let store = Store::new()
+            .map_err(|e| LiveStreamProcessingError(format!("Failed to create store: {}", e)))?;
+
+        for quad in &container.elements {
+            store.insert(quad).map_err(|e| {
+                LiveStreamProcessingError(format!("Failed to insert live quad into store: {}", e))
+            })?;
+        }
+        for quad in static_data {
+            store.insert(quad).map_err(|e| {
+                LiveStreamProcessingError(format!(
+                    "Failed to insert static quad into live store: {}",
+                    e
+                ))
+            })?;
+        }
+
+        let parsed_query = build_evaluator().parse_query(query).map_err(|e| {
+            LiveStreamProcessingError(format!("Failed to parse live SPARQL: {}", e))
+        })?;
+        let results = parsed_query.on_store(&store).execute().map_err(|e| {
+            LiveStreamProcessingError(format!("Failed to execute live SPARQL: {}", e))
+        })?;
+
+        let mut bindings = Vec::new();
+        if let QueryResults::Solutions(solutions) = results {
+            for solution in solutions {
+                let solution = solution.map_err(|e| {
+                    LiveStreamProcessingError(format!(
+                        "Failed to evaluate live solution binding: {}",
+                        e
+                    ))
+                })?;
+                bindings.push(format!("{:?}", solution));
+            }
+        }
+
+        Ok(bindings)
     }
 
     /// Returns the list of registered stream URIs
