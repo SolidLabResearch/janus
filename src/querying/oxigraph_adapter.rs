@@ -38,9 +38,10 @@
 //! }
 //! ```
 
+use crate::extensions::query_options::build_evaluator;
 use crate::querying::query_processing::{self, SparqlEngine};
 use oxigraph::model::Quad;
-use oxigraph::sparql::{QueryResults, SparqlEvaluator};
+use oxigraph::sparql::QueryResults;
 use oxigraph::store::Store;
 use rsp_rs::QuadContainer;
 use std::collections::HashMap;
@@ -118,8 +119,8 @@ impl OxigraphAdapter {
             println!("Query: {}", query);
         }
 
-        // Execute the query using the SparqlEvaluator API
-        let evaluator = SparqlEvaluator::new();
+        // Execute the query using the SparqlEvaluator API with Janus extension functions.
+        let evaluator = build_evaluator();
         let parsed_query =
             evaluator.parse_query(query).map_err(|e| OxigraphError(e.to_string()))?;
         let results = parsed_query.on_store(&store).execute()?;
@@ -170,8 +171,8 @@ impl SparqlEngine for OxigraphAdapter {
             }
         }
 
-        // Execute the query using the new SparqlEvaluator API
-        let evaluator = SparqlEvaluator::new();
+        // Execute the query using the new SparqlEvaluator API with Janus extension functions.
+        let evaluator = build_evaluator();
         let parsed_query =
             evaluator.parse_query(query).map_err(|e| OxigraphError(e.to_string()))?;
         let results = parsed_query.on_store(&store).execute()?;

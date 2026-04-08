@@ -59,7 +59,7 @@ fn test_basic_functionality() {
 
         SELECT ?sensor ?temp
 
-        FROM NAMED WINDOW ex:hist ON STREAM ex:sensors [START 1000 END 2000]
+        FROM NAMED WINDOW ex:hist ON LOG ex:historicalAccl [START 1000 END 2000]
 
         WHERE {
             WINDOW ex:hist { ?sensor ex:temperature ?temp }

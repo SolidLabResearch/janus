@@ -201,6 +201,32 @@ fn test_execute_query_with_literal_filter() {
 }
 
 #[test]
+fn test_execute_query_with_janus_extension_function() {
+    let adapter = OxigraphAdapter::new();
+    let container = create_test_container();
+
+    let query = r#"
+        PREFIX ex: <http://example.org/>
+        PREFIX janus: <https://janus.rs/fn#>
+        SELECT ?s ?age WHERE {
+            ?s ex:age ?age .
+            FILTER(janus:absolute_threshold_exceeded(?age, "25", "2"))
+        }
+    "#;
+
+    let results = adapter.execute_query(query, &container);
+    assert!(results.is_ok(), "Query with Janus extension function should succeed");
+
+    let results = results.unwrap();
+    assert_eq!(results.len(), 1, "Should return 1 result (Alice exceeds threshold)");
+    assert!(
+        results[0].contains("alice"),
+        "Expected Alice to match the custom function filter, got {:?}",
+        results
+    );
+}
+
+#[test]
 fn test_execute_count_query() {
     let adapter = OxigraphAdapter::new();
     let container = create_test_container();

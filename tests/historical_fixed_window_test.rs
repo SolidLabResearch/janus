@@ -1,4 +1,4 @@
-use janus::parsing::janusql_parser::{WindowDefinition, WindowType};
+use janus::parsing::janusql_parser::{SourceKind, WindowDefinition, WindowType};
 use janus::storage::segmented_storage::StreamingSegmentedStorage;
 use janus::storage::util::StreamingConfig;
 use janus::stream::operators::historical_fixed_window::HistoricalFixedWindowOperator;
@@ -73,6 +73,7 @@ fn test_historical_fixed_window_with_real_iris() {
     // Define Fixed Window: [200, 500]
     let window_def = WindowDefinition {
         window_name: "http://example.org/window/temp-fixed".to_string(),
+        source_kind: SourceKind::Stream,
         stream_name: "http://example.org/stream/temperature".to_string(),
         width: 0,
         slide: 0,
@@ -164,6 +165,7 @@ fn test_historical_fixed_window_semantic_web() {
     // Query publications from timestamp 150 to 450
     let window_def = WindowDefinition {
         window_name: "http://example.org/window/publications-fixed".to_string(),
+        source_kind: SourceKind::Stream,
         stream_name: "http://example.org/stream/publications".to_string(),
         width: 0,
         slide: 0,

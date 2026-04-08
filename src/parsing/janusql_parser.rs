@@ -9,11 +9,22 @@ pub enum WindowType {
     HistoricalFixed,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+/// Source kinds supported in JanusQL window clauses.
+pub enum SourceKind {
+    /// Real-time stream source.
+    Stream,
+    /// Historical log or store source.
+    Log,
+}
+
 #[derive(Debug, Clone)]
 /// Definition of a window in JanusQL which is also used for stream processing.
 pub struct WindowDefinition {
     /// Name of the window
     pub window_name: String,
+    /// Source kind used by the window clause.
+    pub source_kind: SourceKind,
     /// Name of the stream
     pub stream_name: String,
     /// Width of the window
@@ -76,10 +87,10 @@ impl JanusQLParser {
     pub fn new() -> Result<Self, Box<dyn std::error::Error>> {
         Ok(JanusQLParser {
             historical_sliding_window: Regex::new(
-                r"FROM\s+NAMED\s+WINDOW\s+([^\s]+)\s+ON\s+STREAM\s+([^\s]+)\s+\[OFFSET\s+(\d+)\s+RANGE\s+(\d+)\s+STEP\s+(\d+)\]",
+                r"FROM\s+NAMED\s+WINDOW\s+([^\s]+)\s+ON\s+(STREAM|LOG)\s+([^\s]+)\s+\[OFFSET\s+(\d+)\s+RANGE\s+(\d+)\s+STEP\s+(\d+)\]",
             )?,
             historical_fixed_window: Regex::new(
-                r"FROM\s+NAMED\s+WINDOW\s+([^\s]+)\s+ON\s+STREAM\s+([^\s]+)\s+\[START\s+(\d+)\s+END\s+(\d+)\]",
+                r"FROM\s+NAMED\s+WINDOW\s+([^\s]+)\s+ON\s+(STREAM|LOG)\s+([^\s]+)\s+\[START\s+(\d+)\s+END\s+(\d+)\]",
             )?,
             live_sliding_window: Regex::new(
                 r"FROM\s+NAMED\s+WINDOW\s+([^\s]+)\s+ON\s+STREAM\s+([^\s]+)\s+\[RANGE\s+(\d+)\s+STEP\s+(\d+)\]",
@@ -97,10 +108,11 @@ impl JanusQLParser {
         if let Some(captures) = self.historical_sliding_window.captures(line) {
             return Ok(Some(WindowDefinition {
                 window_name: self.unwrap_iri(&captures[1], prefix_mapper),
-                stream_name: self.unwrap_iri(&captures[2], prefix_mapper),
-                offset: Some(captures[3].parse()?),
-                width: captures[4].parse()?,
-                slide: captures[5].parse()?,
+                source_kind: self.parse_source_kind(&captures[2]),
+                stream_name: self.unwrap_iri(&captures[3], prefix_mapper),
+                offset: Some(captures[4].parse()?),
+                width: captures[5].parse()?,
+                slide: captures[6].parse()?,
                 start: None,
                 end: None,
                 window_type: WindowType::HistoricalSliding,
@@ -110,9 +122,10 @@ impl JanusQLParser {
         if let Some(captures) = self.historical_fixed_window.captures(line) {
             return Ok(Some(WindowDefinition {
                 window_name: self.unwrap_iri(&captures[1], prefix_mapper),
-                stream_name: self.unwrap_iri(&captures[2], prefix_mapper),
-                start: Some(captures[3].parse()?),
-                end: Some(captures[4].parse()?),
+                source_kind: self.parse_source_kind(&captures[2]),
+                stream_name: self.unwrap_iri(&captures[3], prefix_mapper),
+                start: Some(captures[4].parse()?),
+                end: Some(captures[5].parse()?),
                 width: 0,
                 slide: 0,
                 offset: None,
@@ -123,6 +136,7 @@ impl JanusQLParser {
         if let Some(captures) = self.live_sliding_window.captures(line) {
             return Ok(Some(WindowDefinition {
                 window_name: self.unwrap_iri(&captures[1], prefix_mapper),
+                source_kind: SourceKind::Stream,
                 stream_name: self.unwrap_iri(&captures[2], prefix_mapper),
                 width: captures[3].parse()?,
                 slide: captures[4].parse()?,
@@ -134,6 +148,14 @@ impl JanusQLParser {
         }
 
         Ok(None)
+    }
+
+    fn parse_source_kind(&self, raw: &str) -> SourceKind {
+        if raw.eq_ignore_ascii_case("LOG") {
+            SourceKind::Log
+        } else {
+            SourceKind::Stream
+        }
     }
 
     /// Parses a JanusQL query string.
@@ -339,8 +361,18 @@ impl JanusQLParser {
                 bound_vars.insert(cap[0].to_string());
             }
 
-            let stream_uri = self.wrap_iri(&window.stream_name, prefixes);
-            format!("WHERE {{\n  GRAPH {} {{\n    {}\n  }}\n}}", stream_uri, inner_pattern)
+            match window.source_kind {
+                SourceKind::Log => {
+                    format!(
+                        "WHERE {{\n  GRAPH ?__janus_log_graph {{\n    {}\n  }}\n}}",
+                        inner_pattern
+                    )
+                }
+                SourceKind::Stream => {
+                    let stream_uri = self.wrap_iri(&window.stream_name, prefixes);
+                    format!("WHERE {{\n  GRAPH {} {{\n    {}\n  }}\n}}", stream_uri, inner_pattern)
+                }
+            }
         } else {
             where_clause.to_string()
         };

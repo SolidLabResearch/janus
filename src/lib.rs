@@ -114,6 +114,9 @@ pub mod execution;
 
 pub mod http;
 
+/// Janus-specific SPARQL extension functions.
+pub mod extensions;
+
 pub mod error {
     //! Error types and result definitions
 
