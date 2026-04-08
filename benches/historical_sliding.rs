@@ -1,7 +1,7 @@
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use janus::{
     execution::historical_executor::HistoricalExecutor,
-    parsing::janusql_parser::{WindowDefinition, WindowType},
+    parsing::janusql_parser::{SourceKind, WindowDefinition, WindowType},
     querying::oxigraph_adapter::OxigraphAdapter,
     storage::{segmented_storage::StreamingSegmentedStorage, util::StreamingConfig},
 };
@@ -53,6 +53,7 @@ fn setup(n: usize) -> (Arc<StreamingSegmentedStorage>, WindowDefinition) {
     }
     let window = WindowDefinition {
         window_name: "w".to_string(),
+        source_kind: SourceKind::Stream,
         stream_name: "http://example.org/stream".to_string(),
         width: RANGE_MS,
         slide: SLIDE_MS,

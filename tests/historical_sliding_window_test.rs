@@ -1,4 +1,4 @@
-use janus::parsing::janusql_parser::{WindowDefinition, WindowType};
+use janus::parsing::janusql_parser::{SourceKind, WindowDefinition, WindowType};
 use janus::storage::segmented_storage::StreamingSegmentedStorage;
 use janus::storage::util::StreamingConfig;
 use janus::stream::operators::historical_sliding_window::HistoricalSlidingWindowOperator;
@@ -66,6 +66,7 @@ fn test_historical_sliding_window_with_real_iris() {
     // Define Window: Width 200, Slide 100, Offset 500
     let window_def = WindowDefinition {
         window_name: "http://example.org/window/temp-sliding".to_string(),
+        source_kind: SourceKind::Stream,
         stream_name: "http://example.org/stream/temperature".to_string(),
         width: 200,
         slide: 100,
@@ -150,6 +151,7 @@ fn test_historical_sliding_window_foaf_example() {
 
     let window_def = WindowDefinition {
         window_name: "http://example.org/window/people-sliding".to_string(),
+        source_kind: SourceKind::Stream,
         stream_name: "http://example.org/stream/people".to_string(),
         width: 250,
         slide: 100,

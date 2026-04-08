@@ -3,7 +3,7 @@
 //! Tests for the JanusQL query parser, verifying parsing of window definitions,
 //! R2S operators, and query generation.
 
-use janus::parsing::janusql_parser::JanusQLParser;
+use janus::parsing::janusql_parser::{JanusQLParser, SourceKind};
 
 #[test]
 fn test_basic_live_window() {
@@ -69,4 +69,36 @@ fn test_mixed_windows() {
     assert_eq!(result.historical_windows[1].slide, 2000);
     assert!(!result.rspql_query.is_empty());
     assert_eq!(result.sparql_queries.len(), 2);
+}
+
+#[test]
+fn test_on_log_historical_windows_are_parsed_as_logs() {
+    let parser = JanusQLParser::new().unwrap();
+    let query = r"
+        PREFIX sensor: <https://rsp.js/sensors/>
+        SELECT ?temperature
+        FROM NAMED WINDOW sensor:histWindow ON LOG sensor:historicalStore [START 1000 END 2000]
+        FROM NAMED WINDOW sensor:histSlideWindow ON LOG sensor:historicalStore [OFFSET 500 RANGE 1000 STEP 100]
+        WHERE {
+            WINDOW sensor:histWindow {
+                ?event sensor:value ?temperature .
+            }
+            WINDOW sensor:histSlideWindow {
+                ?event sensor:value ?temperature .
+            }
+        }
+        ";
+
+    let result = parser.parse(query).unwrap();
+    assert_eq!(result.live_windows.len(), 0);
+    assert_eq!(result.historical_windows.len(), 2);
+    assert_eq!(result.historical_windows[0].source_kind, SourceKind::Log);
+    assert_eq!(result.historical_windows[1].source_kind, SourceKind::Log);
+    assert!(
+        result
+            .sparql_queries
+            .iter()
+            .all(|query| query.contains("GRAPH ?__janus_log_graph")),
+        "ON LOG queries should target historical named graphs"
+    );
 }

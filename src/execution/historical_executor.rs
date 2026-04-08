@@ -501,6 +501,7 @@ mod tests {
 
         let window = WindowDefinition {
             window_name: "test_window".to_string(),
+            source_kind: crate::parsing::janusql_parser::SourceKind::Stream,
             stream_name: "test_stream".to_string(),
             width: 1000,
             slide: 100,
@@ -528,6 +529,7 @@ mod tests {
 
         let window = WindowDefinition {
             window_name: "test_window".to_string(),
+            source_kind: crate::parsing::janusql_parser::SourceKind::Stream,
             stream_name: "test_stream".to_string(),
             width: 1000,
             slide: 100,
