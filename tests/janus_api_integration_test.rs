@@ -364,8 +364,7 @@ fn test_execution_count_and_status_update_across_lifecycle() {
     let parser = JanusQLParser::new().expect("Failed to create parser");
     let registry = Arc::new(QueryRegistry::new());
 
-    let api =
-        JanusApi::new(parser, Arc::clone(&registry), storage).expect("Failed to create API");
+    let api = JanusApi::new(parser, Arc::clone(&registry), storage).expect("Failed to create API");
 
     let janusql = r#"
         PREFIX ex: <http://example.org/>
@@ -380,27 +379,21 @@ fn test_execution_count_and_status_update_across_lifecycle() {
     assert_eq!(metadata.execution_count, 0);
     assert_eq!(metadata.status, "Registered");
 
-    let _handle = api
-        .start_query(&"lifecycle_query".into())
-        .expect("Failed to start query");
+    let _handle = api.start_query(&"lifecycle_query".into()).expect("Failed to start query");
 
-    let after_start = registry
-        .get(&"lifecycle_query".into())
-        .expect("query should exist after start");
+    let after_start =
+        registry.get(&"lifecycle_query".into()).expect("query should exist after start");
     assert_eq!(after_start.execution_count, 1);
     assert_eq!(after_start.status, "Running");
 
     api.stop_query(&"lifecycle_query".into()).expect("Failed to stop query");
 
-    let after_stop = registry
-        .get(&"lifecycle_query".into())
-        .expect("query should exist after stop");
+    let after_stop =
+        registry.get(&"lifecycle_query".into()).expect("query should exist after stop");
     assert_eq!(after_stop.execution_count, 1);
     assert_eq!(after_stop.status, "Stopped");
 
-    let _handle = api
-        .start_query(&"lifecycle_query".into())
-        .expect("Failed to restart query");
+    let _handle = api.start_query(&"lifecycle_query".into()).expect("Failed to restart query");
 
     let after_restart = registry
         .get(&"lifecycle_query".into())

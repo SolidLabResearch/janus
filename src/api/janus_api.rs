@@ -392,18 +392,16 @@ impl JanusApi {
                                         *state = ExecutionStatus::Running;
                                     }
                                 }
-                                let _ =
-                                    registry_for_baseline.set_status(&query_id_for_baseline, "Running");
+                                let _ = registry_for_baseline
+                                    .set_status(&query_id_for_baseline, "Running");
                             }
                             Err(err) => {
                                 eprintln!("Async baseline warm-up error: {}", err);
                                 if let Ok(mut state) = status_for_baseline.write() {
                                     *state = ExecutionStatus::Failed(err.to_string());
                                 }
-                                let _ = registry_for_baseline.set_status(
-                                    &query_id_for_baseline,
-                                    format!("Failed({err})"),
-                                );
+                                let _ = registry_for_baseline
+                                    .set_status(&query_id_for_baseline, format!("Failed({err})"));
                             }
                         }
                     }));
