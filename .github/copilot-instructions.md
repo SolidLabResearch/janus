@@ -57,7 +57,7 @@ make fmt            # Format all code
 make clippy         # Lint checks
 ```
 
-**CI Pipeline:** GitHub Actions runs `rustfmt`, `clippy`, and tests on Ubuntu/Windows/macOS with stable/beta Rust. See `.github/workflows/ci.yml`.
+**CI Pipeline:** GitHub Actions runs fast PR checks from `.github/workflows/fast-pr.yml` and extended push/release checks from `.github/workflows/release.yml`.
 
 ### Benchmarking
 

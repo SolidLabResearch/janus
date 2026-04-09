@@ -15,7 +15,7 @@ The Janus project uses GitHub Actions for continuous integration and deployment.
 ### Manual Trigger
 
 ```bash
-# Via GitHub UI: Actions tab → CI/CD Pipeline → Run workflow
+# Via GitHub UI: Actions tab → choose `Fast PR Checks` or `Release And Extended CI` → Run workflow
 ```
 
 ## Jobs Overview
@@ -313,7 +313,8 @@ Common issues:
 
 ### Main Configuration
 
-- `.github/workflows/ci.yml` - Main pipeline
+- `.github/workflows/fast-pr.yml` - Fast pull request validation
+- `.github/workflows/release.yml` - Extended branch, release, and scheduled checks
 
 ### Supporting Files
 
