@@ -8,7 +8,7 @@
 pub mod server;
 
 pub use server::{
-    create_server, start_server, AppState, ErrorResponse, ListQueriesResponse,
-    QueryDetailsResponse, RegisterQueryRequest, RegisterQueryResponse, ReplayStatusResponse,
-    StartReplayRequest, SuccessResponse,
+    create_server, create_server_with_state, start_server, AppState, ErrorResponse,
+    ListQueriesResponse, QueryDetailsResponse, QueryResultBroadcast, RegisterQueryRequest,
+    RegisterQueryResponse, ReplayStatusResponse, StartReplayRequest, SuccessResponse,
 };
