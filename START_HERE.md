@@ -27,4 +27,6 @@ cargo run --example http_client_example
 - `GETTING_STARTED.md`
 - `docs/DOCUMENTATION_INDEX.md`
 - `docs/HTTP_API_CURRENT.md`
+- `docs/README_HTTP_API.md`
+- `docs/QUICKSTART_HTTP_API.md`
 - `docs/QUICK_REFERENCE.md`
