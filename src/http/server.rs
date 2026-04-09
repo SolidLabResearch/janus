@@ -319,29 +319,12 @@ async fn get_query(
 
 fn parse_baseline_mode(raw: Option<&str>) -> Result<BaselineBootstrapMode, ApiError> {
     match raw {
-        None => Ok(BaselineBootstrapMode::Aggregate),
-        Some("aggregate") | Some("AGGREGATE") => Ok(BaselineBootstrapMode::Aggregate),
-        Some("last") | Some("LAST") => Ok(BaselineBootstrapMode::Last),
+        None | Some("aggregate" | "AGGREGATE") => Ok(BaselineBootstrapMode::Aggregate),
+        Some("last" | "LAST") => Ok(BaselineBootstrapMode::Last),
         Some(other) => Err(ApiError::BadRequest(format!(
             "Unsupported baseline_mode '{}'. Use 'aggregate' or 'last'",
             other
         ))),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::parse_baseline_mode;
-    use crate::registry::query_registry::BaselineBootstrapMode;
-
-    #[test]
-    fn test_parse_baseline_mode_defaults_to_aggregate() {
-        assert_eq!(parse_baseline_mode(None).unwrap(), BaselineBootstrapMode::Aggregate);
-    }
-
-    #[test]
-    fn test_parse_baseline_mode_accepts_last() {
-        assert_eq!(parse_baseline_mode(Some("last")).unwrap(), BaselineBootstrapMode::Last);
     }
 }
 
@@ -663,4 +646,20 @@ pub async fn start_server(
     axum::serve(listener, app).await?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_baseline_mode;
+    use crate::registry::query_registry::BaselineBootstrapMode;
+
+    #[test]
+    fn test_parse_baseline_mode_defaults_to_aggregate() {
+        assert_eq!(parse_baseline_mode(None).unwrap(), BaselineBootstrapMode::Aggregate);
+    }
+
+    #[test]
+    fn test_parse_baseline_mode_accepts_last() {
+        assert_eq!(parse_baseline_mode(Some("last")).unwrap(), BaselineBootstrapMode::Last);
+    }
 }

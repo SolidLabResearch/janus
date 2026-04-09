@@ -693,7 +693,7 @@ fn accumulate_bindings_into_baseline(
                 all_numeric: true,
             });
 
-            entry.last_value = normalized.clone();
+            entry.last_value.clone_from(&normalized);
             if let Ok(value) = normalized.parse::<f64>() {
                 entry.numeric_sum += value;
                 entry.numeric_count += 1;
