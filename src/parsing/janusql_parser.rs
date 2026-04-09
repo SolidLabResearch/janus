@@ -64,16 +64,11 @@ pub struct RegisterClause {
     pub name: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum BaselineBootstrapMode {
     Last,
+    #[default]
     Aggregate,
-}
-
-impl Default for BaselineBootstrapMode {
-    fn default() -> Self {
-        Self::Aggregate
-    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
