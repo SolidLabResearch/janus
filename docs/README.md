@@ -19,8 +19,19 @@ Some older files in this directory are design notes, implementation logs, or mil
 - [EXECUTION_ARCHITECTURE.md](./EXECUTION_ARCHITECTURE.md): historical execution design notes
 - [HTTP_API.md](./HTTP_API.md): earlier HTTP API writeup
 - [BENCHMARK_RESULTS.md](./BENCHMARK_RESULTS.md): benchmark data
+- [STREAM_BUS_CLI.md](./STREAM_BUS_CLI.md): replay and ingestion CLI
+
+## Repo Boundary
+
+This repository is the Janus backend and engine implementation.
+
+The maintained dashboard lives in:
+
+- `https://github.com/SolidLabResearch/janus-dashboard`
+
+The dashboard code checked into this repository should be treated as a local demo client unless stated otherwise.
 
 ## Notes
 
-- The canonical docs above are intended to describe the current implementation on `main` once merged.
+- The canonical docs above are intended to describe the current implementation on `main`.
 - Older files are still useful for background, but they may describe previous milestones or implementation states.

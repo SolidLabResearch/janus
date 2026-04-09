@@ -56,6 +56,22 @@ WHERE {
 - `LAST`: use the final historical window snapshot as baseline
 - `AGGREGATE`: merge the historical window outputs into one compact baseline
 
+## Repository Status
+
+The backend repository is active and locally healthy:
+
+- `cargo test --all-features` passes
+- `cargo clippy --all-targets --all-features -- -D warnings` passes
+- the HTTP API, Janus API, parser, storage layer, and stream bus all have integration coverage
+
+This repository is the backend and engine implementation.
+
+The maintained dashboard lives in a separate repository:
+
+- `https://github.com/SolidLabResearch/janus-dashboard`
+
+The `janus-dashboard/` folder in this repository is a lightweight local demo client, not the primary frontend.
+
 ## Performance
 
 Janus uses dictionary encoding and segmented storage for high-throughput ingestion and historical reads.
@@ -65,7 +81,7 @@ Janus uses dictionary encoding and segmented storage for high-throughput ingesti
 - Point query latency: 0.235 ms at 1M quads
 - Space efficiency: about 40% smaller encoded events
 
-Detailed benchmark data is in [BENCHMARK_RESULTS.md](./BENCHMARK_RESULTS.md).
+Detailed benchmark data is in [docs/BENCHMARK_RESULTS.md](./docs/BENCHMARK_RESULTS.md).
 
 ## Quick Start
 
@@ -73,6 +89,7 @@ Detailed benchmark data is in [BENCHMARK_RESULTS.md](./BENCHMARK_RESULTS.md).
 
 - Rust stable
 - Cargo
+- Docker, if you want to run the local MQTT broker from `docker-compose.yml`
 
 ### Build
 
@@ -128,23 +145,26 @@ make ci-check      # local CI script
 The repository includes runnable examples under [`examples/`](./examples), including:
 
 - [`examples/http_client_example.rs`](./examples/http_client_example.rs)
-- [`examples/comparator_demo.rs`](./examples/comparator_demo.rs)
-- [`examples/demo_dashboard.html`](./examples/demo_dashboard.html)
 
-## Project Layout
+## Documentation
 
-- [`src/api`](./src/api): query lifecycle and orchestration
-- [`src/parsing`](./src/parsing): Janus-QL parsing
-- [`src/stream`](./src/stream): live stream processing
-- [`src/execution`](./src/execution): historical execution
-- [`src/storage`](./src/storage): segmented RDF storage
-- [`src/http`](./src/http): REST and WebSocket API
-- [`tests`](./tests): integration and parser coverage
+Start here:
 
-## License
+- [GETTING_STARTED.md](./GETTING_STARTED.md)
+- [START_HERE.md](./START_HERE.md)
+- [docs/DOCUMENTATION_INDEX.md](./docs/DOCUMENTATION_INDEX.md)
+- [docs/README.md](./docs/README.md)
+- [docs/HTTP_API_CURRENT.md](./docs/HTTP_API_CURRENT.md)
 
-This project is released under the MIT License.
+## Notes
+
+- `src/main.rs` is currently a benchmark-style executable, not the main user-facing interface.
+- The primary user-facing entry point is `http_server`.
+
+## Licence
+
+This code is copyrighted by Ghent University - imec and released under the MIT Licence.
 
 ## Contact
 
-For questions, open an issue or contact [Kush](mailto:mailkushbisen@gmail.com).
+For questions, contact [Kush](mailto:mailkushbisen@gmail.com) or open an issue in the repository.

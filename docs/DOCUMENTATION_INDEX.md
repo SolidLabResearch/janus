@@ -5,11 +5,13 @@ This is the shortest path to understanding the current Janus implementation.
 ## Core Reading Order
 
 1. [../README.md](../README.md)
-2. [JANUSQL.md](./JANUSQL.md)
-3. [QUERY_EXECUTION.md](./QUERY_EXECUTION.md)
-4. [BASELINES.md](./BASELINES.md)
-5. [HTTP_API_CURRENT.md](./HTTP_API_CURRENT.md)
-6. [ANOMALY_DETECTION.md](./ANOMALY_DETECTION.md)
+2. [../GETTING_STARTED.md](../GETTING_STARTED.md)
+3. [../START_HERE.md](../START_HERE.md)
+4. [JANUSQL.md](./JANUSQL.md)
+5. [QUERY_EXECUTION.md](./QUERY_EXECUTION.md)
+6. [BASELINES.md](./BASELINES.md)
+7. [HTTP_API_CURRENT.md](./HTTP_API_CURRENT.md)
+8. [ANOMALY_DETECTION.md](./ANOMALY_DETECTION.md)
 
 ## What Each File Covers
 
@@ -43,6 +45,13 @@ This is the shortest path to understanding the current Janus implementation.
   - when baseline state helps
   - recommended query patterns
 
+## Additional Current Guides
+
+- [STREAM_BUS_CLI.md](./STREAM_BUS_CLI.md)
+- [README_HTTP_API.md](./README_HTTP_API.md)
+- [QUICKSTART_HTTP_API.md](./QUICKSTART_HTTP_API.md)
+- [QUICK_REFERENCE.md](./QUICK_REFERENCE.md)
+
 ## Legacy Material
 
 The following files remain useful as background, but they are not the main entrypoint for the current code:
@@ -50,8 +59,15 @@ The following files remain useful as background, but they are not the main entry
 - [ARCHITECTURE.md](./ARCHITECTURE.md)
 - [EXECUTION_ARCHITECTURE.md](./EXECUTION_ARCHITECTURE.md)
 - [HTTP_API.md](./HTTP_API.md)
-- [README_HTTP_API.md](./README_HTTP_API.md)
-- [SETUP_GUIDE.md](./SETUP_GUIDE.md)
+- [MVP_TODO.md](./MVP_TODO.md)
+- [MVP_ARCHITECTURE.md](./MVP_ARCHITECTURE.md)
+- [RSP_INTEGRATION_COMPLETE.md](./RSP_INTEGRATION_COMPLETE.md)
+- [SPARQL_BINDINGS_UPGRADE.md](./SPARQL_BINDINGS_UPGRADE.md)
+
+## Dashboard Boundary
+
+- Local demo dashboard in this repository: `examples/demo_dashboard.html`
+- Maintained dashboard repository: `https://github.com/SolidLabResearch/janus-dashboard`
 
 ## Related Code
 

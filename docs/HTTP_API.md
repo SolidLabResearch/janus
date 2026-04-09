@@ -169,7 +169,7 @@ Not Found (404):
 
 ---
 
-#### `DELETE /api/queries/:id`
+#### `POST /api/queries/:id/stop`
 
 Stop a running query.
 
@@ -187,6 +187,29 @@ Stop a running query.
 ```json
 {
   "error": "Execution Error: Query 'sensor_query_1' is not running"
+}
+```
+
+---
+
+#### `DELETE /api/queries/:id`
+
+Delete a stopped query from the registry.
+
+**Parameters:**
+- `id` (path): Query identifier
+
+**Response:**
+```json
+{
+  "message": "Query 'sensor_query_1' deleted successfully"
+}
+```
+
+**Error Response (400 Bad Request):**
+```json
+{
+  "error": "Query 'sensor_query_1' is running. Stop it before deleting."
 }
 ```
 
