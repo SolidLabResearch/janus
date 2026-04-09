@@ -15,6 +15,7 @@ pub struct QueryMetadata {
     pub baseline_mode: BaselineBootstrapMode,
     pub registered_at: u64,
     pub execution_count: u64,
+    pub status: String,
     pub subscribers: Vec<QueryId>,
 }
 
@@ -102,6 +103,7 @@ impl QueryRegistry {
             baseline_mode,
             registered_at: Self::current_timestamp(),
             execution_count: 0,
+            status: "Registered".to_string(),
             subscribers: Vec::new(),
         };
 
@@ -142,6 +144,20 @@ impl QueryRegistry {
             .ok_or_else(|| QueryRegistryError::QueryNotFound(query_id.clone()))?;
 
         query.execution_count += 1;
+        Ok(())
+    }
+
+    pub fn set_status(
+        &self,
+        query_id: &QueryId,
+        status: impl Into<String>,
+    ) -> Result<(), QueryRegistryError> {
+        let mut queries = self.queries.write().unwrap();
+        let query = queries
+            .get_mut(query_id)
+            .ok_or_else(|| QueryRegistryError::QueryNotFound(query_id.clone()))?;
+
+        query.status = status.into();
         Ok(())
     }
 
