@@ -99,7 +99,7 @@ struct RunningQuery {
     historical_handles: Vec<thread::JoinHandle<()>>,
     baseline_handle: Option<thread::JoinHandle<()>>,
     live_handle: Option<thread::JoinHandle<()>>,
-    mqtt_subscriber_handle: Option<thread::JoinHandle<()>>,
+    mqtt_subscriber_handles: Vec<thread::JoinHandle<()>>,
     // shutdown sender signals used to stop the workers
     shutdown_senders: Vec<Sender<()>>,
     // MQTT subscriber instances (for stopping)
@@ -224,13 +224,13 @@ impl JanusApi {
             parsed.baseline.as_ref().map(|baseline| baseline.window_name.clone());
         let mut historical_handles = Vec::new();
         let mut shutdown_senders = Vec::new();
-        let status = Arc::new(RwLock::new(
+        let initial_status =
             if !parsed.live_windows.is_empty() && !parsed.historical_windows.is_empty() {
                 ExecutionStatus::WarmingBaseline
             } else {
                 ExecutionStatus::Running
-            },
-        ));
+            };
+        let status = Arc::new(RwLock::new(initial_status.clone()));
 
         // 4. Spawn historical worker threads (one per historical window)
         for (i, window) in parsed.historical_windows.iter().enumerate() {
@@ -308,7 +308,7 @@ impl JanusApi {
 
         // 5. Spawn live worker thread and MQTT subscribers (if there are live windows)
         let mut mqtt_subscribers = Vec::new();
-        let mut mqtt_subscriber_handle = None;
+        let mut mqtt_subscriber_handles = Vec::new();
         let mut baseline_handle = None;
 
         let live_handle = if !parsed.live_windows.is_empty() && !parsed.rspql_query.is_empty() {
@@ -354,6 +354,8 @@ impl JanusApi {
                 let parsed_clone = parsed.clone();
                 let processor_for_baseline = Arc::clone(&live_processor);
                 let status_for_baseline = Arc::clone(&status);
+                let registry_for_baseline = Arc::clone(&self.registry);
+                let query_id_for_baseline = query_id.clone();
                 let baseline_mode = effective_baseline_mode;
                 let baseline_window = effective_baseline_window.clone();
                 let (baseline_shutdown_tx, baseline_shutdown_rx) = mpsc::channel::<()>();
@@ -390,12 +392,18 @@ impl JanusApi {
                                         *state = ExecutionStatus::Running;
                                     }
                                 }
+                                let _ =
+                                    registry_for_baseline.set_status(&query_id_for_baseline, "Running");
                             }
                             Err(err) => {
                                 eprintln!("Async baseline warm-up error: {}", err);
                                 if let Ok(mut state) = status_for_baseline.write() {
                                     *state = ExecutionStatus::Failed(err.to_string());
                                 }
+                                let _ = registry_for_baseline.set_status(
+                                    &query_id_for_baseline,
+                                    format!("Failed({err})"),
+                                );
                             }
                         }
                     }));
@@ -431,7 +439,7 @@ impl JanusApi {
                 });
 
                 mqtt_subscribers.push(subscriber);
-                mqtt_subscriber_handle = Some(sub_handle);
+                mqtt_subscriber_handles.push(sub_handle);
             }
 
             // Spawn live worker thread to receive results
@@ -470,6 +478,21 @@ impl JanusApi {
             None
         };
 
+        self.registry.increment_execution_count(query_id).map_err(|e| {
+            JanusApiError::RegistryError(format!(
+                "Failed to increment execution count for '{}': {}",
+                query_id, e
+            ))
+        })?;
+        self.registry
+            .set_status(query_id, format!("{:?}", initial_status))
+            .map_err(|e| {
+                JanusApiError::RegistryError(format!(
+                    "Failed to update query status for '{}': {}",
+                    query_id, e
+                ))
+            })?;
+
         // 6. Store running query information
         let running = RunningQuery {
             metadata,
@@ -479,7 +502,7 @@ impl JanusApi {
             historical_handles,
             baseline_handle,
             live_handle,
-            mqtt_subscriber_handle,
+            mqtt_subscriber_handles,
             shutdown_senders,
             mqtt_subscribers,
         };
@@ -506,6 +529,7 @@ impl JanusApi {
         let running = running_map.remove(query_id).ok_or_else(|| {
             JanusApiError::ExecutionError(format!("Query '{}' is not running", query_id))
         })?;
+        drop(running_map);
 
         // Send shutdown signals
         for shutdown_tx in running.shutdown_senders {
@@ -520,6 +544,25 @@ impl JanusApi {
         // Update status
         if let Ok(mut status) = running.status.write() {
             *status = ExecutionStatus::Stopped;
+        }
+        self.registry.set_status(query_id, "Stopped").map_err(|e| {
+            JanusApiError::RegistryError(format!(
+                "Failed to update query status for '{}': {}",
+                query_id, e
+            ))
+        })?;
+
+        for handle in running.historical_handles {
+            let _ = handle.join();
+        }
+        if let Some(handle) = running.baseline_handle {
+            let _ = handle.join();
+        }
+        if let Some(handle) = running.live_handle {
+            let _ = handle.join();
+        }
+        for handle in running.mqtt_subscriber_handles {
+            let _ = handle.join();
         }
 
         Ok(())

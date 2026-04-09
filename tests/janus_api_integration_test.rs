@@ -356,6 +356,60 @@ fn test_stop_query() {
 }
 
 #[test]
+fn test_execution_count_and_status_update_across_lifecycle() {
+    let storage = Arc::new(
+        StreamingSegmentedStorage::new(StreamingConfig::default())
+            .expect("Failed to create storage"),
+    );
+    let parser = JanusQLParser::new().expect("Failed to create parser");
+    let registry = Arc::new(QueryRegistry::new());
+
+    let api =
+        JanusApi::new(parser, Arc::clone(&registry), storage).expect("Failed to create API");
+
+    let janusql = r#"
+        PREFIX ex: <http://example.org/>
+        SELECT ?s
+        FROM NAMED WINDOW ex:w ON STREAM ex:stream1 [RANGE 1000 STEP 200]
+        WHERE { WINDOW ex:w { ?s ?p ?o } }
+    "#;
+
+    let metadata = api
+        .register_query("lifecycle_query".into(), janusql)
+        .expect("Failed to register query");
+    assert_eq!(metadata.execution_count, 0);
+    assert_eq!(metadata.status, "Registered");
+
+    let _handle = api
+        .start_query(&"lifecycle_query".into())
+        .expect("Failed to start query");
+
+    let after_start = registry
+        .get(&"lifecycle_query".into())
+        .expect("query should exist after start");
+    assert_eq!(after_start.execution_count, 1);
+    assert_eq!(after_start.status, "Running");
+
+    api.stop_query(&"lifecycle_query".into()).expect("Failed to stop query");
+
+    let after_stop = registry
+        .get(&"lifecycle_query".into())
+        .expect("query should exist after stop");
+    assert_eq!(after_stop.execution_count, 1);
+    assert_eq!(after_stop.status, "Stopped");
+
+    let _handle = api
+        .start_query(&"lifecycle_query".into())
+        .expect("Failed to restart query");
+
+    let after_restart = registry
+        .get(&"lifecycle_query".into())
+        .expect("query should exist after restart");
+    assert_eq!(after_restart.execution_count, 2);
+    assert_eq!(after_restart.status, "Running");
+}
+
+#[test]
 fn test_multiple_queries_concurrent() {
     let storage = create_test_storage_with_data().expect("Failed to create storage");
     let parser = JanusQLParser::new().expect("Failed to create parser");

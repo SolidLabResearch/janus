@@ -226,7 +226,8 @@ async fn test_stop_route_stops_running_query_and_delete_requires_stop() {
     assert!(get_response.status().is_success());
     let get_body: Value = get_response.json().await.expect("invalid get response");
     assert_eq!(get_body["is_running"], false);
-    assert_eq!(get_body["status"], "Registered");
+    assert_eq!(get_body["status"], "Stopped");
+    assert_eq!(get_body["execution_count"], 1);
 
     let delete_response = server
         .client

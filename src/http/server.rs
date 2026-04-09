@@ -296,15 +296,6 @@ async fn get_query(
         .ok_or_else(|| ApiError::NotFound(format!("Query '{}' not found", query_id)))?;
 
     let is_running = state.janus_api.is_running(&query_id);
-    let status = if is_running {
-        state
-            .janus_api
-            .get_query_status(&query_id)
-            .map(|s| format!("{:?}", s))
-            .unwrap_or_else(|| "Unknown".to_string())
-    } else {
-        "Registered".to_string()
-    };
 
     Ok(Json(QueryDetailsResponse {
         query_id: metadata.query_id,
@@ -313,7 +304,7 @@ async fn get_query(
         registered_at: metadata.registered_at,
         execution_count: metadata.execution_count,
         is_running,
-        status,
+        status: metadata.status,
     }))
 }
 
