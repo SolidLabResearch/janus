@@ -5,7 +5,7 @@
 
 use crate::{
     api::janus_api::{JanusApi, JanusApiError, QueryHandle, QueryResult, ResultSource},
-    registry::query_registry::{QueryId, QueryRegistry},
+    registry::query_registry::{BaselineBootstrapMode, QueryId, QueryRegistry},
     storage::segmented_storage::StreamingSegmentedStorage,
     stream_bus::{BrokerType, MqttConfig, StreamBus, StreamBusConfig},
 };
@@ -38,6 +38,7 @@ const RESULT_BROADCAST_CAPACITY: usize = 1024;
 pub struct RegisterQueryRequest {
     pub query_id: String,
     pub janusql: String,
+    pub baseline_mode: Option<String>,
 }
 
 /// Response after registering a query
@@ -54,6 +55,7 @@ pub struct RegisterQueryResponse {
 pub struct QueryDetailsResponse {
     pub query_id: String,
     pub query_text: String,
+    pub baseline_mode: String,
     pub registered_at: u64,
     pub execution_count: u64,
     pub is_running: bool,
@@ -176,6 +178,7 @@ impl Default for ReplayState {
 }
 
 /// Custom error type for API errors
+#[derive(Debug)]
 pub enum ApiError {
     JanusError(JanusApiError),
     NotFound(String),
@@ -257,7 +260,12 @@ async fn register_query(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<RegisterQueryRequest>,
 ) -> Result<Json<RegisterQueryResponse>, ApiError> {
-    let metadata = state.janus_api.register_query(payload.query_id.clone(), &payload.janusql)?;
+    let baseline_mode = parse_baseline_mode(payload.baseline_mode.as_deref())?;
+    let metadata = state.janus_api.register_query_with_baseline_mode(
+        payload.query_id.clone(),
+        &payload.janusql,
+        baseline_mode,
+    )?;
 
     Ok(Json(RegisterQueryResponse {
         query_id: metadata.query_id,
@@ -301,11 +309,23 @@ async fn get_query(
     Ok(Json(QueryDetailsResponse {
         query_id: metadata.query_id,
         query_text: metadata.query_text,
+        baseline_mode: format!("{:?}", metadata.baseline_mode),
         registered_at: metadata.registered_at,
         execution_count: metadata.execution_count,
         is_running,
         status,
     }))
+}
+
+fn parse_baseline_mode(raw: Option<&str>) -> Result<BaselineBootstrapMode, ApiError> {
+    match raw {
+        None | Some("aggregate" | "AGGREGATE") => Ok(BaselineBootstrapMode::Aggregate),
+        Some("last" | "LAST") => Ok(BaselineBootstrapMode::Last),
+        Some(other) => Err(ApiError::BadRequest(format!(
+            "Unsupported baseline_mode '{}'. Use 'aggregate' or 'last'",
+            other
+        ))),
+    }
 }
 
 /// POST /api/queries/:id/start - Start executing a query
@@ -626,4 +646,20 @@ pub async fn start_server(
     axum::serve(listener, app).await?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_baseline_mode;
+    use crate::registry::query_registry::BaselineBootstrapMode;
+
+    #[test]
+    fn test_parse_baseline_mode_defaults_to_aggregate() {
+        assert_eq!(parse_baseline_mode(None).unwrap(), BaselineBootstrapMode::Aggregate);
+    }
+
+    #[test]
+    fn test_parse_baseline_mode_accepts_last() {
+        assert_eq!(parse_baseline_mode(Some("last")).unwrap(), BaselineBootstrapMode::Last);
+    }
 }

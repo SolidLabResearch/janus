@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
+pub use crate::parsing::janusql_parser::BaselineBootstrapMode;
 use crate::parsing::janusql_parser::ParsedJanusQuery;
 
 pub type QueryId = String;
@@ -11,6 +12,7 @@ pub struct QueryMetadata {
     pub query_id: QueryId,
     pub query_text: String,
     pub parsed: ParsedJanusQuery,
+    pub baseline_mode: BaselineBootstrapMode,
     pub registered_at: u64,
     pub execution_count: u64,
     pub subscribers: Vec<QueryId>,
@@ -75,6 +77,7 @@ impl QueryRegistry {
         query_id: QueryId,
         query_text: String,
         parsed: ParsedJanusQuery,
+        baseline_mode: BaselineBootstrapMode,
     ) -> Result<QueryMetadata, QueryRegistryError> {
         // Check if query ID already exists
         {
@@ -96,6 +99,7 @@ impl QueryRegistry {
             query_id: query_id.clone(),
             query_text,
             parsed,
+            baseline_mode,
             registered_at: Self::current_timestamp(),
             execution_count: 0,
             subscribers: Vec::new(),
