@@ -64,6 +64,13 @@ pub struct RegisterClause {
     pub name: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum BaselineBootstrapMode {
+    Last,
+    #[default]
+    Aggregate,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 /// Structured window specification used by the AST.
 pub enum WindowSpec {
@@ -82,6 +89,12 @@ pub struct WindowClause {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct BaselineClause {
+    pub window_name: String,
+    pub mode: BaselineBootstrapMode,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 /// One parsed `WINDOW foo { ... }` block from the WHERE clause.
 pub struct WhereWindowClause {
     pub identifier: String,
@@ -93,6 +106,7 @@ pub struct WhereWindowClause {
 pub struct JanusQueryAst {
     pub prefixes: Vec<PrefixDeclaration>,
     pub register: Option<RegisterClause>,
+    pub baseline: Option<BaselineClause>,
     pub select_clause: String,
     pub windows: Vec<WindowClause>,
     pub where_clause: String,
@@ -104,6 +118,8 @@ pub struct JanusQueryAst {
 pub struct ParsedJanusQuery {
     /// Structured AST representation of the parsed JanusQL query.
     pub ast: JanusQueryAst,
+    /// Optional baseline clause selecting a historical window and bootstrap mode.
+    pub baseline: Option<BaselineClause>,
     /// R2S operator if present
     pub r2s: Option<R2SOperator>,
     /// Live windows defined in the query
@@ -136,6 +152,7 @@ impl JanusQLParser {
         let mut prefixes = Vec::new();
         let mut prefix_mapper = HashMap::new();
         let mut register = None;
+        let mut baseline = None;
         let mut select_clause = String::new();
         let mut windows = Vec::new();
         let mut in_where_clause = false;
@@ -161,6 +178,8 @@ impl JanusQLParser {
 
             if trimmed_line.starts_with("REGISTER") {
                 register = Some(self.parse_register_clause(trimmed_line, &prefix_mapper)?);
+            } else if trimmed_line.starts_with("USING BASELINE") {
+                baseline = Some(self.parse_baseline_clause(trimmed_line, &prefix_mapper)?);
             } else if trimmed_line.starts_with("PREFIX") {
                 let prefix = self.parse_prefix_declaration(trimmed_line)?;
                 prefix_mapper.insert(prefix.prefix.clone(), prefix.namespace.clone());
@@ -191,6 +210,7 @@ impl JanusQLParser {
         Ok(JanusQueryAst {
             prefixes,
             register,
+            baseline,
             select_clause,
             windows,
             where_clause,
@@ -230,8 +250,21 @@ impl JanusQLParser {
             .clone()
             .map(|register| R2SOperator { operator: register.operator, name: register.name });
 
+        if let Some(baseline) = &ast.baseline {
+            let has_matching_historical_window = historical_windows
+                .iter()
+                .any(|window| window.window_name == baseline.window_name);
+            if !has_matching_historical_window {
+                return Err(self.parse_error(format!(
+                    "USING BASELINE references unknown historical window '{}'",
+                    baseline.window_name
+                )));
+            }
+        }
+
         let mut parsed = ParsedJanusQuery {
             ast: ast.clone(),
+            baseline: ast.baseline.clone(),
             r2s,
             live_windows,
             historical_windows,
@@ -248,6 +281,29 @@ impl JanusQLParser {
         parsed.sparql_queries = self.generate_sparql_queries(&parsed, &prefix_lines);
 
         Ok(parsed)
+    }
+
+    fn parse_baseline_clause(
+        &self,
+        line: &str,
+        prefix_mapper: &HashMap<String, String>,
+    ) -> Result<BaselineClause, Box<dyn std::error::Error>> {
+        let parts = line.split_whitespace().collect::<Vec<_>>();
+        if parts.len() != 4 || parts[0] != "USING" || parts[1] != "BASELINE" {
+            return Err(self.parse_error(format!("Invalid USING BASELINE clause: {line}")));
+        }
+
+        let mode = match parts[3] {
+            "LAST" => BaselineBootstrapMode::Last,
+            "AGGREGATE" => BaselineBootstrapMode::Aggregate,
+            other => {
+                return Err(self.parse_error(format!(
+                    "Unsupported baseline mode '{other}'. Use LAST or AGGREGATE"
+                )))
+            }
+        };
+
+        Ok(BaselineClause { window_name: self.unwrap_iri(parts[2], prefix_mapper), mode })
     }
 
     fn parse_register_clause(
@@ -544,6 +600,11 @@ impl JanusQLParser {
         prefixes: &HashMap<String, String>,
     ) -> String {
         let mut where_patterns = Vec::new();
+        let non_window_patterns = self.extract_non_window_where_patterns(where_clause);
+
+        if !non_window_patterns.is_empty() {
+            where_patterns.push(non_window_patterns);
+        }
 
         for window in live_windows {
             if let Some(inner_pattern) = self.find_window_body(where_windows, window, prefixes) {
@@ -558,6 +619,90 @@ impl JanusQLParser {
         } else {
             format!("WHERE {{\n  {}\n}}", where_patterns.join("\n  "))
         }
+    }
+
+    fn extract_non_window_where_patterns(&self, where_clause: &str) -> String {
+        let inner = self.extract_where_inner(where_clause);
+        if inner.is_empty() {
+            return String::new();
+        }
+
+        let mut preserved = String::new();
+        let mut offset = 0usize;
+
+        while let Some(found) = inner[offset..].find("WINDOW") {
+            let start = offset + found;
+            preserved.push_str(&inner[offset..start]);
+
+            let after_keyword = start + "WINDOW".len();
+            let mut cursor = after_keyword;
+
+            while let Some(ch) = inner[cursor..].chars().next() {
+                if ch.is_whitespace() {
+                    cursor += ch.len_utf8();
+                } else {
+                    break;
+                }
+            }
+
+            while let Some(ch) = inner[cursor..].chars().next() {
+                if ch.is_whitespace() || ch == '{' {
+                    break;
+                }
+                cursor += ch.len_utf8();
+            }
+
+            while let Some(ch) = inner[cursor..].chars().next() {
+                if ch.is_whitespace() {
+                    cursor += ch.len_utf8();
+                } else {
+                    break;
+                }
+            }
+
+            if !inner[cursor..].starts_with('{') {
+                preserved.push_str("WINDOW");
+                offset = after_keyword;
+                continue;
+            }
+
+            let Some(body_end) = self.find_matching_brace(&inner, cursor) else {
+                preserved.push_str(&inner[start..]);
+                offset = inner.len();
+                break;
+            };
+
+            offset = body_end + 1;
+        }
+
+        if offset < inner.len() {
+            preserved.push_str(&inner[offset..]);
+        }
+
+        preserved
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .collect::<Vec<_>>()
+            .join("\n  ")
+    }
+
+    fn extract_where_inner(&self, where_clause: &str) -> String {
+        let trimmed = where_clause.trim();
+        let without_where = trimmed
+            .strip_prefix("WHERE")
+            .or_else(|| trimmed.strip_prefix("where"))
+            .map_or(trimmed, str::trim);
+
+        if without_where.starts_with('{') {
+            if let Some(end) = self.find_matching_brace(without_where, 0) {
+                if end == without_where.len() - 1 {
+                    return without_where[1..end].trim().to_string();
+                }
+            }
+        }
+
+        without_where.to_string()
     }
 
     fn find_window_body<'a>(

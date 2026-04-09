@@ -1,39 +1,25 @@
 # Janus Documentation
 
-This directory mixes current guides with deeper implementation notes from earlier development phases. Start with the documents below; some older design and MVP notes are retained for historical context.
+This directory contains the project documentation for Janus.
 
-## Recommended Reading Order
+Some older files in this directory are design notes, implementation logs, or milestone-specific writeups. The files below are the current starting point for understanding how Janus works today.
 
-1. [../README.md](../README.md)
-2. [../GETTING_STARTED.md](../GETTING_STARTED.md)
-3. [../START_HERE.md](../START_HERE.md)
-4. [README_HTTP_API.md](README_HTTP_API.md)
-5. [QUICKSTART_HTTP_API.md](QUICKSTART_HTTP_API.md)
-6. [STREAM_BUS_CLI.md](STREAM_BUS_CLI.md)
+## Start Here
 
-## Current Guides
+- [DOCUMENTATION_INDEX.md](./DOCUMENTATION_INDEX.md): canonical reading order
+- [JANUSQL.md](./JANUSQL.md): Janus-QL syntax and semantics
+- [QUERY_EXECUTION.md](./QUERY_EXECUTION.md): how registration, startup, historical execution, live execution, and result delivery work
+- [BASELINES.md](./BASELINES.md): `USING BASELINE`, `LAST`, `AGGREGATE`, and async warm-up
+- [HTTP_API_CURRENT.md](./HTTP_API_CURRENT.md): current REST and WebSocket API
+- [ANOMALY_DETECTION.md](./ANOMALY_DETECTION.md): recommended anomaly-detection patterns and limitations
 
-### Core usage
+## Supporting Material
 
-- [README_HTTP_API.md](README_HTTP_API.md) - current HTTP/WebSocket API guide
-- [QUICKSTART_HTTP_API.md](QUICKSTART_HTTP_API.md) - short API quickstart
-- [STREAM_BUS_CLI.md](STREAM_BUS_CLI.md) - replay and ingestion CLI
-- [HTTP_API.md](HTTP_API.md) - API reference details
-
-### Performance and architecture
-
-- [BENCHMARK_RESULTS.md](BENCHMARK_RESULTS.md) - benchmark data and measurements
-- [ARCHITECTURE.md](ARCHITECTURE.md) - high-level architecture
-- [EXECUTION_ARCHITECTURE.md](EXECUTION_ARCHITECTURE.md) - historical/live execution details
-
-## Historical / Planning Documents
-
-These are useful for design context, but they should not be treated as the source of truth for current repository status:
-
-- [MVP_TODO.md](MVP_TODO.md)
-- [MVP_ARCHITECTURE.md](MVP_ARCHITECTURE.md)
-- [RSP_INTEGRATION_COMPLETE.md](RSP_INTEGRATION_COMPLETE.md)
-- [SPARQL_BINDINGS_UPGRADE.md](SPARQL_BINDINGS_UPGRADE.md)
+- [ARCHITECTURE.md](./ARCHITECTURE.md): older high-level architecture notes
+- [EXECUTION_ARCHITECTURE.md](./EXECUTION_ARCHITECTURE.md): historical execution design notes
+- [HTTP_API.md](./HTTP_API.md): earlier HTTP API writeup
+- [BENCHMARK_RESULTS.md](./BENCHMARK_RESULTS.md): benchmark data
+- [STREAM_BUS_CLI.md](./STREAM_BUS_CLI.md): replay and ingestion CLI
 
 ## Repo Boundary
 
@@ -44,3 +30,8 @@ The maintained dashboard lives in:
 - `https://github.com/SolidLabResearch/janus-dashboard`
 
 The dashboard code checked into this repository should be treated as a local demo client unless stated otherwise.
+
+## Notes
+
+- The canonical docs above are intended to describe the current implementation on `main`.
+- Older files are still useful for background, but they may describe previous milestones or implementation states.

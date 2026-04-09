@@ -19,6 +19,7 @@ use std::collections::HashMap;
 struct RegisterQueryRequest {
     query_id: String,
     janusql: String,
+    baseline_mode: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -44,6 +45,7 @@ struct ListQueriesResponse {
 struct QueryDetailsResponse {
     query_id: String,
     query_text: String,
+    baseline_mode: String,
     registered_at: u64,
     execution_count: u64,
     is_running: bool,
@@ -121,6 +123,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         "#
         .to_string(),
+        baseline_mode: None,
     };
 
     let response = client
@@ -156,6 +159,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         "#
         .to_string(),
+        baseline_mode: None,
     };
 
     let response = client
@@ -199,6 +203,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("   ✓ Query ID: {}", body.query_id);
         println!("   ✓ Registered at: {}", body.registered_at);
         println!("   ✓ Execution count: {}", body.execution_count);
+        println!("   ✓ Baseline mode: {}", body.baseline_mode);
         println!("   ✓ Is running: {}", body.is_running);
         println!("   ✓ Status: {}", body.status);
     } else {

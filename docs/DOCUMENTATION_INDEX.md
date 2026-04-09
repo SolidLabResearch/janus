@@ -1,31 +1,78 @@
 # Janus Documentation Index
 
-## Canonical Entry Points
+This is the shortest path to understanding the current Janus implementation.
 
-- [../README.md](../README.md)
-- [../GETTING_STARTED.md](../GETTING_STARTED.md)
-- [../START_HERE.md](../START_HERE.md)
-- [README_HTTP_API.md](README_HTTP_API.md)
-- [QUICKSTART_HTTP_API.md](QUICKSTART_HTTP_API.md)
+## Core Reading Order
 
-## Backend Guides
+1. [../README.md](../README.md)
+2. [../GETTING_STARTED.md](../GETTING_STARTED.md)
+3. [../START_HERE.md](../START_HERE.md)
+4. [JANUSQL.md](./JANUSQL.md)
+5. [QUERY_EXECUTION.md](./QUERY_EXECUTION.md)
+6. [BASELINES.md](./BASELINES.md)
+7. [HTTP_API_CURRENT.md](./HTTP_API_CURRENT.md)
+8. [ANOMALY_DETECTION.md](./ANOMALY_DETECTION.md)
 
-- [STREAM_BUS_CLI.md](STREAM_BUS_CLI.md)
-- [HTTP_API.md](HTTP_API.md)
-- [ARCHITECTURE.md](ARCHITECTURE.md)
-- [EXECUTION_ARCHITECTURE.md](EXECUTION_ARCHITECTURE.md)
-- [BENCHMARK_RESULTS.md](BENCHMARK_RESULTS.md)
+## What Each File Covers
 
-## Historical Context
+- [JANUSQL.md](./JANUSQL.md)
+  - query structure
+  - supported window types
+  - `USING BASELINE <window> LAST|AGGREGATE`
+  - how live and historical queries are derived
 
-The files below are retained for implementation history and design context. Some of them describe earlier states of the project and should not be treated as the current source of truth:
+- [QUERY_EXECUTION.md](./QUERY_EXECUTION.md)
+  - registration and parsed metadata
+  - `start_query()` flow
+  - historical workers
+  - live workers and MQTT subscription
+  - result multiplexing and runtime status
 
-- [MVP_TODO.md](MVP_TODO.md)
-- [MVP_ARCHITECTURE.md](MVP_ARCHITECTURE.md)
-- [RSP_INTEGRATION_COMPLETE.md](RSP_INTEGRATION_COMPLETE.md)
-- [SPARQL_BINDINGS_UPGRADE.md](SPARQL_BINDINGS_UPGRADE.md)
+- [BASELINES.md](./BASELINES.md)
+  - what baseline bootstrap does
+  - `LAST` vs `AGGREGATE`
+  - async warm-up behavior
+  - what state is and is not retained
+
+- [HTTP_API_CURRENT.md](./HTTP_API_CURRENT.md)
+  - current REST endpoints
+  - WebSocket result flow
+  - request and response shapes
+  - `baseline_mode` registration fallback
+
+- [ANOMALY_DETECTION.md](./ANOMALY_DETECTION.md)
+  - when extension functions are enough
+  - when baseline state helps
+  - recommended query patterns
+
+## Additional Current Guides
+
+- [STREAM_BUS_CLI.md](./STREAM_BUS_CLI.md)
+- [README_HTTP_API.md](./README_HTTP_API.md)
+- [QUICKSTART_HTTP_API.md](./QUICKSTART_HTTP_API.md)
+- [QUICK_REFERENCE.md](./QUICK_REFERENCE.md)
+
+## Legacy Material
+
+The following files remain useful as background, but they are not the main entrypoint for the current code:
+
+- [ARCHITECTURE.md](./ARCHITECTURE.md)
+- [EXECUTION_ARCHITECTURE.md](./EXECUTION_ARCHITECTURE.md)
+- [HTTP_API.md](./HTTP_API.md)
+- [MVP_TODO.md](./MVP_TODO.md)
+- [MVP_ARCHITECTURE.md](./MVP_ARCHITECTURE.md)
+- [RSP_INTEGRATION_COMPLETE.md](./RSP_INTEGRATION_COMPLETE.md)
+- [SPARQL_BINDINGS_UPGRADE.md](./SPARQL_BINDINGS_UPGRADE.md)
 
 ## Dashboard Boundary
 
 - Local demo dashboard in this repository: `examples/demo_dashboard.html`
 - Maintained dashboard repository: `https://github.com/SolidLabResearch/janus-dashboard`
+
+## Related Code
+
+- [../src/parsing/janusql_parser.rs](../src/parsing/janusql_parser.rs)
+- [../src/api/janus_api.rs](../src/api/janus_api.rs)
+- [../src/http/server.rs](../src/http/server.rs)
+- [../src/stream/live_stream_processing.rs](../src/stream/live_stream_processing.rs)
+- [../src/execution/historical_executor.rs](../src/execution/historical_executor.rs)
