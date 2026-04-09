@@ -1,19 +1,21 @@
-# Janus HTTP API - Quick Reference
+# Janus Quick Reference
 
-## Setup (3 Commands)
+## Setup
 
 ```bash
-./scripts/test_setup.sh                    # One-time setup
-docker-compose up -d mosquitto     # Start MQTT
-cargo run --bin http_server        # Start server
+docker-compose up -d mosquitto
+cargo run --bin http_server -- --host 127.0.0.1 --port 8080 --storage-dir ./data/storage
+cargo run --example http_client_example
 ```
 
-## Demo Dashboard
+## Optional Manual Demo
 
 ```bash
 open examples/demo_dashboard.html
-# Click: Start Replay → Start Query
 ```
+
+The static HTML demo is only for local manual testing. The maintained web
+dashboard lives in the separate `janus-dashboard` repository.
 
 ## API Endpoints
 
@@ -26,7 +28,8 @@ POST   /api/queries              # Register
 GET    /api/queries              # List all
 GET    /api/queries/:id          # Details
 POST   /api/queries/:id/start    # Start
-DELETE /api/queries/:id          # Stop
+POST   /api/queries/:id/stop     # Stop
+DELETE /api/queries/:id          # Delete stopped query
 WS     /api/queries/:id/results  # Stream
 
 # Replay
@@ -96,27 +99,13 @@ docker exec -it janus-mosquitto mosquitto_sub -t "sensors" -v
 docker-compose restart mosquitto
 ```
 
-## File Locations
-
-```
-janus/
-├── examples/demo_dashboard.html    # Interactive UI
-├── COMPLETE_SOLUTION.md            # Full explanation
-├── SETUP_GUIDE.md                  # Detailed setup
-├── README_HTTP_API.md              # API guide
-└── ./scripts/test_setup.sh                   # Automated setup
-```
-
 ## Success Checklist
 
 - [ ] MQTT running: `docker ps | grep mosquitto`
 - [ ] Server running: `curl localhost:8080/health`
-- [ ] Data exists: `ls data/sensors.nq`
-- [ ] Dashboard opens: `open examples/demo_dashboard.html`
-- [ ] Replay works: Click "Start Replay"
-- [ ] Query works: Click "Start Query"
-- [ ] Results appear in dashboard
+- [ ] Example client runs: `cargo run --example http_client_example`
+- [ ] Optional demo opens: `open examples/demo_dashboard.html`
 
 ---
 
-**Quick Start:** `./scripts/test_setup.sh` then `cargo run --bin http_server`
+**Quick Start:** `cargo run --bin http_server` then `cargo run --example http_client_example`

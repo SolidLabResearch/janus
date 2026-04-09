@@ -1,265 +1,89 @@
 # Getting Started with Janus
 
-Welcome to Janus! This guide will help you get up and running with the Janus RDF Stream Processing Engine.
-
-## What is Janus?
-
-Janus is a hybrid engine for unified Live and Historical RDF Stream Processing, written in Rust. It allows you to seamlessly process both historical RDF data stored in databases and live RDF streams in real-time using a single query language.
+Janus is a Rust engine for querying historical and live RDF data through one
+Janus-QL model and one HTTP/WebSocket API.
 
 ## Prerequisites
 
-Before you begin, ensure you have the following installed:
+- Rust stable with Cargo
+- Docker and Docker Compose if you want the MQTT-backed replay flow
 
-- **Rust** (1.70.0 or later) - [Install from rustup.rs](https://rustup.rs/)
-- **Cargo** (comes with Rust)
-- **Git** (for cloning the repository)
-- **Docker** (optional, for running RDF stores)
+## Fastest Working Path
 
-### Installing Rust
-
-If you don't have Rust installed, run:
+### 1. Build and test
 
 ```bash
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-```
-
-After installation, restart your terminal and verify:
-
-```bash
-rustc --version
-cargo --version
-```
-
-## Quick Start
-
-### 1. Clone the Repository
-
-```bash
-git clone https://github.com/yourusername/janus.git
-cd janus
-```
-
-### 2. Build the Project
-
-```bash
-# Debug build (faster compilation, slower execution)
-cargo build
-
-# Release build (slower compilation, faster execution)
-cargo build --release
-```
-
-### 3. Run Tests
-
-Verify everything is working correctly:
-
-```bash
-cargo test
-```
-
-### 4. Run the Example
-
-```bash
-cargo run --example basic
-```
-
-You should see output explaining the steps Janus takes to process RDF streams.
-
-### 5. Run the CLI Tool
-
-```bash
-cargo run
-```
-
-This will display the version and basic information about Janus.
-
-## Project Structure
-
-Understanding the project structure will help you navigate the codebase:
-
-```
-janus/
-├── src/                    # Source code
-│   ├── lib.rs             # Library entry point
-│   ├── main.rs            # Binary entry point
-│   ├── core/              # Core engine logic (to be implemented)
-│   ├── store/             # RDF store adapters (to be implemented)
-│   ├── stream/            # Stream processing (to be implemented)
-│   ├── query/             # Query engine (to be implemented)
-│   └── config/            # Configuration (to be implemented)
-├── examples/              # Usage examples
-│   └── basic.rs           # Basic example
-├── tests/                 # Integration tests
-│   └── integration_test.rs
-├── benches/               # Performance benchmarks
-├── fuseki-config/         # Apache Jena Fuseki configuration
-├── Cargo.toml             # Project metadata and dependencies
-├── Makefile               # Common development tasks
-└── README.md              # Project overview
-```
-
-## Using the Makefile
-
-The project includes a `Makefile` with common development tasks:
-
-```bash
-# See all available commands
-make help
-
-# Build the project
 make build
-
-# Run tests
 make test
+```
 
-# Format code
+### 2. Start the HTTP server
+
+```bash
+cargo run --bin http_server -- --host 127.0.0.1 --port 8080 --storage-dir ./data/storage
+```
+
+Verify it is up:
+
+```bash
+curl http://127.0.0.1:8080/health
+```
+
+### 3. Exercise the API
+
+The quickest end-to-end client is the example binary:
+
+```bash
+cargo run --example http_client_example
+```
+
+That example covers query registration, start, stop, replay control, and
+WebSocket result consumption.
+
+## Optional Local Demo UI
+
+This repository keeps a small static demo at
+`examples/demo_dashboard.html` for manual browser testing.
+
+The maintained Svelte dashboard lives in the separate
+`SolidLabResearch/janus-dashboard` repository.
+
+## Main Binaries
+
+- `http_server`: REST and WebSocket API for query lifecycle and replay control
+- `stream_bus_cli`: replay and ingestion CLI for RDF event files
+
+## Common Commands
+
+```bash
+make build
+make release
+make test
 make fmt
-
-# Run linter
+make fmt-check
 make lint
-
-# Run all checks
 make check
-
-# Generate documentation
-make doc
-
-# Run benchmarks
-make bench
-
-# Start Docker services (Oxigraph + Jena)
-make docker-start
-
-# Stop Docker services
-make docker-stop
+make ci-check
 ```
 
-## Development Workflow
+## Repository Layout
 
-### 1. Set Up Your Development Environment
+- `src/api`: query lifecycle orchestration
+- `src/http`: REST and WebSocket server
+- `src/parsing`: Janus-QL parsing
+- `src/execution`: historical execution
+- `src/stream`: live stream processing
+- `src/storage`: segmented RDF storage
+- `src/bin`: executable binaries
+- `examples`: runnable examples and a minimal static demo
+- `tests`: integration coverage
+- `docs`: current docs plus older design notes
 
-```bash
-# Install development tools
-make setup
+## Where to Read Next
 
-# Verify everything is installed
-make setup-check
-```
-
-### 2. Make Changes
-
-Edit files in the `src/` directory. The main areas to implement are:
-
-- `src/core/` - Core engine logic
-- `src/store/` - RDF store adapters
-- `src/stream/` - Stream processing
-- `src/query/` - Query parsing and execution
-
-### 3. Test Your Changes
-
-```bash
-# Run tests
-cargo test
-
-# Run tests with output
-cargo test -- --nocapture
-
-# Run specific test
-cargo test test_name
-```
-
-### 4. Format and Lint
-
-```bash
-# Format code
-cargo fmt
-
-# Check formatting
-cargo fmt --check
-
-# Run linter
-cargo clippy
-```
-
-### 5. Build and Run
-
-```bash
-# Build
-cargo build
-
-# Run
-cargo run
-
-# Run example
-cargo run --example basic
-```
-
-## Working with RDF Stores
-
-Janus is designed to work with multiple RDF stores. Here's how to set them up for development:
-
-### Oxigraph
-
-Start Oxigraph using Docker:
-
-```bash
-docker run -d -p 7878:7878 --name oxigraph-server oxigraph/oxigraph
-```
-
-Or use the Makefile:
-
-```bash
-make docker-oxigraph
-```
-
-Oxigraph will be available at `http://localhost:7878`
-
-### Apache Jena Fuseki
-
-Start Jena Fuseki using Docker:
-
-```bash
-docker run -d -p 3030:3030 --platform linux/amd64 \
-  -v $(pwd)/fuseki-config:/fuseki/configuration \
-  -v $(pwd)/fuseki-config/shiro.ini:/fuseki/shiro.ini \
-  --name jena-server stain/jena-fuseki
-```
-
-Or use the Makefile:
-
-```bash
-make docker-jena
-```
-
-Fuseki will be available at `http://localhost:3030`
-
-### Starting Both Services
-
-```bash
-make docker-start
-```
-
-### Stopping Services
-
-```bash
-make docker-stop
-```
-
-## Adding Dependencies
-
-To add a new dependency, edit `Cargo.toml`:
-
-```toml
-[dependencies]
-# Add your dependency here
-tokio = { version = "1.35", features = ["full"] }
-```
-
-Then run:
-
-```bash
-cargo build
-```
+- `README.md`
+- `START_HERE.md`
+- `docs/DOCUMENTATION_INDEX.md`
 
 ## Common Rust Commands
 

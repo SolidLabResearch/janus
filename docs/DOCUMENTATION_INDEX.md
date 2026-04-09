@@ -5,11 +5,14 @@ This is the shortest path to understanding the current Janus implementation.
 ## Core Reading Order
 
 1. [../README.md](../README.md)
-2. [JANUSQL.md](./JANUSQL.md)
-3. [QUERY_EXECUTION.md](./QUERY_EXECUTION.md)
-4. [BASELINES.md](./BASELINES.md)
-5. [HTTP_API_CURRENT.md](./HTTP_API_CURRENT.md)
-6. [ANOMALY_DETECTION.md](./ANOMALY_DETECTION.md)
+2. [../GETTING_STARTED.md](../GETTING_STARTED.md)
+3. [../START_HERE.md](../START_HERE.md)
+4. [JANUSQL.md](./JANUSQL.md)
+5. [QUERY_EXECUTION.md](./QUERY_EXECUTION.md)
+6. [BASELINES.md](./BASELINES.md)
+7. [HTTP_API_CURRENT.md](./HTTP_API_CURRENT.md)
+8. [ANOMALY_DETECTION.md](./ANOMALY_DETECTION.md)
+9. [QUICK_REFERENCE.md](./QUICK_REFERENCE.md)
 
 ## What Each File Covers
 
@@ -36,12 +39,18 @@ This is the shortest path to understanding the current Janus implementation.
   - current REST endpoints
   - WebSocket result flow
   - request and response shapes
-  - `baseline_mode` registration fallback
+  - persisted query lifecycle status
 
 - [ANOMALY_DETECTION.md](./ANOMALY_DETECTION.md)
   - when extension functions are enough
   - when baseline state helps
   - recommended query patterns
+
+- [QUICK_REFERENCE.md](./QUICK_REFERENCE.md)
+  - common local commands
+  - query lifecycle endpoints
+  - replay endpoints
+  - smoke-test flow
 
 ## Legacy Material
 
@@ -49,9 +58,8 @@ The following files remain useful as background, but they are not the main entry
 
 - [ARCHITECTURE.md](./ARCHITECTURE.md)
 - [EXECUTION_ARCHITECTURE.md](./EXECUTION_ARCHITECTURE.md)
-- [HTTP_API.md](./HTTP_API.md)
-- [README_HTTP_API.md](./README_HTTP_API.md)
-- [SETUP_GUIDE.md](./SETUP_GUIDE.md)
+- [MVP_ARCHITECTURE.md](./MVP_ARCHITECTURE.md)
+- [MVP_TODO.md](./MVP_TODO.md)
 
 ## Related Code
 

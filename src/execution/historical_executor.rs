@@ -95,21 +95,6 @@ impl HistoricalExecutor {
         self.execute_sparql_on_events(&events, sparql_query)
     }
 
-    /// Execute a sliding window query that returns an iterator of results (bypassing operator).
-    ///
-    /// Note: This is a simplified implementation that queries storage directly.
-    /// For production use, consider implementing proper window sliding logic.
-    #[allow(dead_code)]
-    fn execute_fixed_window_with_operator(
-        &self,
-        window: &WindowDefinition,
-        sparql_query: &str,
-    ) -> Result<Vec<HashMap<String, String>>, JanusApiError> {
-        // Original operator-based implementation kept for reference
-        // Note: Requires Arc->Rc conversion which is currently problematic
-        unimplemented!("Operator-based execution requires refactoring window operators to use Arc")
-    }
-
     /// Execute a sliding window query that returns an iterator of results.
     ///
     /// # Arguments
