@@ -3,7 +3,7 @@
 //! Tests for the JanusQL query parser, verifying parsing of window definitions,
 //! R2S operators, and query generation.
 
-use janus::parsing::janusql_parser::{JanusQLParser, SourceKind};
+use janus::parsing::janusql_parser::{JanusQLParser, SourceKind, WindowSpec};
 
 #[test]
 fn test_basic_live_window() {
@@ -101,4 +101,115 @@ fn test_on_log_historical_windows_are_parsed_as_logs() {
             .all(|query| query.contains("GRAPH ?__janus_log_graph")),
         "ON LOG queries should target historical named graphs"
     );
+}
+
+#[test]
+fn test_parse_ast_exposes_structured_window_specs() {
+    let parser = JanusQLParser::new().unwrap();
+    let query = r"
+        PREFIX ex: <http://example.org/>
+        REGISTER RStream ex:out AS
+        SELECT ?sensor
+        FROM NAMED WINDOW ex:live ON STREAM ex:stream [RANGE 500 STEP 100]
+        FROM NAMED WINDOW ex:hist ON LOG ex:store [START 1000 END 2000]
+        WHERE {
+            WINDOW ex:live { ?sensor ex:value ?value }
+            WINDOW ex:hist { ?sensor ex:value ?value }
+        }
+    ";
+
+    let ast = parser.parse_ast(query).unwrap();
+    assert_eq!(ast.windows.len(), 2);
+    assert_eq!(ast.where_windows.len(), 2);
+    assert_eq!(ast.prefixes.len(), 1);
+
+    assert!(matches!(ast.windows[0].spec, WindowSpec::LiveSliding { range: 500, step: 100 }));
+    assert!(matches!(
+        ast.windows[1].spec,
+        WindowSpec::HistoricalFixed { start: 1000, end: 2000 }
+    ));
+}
+
+#[test]
+fn test_parse_ast_register_clause_is_structured() {
+    let parser = JanusQLParser::new().unwrap();
+    let query = r"
+        PREFIX ex: <http://example.org/>
+        REGISTER RStream ex:out AS
+        SELECT ?sensor
+        FROM NAMED WINDOW ex:live ON STREAM ex:stream [RANGE 500 STEP 100]
+        WHERE {
+            WINDOW ex:live { ?sensor ex:value ?value }
+        }
+    ";
+
+    let ast = parser.parse_ast(query).unwrap();
+    let register = ast.register.expect("expected register clause");
+    assert_eq!(register.operator, "RStream");
+    assert_eq!(register.name, "http://example.org/out");
+}
+
+#[test]
+fn test_parse_ast_multiline_window_clause_is_supported() {
+    let parser = JanusQLParser::new().unwrap();
+    let query = r"
+        PREFIX ex: <http://example.org/>
+        SELECT ?sensor
+        FROM NAMED WINDOW ex:hist ON LOG ex:store
+            [START 1000 END 2000]
+        WHERE {
+            WINDOW ex:hist { ?sensor ex:value ?value }
+        }
+    ";
+
+    let ast = parser.parse_ast(query).unwrap();
+    assert_eq!(ast.windows.len(), 1);
+    assert!(matches!(
+        ast.windows[0].spec,
+        WindowSpec::HistoricalFixed { start: 1000, end: 2000 }
+    ));
+}
+
+#[test]
+fn test_parse_ast_on_log_historical_sliding_window() {
+    let parser = JanusQLParser::new().unwrap();
+    let query = r"
+        PREFIX ex: <http://example.org/>
+        SELECT ?sensor
+        FROM NAMED WINDOW ex:hist ON LOG ex:store [OFFSET 3000 RANGE 1000 STEP 250]
+        WHERE {
+            WINDOW ex:hist { ?sensor ex:value ?value }
+        }
+    ";
+
+    let ast = parser.parse_ast(query).unwrap();
+    assert_eq!(ast.windows.len(), 1);
+    assert_eq!(ast.windows[0].source_kind, SourceKind::Log);
+    assert!(matches!(
+        ast.windows[0].spec,
+        WindowSpec::HistoricalSliding { offset: 3000, range: 1000, step: 250 }
+    ));
+}
+
+#[test]
+fn test_parse_ast_extracts_window_body_with_nested_braces() {
+    let parser = JanusQLParser::new().unwrap();
+    let query = r#"
+        PREFIX ex: <http://example.org/>
+        SELECT ?sensor
+        FROM NAMED WINDOW ex:live ON STREAM ex:stream [RANGE 500 STEP 100]
+        WHERE {
+            WINDOW ex:live {
+                ?sensor ex:value ?value .
+                FILTER(EXISTS {
+                    ?sensor ex:meta ?meta .
+                })
+            }
+        }
+    "#;
+
+    let ast = parser.parse_ast(query).unwrap();
+    assert_eq!(ast.where_windows.len(), 1);
+    assert!(ast.where_windows[0].body.contains("FILTER(EXISTS"));
+    assert!(ast.where_windows[0].body.contains("?sensor ex:meta ?meta"));
 }
