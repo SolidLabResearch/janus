@@ -3,7 +3,9 @@
 //! Tests for the JanusQL query parser, verifying parsing of window definitions,
 //! R2S operators, and query generation.
 
-use janus::parsing::janusql_parser::{JanusQLParser, SourceKind, WindowSpec};
+use janus::parsing::janusql_parser::{
+    BaselineBootstrapMode, JanusQLParser, SourceKind, WindowSpec,
+};
 
 #[test]
 fn test_basic_live_window() {
@@ -212,4 +214,77 @@ fn test_parse_ast_extracts_window_body_with_nested_braces() {
     assert_eq!(ast.where_windows.len(), 1);
     assert!(ast.where_windows[0].body.contains("FILTER(EXISTS"));
     assert!(ast.where_windows[0].body.contains("?sensor ex:meta ?meta"));
+}
+
+#[test]
+fn test_live_query_preserves_non_window_patterns_for_static_joins() {
+    let parser = JanusQLParser::new().unwrap();
+    let query = r#"
+        PREFIX ex: <http://example.org/>
+        PREFIX janus: <https://janus.rs/fn#>
+        PREFIX baseline: <https://janus.rs/baseline#>
+        REGISTER RStream ex:out AS
+        SELECT ?sensor ?reading
+        FROM NAMED WINDOW ex:hist ON LOG ex:store [START 1000 END 2000]
+        FROM NAMED WINDOW ex:live ON STREAM ex:stream [RANGE 500 STEP 100]
+        WHERE {
+            WINDOW ex:hist {
+                ?sensor ex:reading ?histReading .
+            }
+            WINDOW ex:live {
+                ?sensor ex:reading ?reading .
+            }
+            ?sensor baseline:mean ?mean .
+            ?sensor baseline:sigma ?sigma .
+            FILTER(janus:is_outlier(?reading, ?mean, ?sigma, 3))
+        }
+    "#;
+
+    let parsed = parser.parse(query).unwrap();
+    assert!(parsed.rspql_query.contains("?sensor baseline:mean ?mean"));
+    assert!(parsed.rspql_query.contains("?sensor baseline:sigma ?sigma"));
+    assert!(parsed
+        .rspql_query
+        .contains("FILTER(janus:is_outlier(?reading, ?mean, ?sigma, 3))"));
+    assert!(parsed.rspql_query.contains("WINDOW ex:live"));
+    assert!(!parsed.rspql_query.contains("WINDOW ex:hist"));
+}
+
+#[test]
+fn test_parse_using_baseline_clause() {
+    let parser = JanusQLParser::new().unwrap();
+    let query = r#"
+        PREFIX ex: <http://example.org/>
+        REGISTER RStream ex:out AS
+        SELECT ?sensor ?reading
+        FROM NAMED WINDOW ex:hist ON LOG ex:store [START 1000 END 2000]
+        FROM NAMED WINDOW ex:live ON STREAM ex:stream [RANGE 500 STEP 100]
+        USING BASELINE ex:hist AGGREGATE
+        WHERE {
+            WINDOW ex:hist { ?sensor ex:mean ?mean }
+            WINDOW ex:live { ?sensor ex:reading ?reading }
+        }
+    "#;
+
+    let parsed = parser.parse(query).unwrap();
+    let baseline = parsed.baseline.expect("expected baseline clause");
+    assert_eq!(baseline.window_name, "http://example.org/hist");
+    assert_eq!(baseline.mode, BaselineBootstrapMode::Aggregate);
+}
+
+#[test]
+fn test_using_baseline_requires_known_historical_window() {
+    let parser = JanusQLParser::new().unwrap();
+    let query = r#"
+        PREFIX ex: <http://example.org/>
+        SELECT ?sensor
+        FROM NAMED WINDOW ex:live ON STREAM ex:stream [RANGE 500 STEP 100]
+        USING BASELINE ex:missing LAST
+        WHERE {
+            WINDOW ex:live { ?sensor ex:value ?value }
+        }
+    "#;
+
+    let result = parser.parse(query);
+    assert!(result.is_err());
 }
