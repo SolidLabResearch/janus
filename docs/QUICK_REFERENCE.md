@@ -3,17 +3,20 @@
 ## Setup (3 Commands)
 
 ```bash
-./scripts/test_setup.sh                    # One-time setup
+./scripts/test_setup.sh            # Optional local setup helper
 docker-compose up -d mosquitto     # Start MQTT
 cargo run --bin http_server        # Start server
 ```
 
-## Demo Dashboard
+## Local Demo Dashboard
 
 ```bash
 open examples/demo_dashboard.html
-# Click: Start Replay → Start Query
 ```
+
+For the maintained frontend, use:
+
+- `https://github.com/SolidLabResearch/janus-dashboard`
 
 ## API Endpoints
 
@@ -26,7 +29,8 @@ POST   /api/queries              # Register
 GET    /api/queries              # List all
 GET    /api/queries/:id          # Details
 POST   /api/queries/:id/start    # Start
-DELETE /api/queries/:id          # Stop
+POST   /api/queries/:id/stop     # Stop
+DELETE /api/queries/:id          # Delete stopped query
 WS     /api/queries/:id/results  # Stream
 
 # Replay
@@ -100,11 +104,11 @@ docker-compose restart mosquitto
 
 ```
 janus/
-├── examples/demo_dashboard.html    # Interactive UI
-├── COMPLETE_SOLUTION.md            # Full explanation
-├── SETUP_GUIDE.md                  # Detailed setup
-├── README_HTTP_API.md              # API guide
-└── ./scripts/test_setup.sh                   # Automated setup
+├── examples/demo_dashboard.html  # Local demo client
+├── docs/README_HTTP_API.md       # Current HTTP guide
+├── docs/QUICKSTART_HTTP_API.md   # Short API quickstart
+├── docs/SETUP_GUIDE.md           # Detailed setup
+└── scripts/test_setup.sh         # Local setup helper
 ```
 
 ## Success Checklist
@@ -112,10 +116,9 @@ janus/
 - [ ] MQTT running: `docker ps | grep mosquitto`
 - [ ] Server running: `curl localhost:8080/health`
 - [ ] Data exists: `ls data/sensors.nq`
-- [ ] Dashboard opens: `open examples/demo_dashboard.html`
-- [ ] Replay works: Click "Start Replay"
-- [ ] Query works: Click "Start Query"
-- [ ] Results appear in dashboard
+- [ ] Query registers successfully
+- [ ] Query starts successfully
+- [ ] WebSocket receives results
 
 ---
 

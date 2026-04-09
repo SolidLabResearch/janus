@@ -1,112 +1,46 @@
 # Janus Documentation
 
-This directory contains comprehensive documentation for the Janus RDF Stream Processing engine.
+This directory mixes current guides with deeper implementation notes from earlier development phases. Start with the documents below; some older design and MVP notes are retained for historical context.
 
-## Core Documentation
+## Recommended Reading Order
 
-### Architecture & Design
-- **[ARCHITECTURE.md](ARCHITECTURE.md)** - High-level system architecture and design principles
-- **[MVP_ARCHITECTURE.md](MVP_ARCHITECTURE.md)** - Minimum Viable Product architecture details
-- **[RSP_INTEGRATION_COMPLETE.md](RSP_INTEGRATION_COMPLETE.md)** - RSP-RS integration documentation
+1. [../README.md](../README.md)
+2. [../GETTING_STARTED.md](../GETTING_STARTED.md)
+3. [../START_HERE.md](../START_HERE.md)
+4. [README_HTTP_API.md](README_HTTP_API.md)
+5. [QUICKSTART_HTTP_API.md](QUICKSTART_HTTP_API.md)
+6. [STREAM_BUS_CLI.md](STREAM_BUS_CLI.md)
 
-### Performance & Benchmarking
-- **[BENCHMARK_RESULTS.md](BENCHMARK_RESULTS.md)** - Performance metrics and benchmark results
-- **[WRITING_BENCHMARKS.md](WRITING_BENCHMARKS.md)** - Guide for writing performance benchmarks
+## Current Guides
 
-### Features & Components
-- **[STREAM_BUS_CLI.md](STREAM_BUS_CLI.md)** - Command-line interface documentation
-- **[SPARQL_BINDINGS_UPGRADE.md](SPARQL_BINDINGS_UPGRADE.md)** - SPARQL structured bindings feature
-- **[EXECUTION_ARCHITECTURE.md](EXECUTION_ARCHITECTURE.md)** - ✨ Query execution architecture (NEW)
+### Core usage
 
-### Getting Started
-- **[MVP_QUICKSTART.md](MVP_QUICKSTART.md)** - Quick start guide for MVP features
-- **[MVP_TODO.md](MVP_TODO.md)** - Current development roadmap and TODOs
+- [README_HTTP_API.md](README_HTTP_API.md) - current HTTP/WebSocket API guide
+- [QUICKSTART_HTTP_API.md](QUICKSTART_HTTP_API.md) - short API quickstart
+- [STREAM_BUS_CLI.md](STREAM_BUS_CLI.md) - replay and ingestion CLI
+- [HTTP_API.md](HTTP_API.md) - API reference details
 
-## Recent Updates
+### Performance and architecture
 
-### Execution Architecture (Latest)
-Built internal execution layer for historical and live query processing:
-- `HistoricalExecutor` for querying historical RDF data with SPARQL
-- `ResultConverter` for unified result formatting
-- Supports both fixed and sliding windows
-- Thread-safe with message passing architecture
-- 12 comprehensive unit tests
-- See [EXECUTION_ARCHITECTURE.md](EXECUTION_ARCHITECTURE.md) for details
+- [BENCHMARK_RESULTS.md](BENCHMARK_RESULTS.md) - benchmark data and measurements
+- [ARCHITECTURE.md](ARCHITECTURE.md) - high-level architecture
+- [EXECUTION_ARCHITECTURE.md](EXECUTION_ARCHITECTURE.md) - historical/live execution details
 
-### SPARQL Structured Bindings
-Enhanced `OxigraphAdapter` with `execute_query_bindings()` method for structured SPARQL results:
-- Returns `Vec<HashMap<String, String>>` instead of debug format strings
-- 12 comprehensive tests covering all query types
-- Full backward compatibility maintained
-- See [SPARQL_BINDINGS_UPGRADE.md](SPARQL_BINDINGS_UPGRADE.md) for details
+## Historical / Planning Documents
 
-## Quick Links
+These are useful for design context, but they should not be treated as the source of truth for current repository status:
 
-### Development
-```bash
-# Build project
-make build
+- [MVP_TODO.md](MVP_TODO.md)
+- [MVP_ARCHITECTURE.md](MVP_ARCHITECTURE.md)
+- [RSP_INTEGRATION_COMPLETE.md](RSP_INTEGRATION_COMPLETE.md)
+- [SPARQL_BINDINGS_UPGRADE.md](SPARQL_BINDINGS_UPGRADE.md)
 
-# Run tests
-make test
+## Repo Boundary
 
-# Format code
-make fmt
+This repository is the Janus backend and engine implementation.
 
-# Run clippy
-make clippy
-```
+The maintained dashboard lives in:
 
-### Testing
-```bash
-# Run all tests
-cargo test
+- `https://github.com/SolidLabResearch/janus-dashboard`
 
-# Run specific test file
-cargo test --test oxigraph_adapter_test
-
-# Run with output
-cargo test -- --nocapture
-```
-
-### Documentation
-```bash
-# Build and view docs
-cargo doc --no-deps --open
-
-# Check docs build
-cargo doc --no-deps --package janus
-```
-
-## Project Structure
-
-```
-janus/
-├── src/
-│   ├── core/           # Core RDF event types and encoding
-│   ├── storage/        # Storage engine and indexing
-│   ├── execution/      # Query execution (historical + live)
-│   ├── querying/       # SPARQL query processing (Oxigraph)
-│   ├── parsing/        # JanusQL parser
-│   ├── api/            # Public API layer
-│   └── stream_bus/     # Event streaming infrastructure
-├── tests/              # Integration tests
-├── examples/           # Benchmark examples
-└── docs/               # This directory
-```
-
-## Contributing
-
-When adding new features:
-1. Follow patterns in existing code
-2. Add comprehensive tests (aim for >80% coverage)
-3. Update relevant documentation
-4. Run `make fmt` and `make clippy` before committing
-5. Add changelog entry to this README if significant
-
-## Support
-
-For questions or issues:
-- Check existing documentation first
-- Review test files for usage examples
-- See `.github/copilot-instructions.md` for coding standards
+The dashboard code checked into this repository should be treated as a local demo client unless stated otherwise.

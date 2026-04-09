@@ -1,79 +1,102 @@
 # Janus
 
-Janus is a hybrid engine for unified Live and Historical RDF Stream Processing, implemented in Rust.
+Janus is a Rust engine for hybrid RDF stream processing. It combines:
 
-The name "Janus" is inspired by the Roman deity Janus who is the guardian of doorways and transitions, and looks towards both the past and the future simultaneously. This dual perspective reflects Janus's capability to process both Historical and Live RDF streams in a unified manner utilizing a single query language and engine.
+- historical query execution over locally stored RDF events
+- live query execution over streaming RDF data
+- a JanusQL parser that lowers hybrid queries to SPARQL and RSP-QL
+- an HTTP/WebSocket API for query management and result streaming
 
-## Performance
+## Repository Status
 
-Janus achieves high-throughput RDF stream processing with dictionary encoding and streaming segmented storage:
+The backend repository is active and locally healthy:
 
-- Write Throughput: 2.6-3.14 Million quads/sec
-- Read Throughput: 2.7-2.77 Million quads/sec
-- Point Query Latency: Sub-millisecond (0.235 ms at 1M quads)
-- Space Efficiency: 40% reduction through dictionary encoding (24 bytes vs 40 bytes per event)
+- `cargo test --all-features` passes
+- `cargo clippy --all-targets --all-features -- -D warnings` passes
+- the HTTP API, Janus API, parser, storage layer, and stream bus all have integration coverage
 
-For detailed benchmark results, see [BENCHMARK_RESULTS.md](./BENCHMARK_RESULTS.md).
+This repository is the backend and engine implementation.
+
+The maintained dashboard lives in a separate repository:
+- `https://github.com/SolidLabResearch/janus-dashboard`
+
+The `janus-dashboard/` folder in this repository is a lightweight local demo client, not the primary frontend.
+
+## What You Can Run
+
+### HTTP API server
+
+```bash
+cargo run --bin http_server
+```
+
+This starts the backend on `http://127.0.0.1:8080` by default.
+
+### Stream replay / ingestion CLI
+
+```bash
+cargo run --bin stream_bus_cli -- --help
+```
+
+Use this to replay RDF input files into storage and optionally publish them to MQTT.
+
+### Tests
+
+```bash
+make test
+```
+
+### Linting
+
+```bash
+make lint
+```
 
 ## Development
 
 ### Prerequisites
 
-- Rust (stable toolchain)
+- Rust stable
 - Cargo
+- Docker, if you want to run the local MQTT broker from `docker-compose.yml`
 
-### Building
+### Build
 
 ```bash
-# Debug build
 make build
-
-# Release build (optimized)
 make release
 ```
 
-### Testing
+### Full local CI checks
 
 ```bash
-# Run all tests
-make test
-
-# Run tests with verbose output
-make test-verbose
-```
-
-### Code Quality
-
-Before pushing to the repository, run the CI/CD checks locally:
-
-```bash
-# Run all CI/CD checks (formatting, linting, tests, build)
 make ci-check
-
-# Or use the script directly
-   ./scripts/ci-check.sh```
-
-This will run:
-- **rustfmt** - Code formatting check
-- **clippy** - Lint checks with warnings as errors
-- **tests** - Full test suite
-- **build** - Compilation check
-
-Individual checks can also be run:
-
-```bash
-make fmt        # Format code
-make fmt-check  # Check formatting
-make lint       # Run Clippy
-make check      # Run formatting and linting checks
 ```
 
-## Licence 
+This runs formatting, clippy, tests, and build checks.
 
-This code is copyrighted by Ghent University - imec and released under the MIT Licence
+## Documentation
+
+Start here:
+
+- [GETTING_STARTED.md](./GETTING_STARTED.md)
+- [START_HERE.md](./START_HERE.md)
+- [docs/README.md](./docs/README.md)
+- [docs/README_HTTP_API.md](./docs/README_HTTP_API.md)
+
+Performance notes:
+
+- [docs/BENCHMARK_RESULTS.md](./docs/BENCHMARK_RESULTS.md)
+
+## Notes
+
+- `src/main.rs` is currently a benchmark-style executable, not the main user-facing interface.
+- The primary user-facing entry point is `http_server`.
+
+## Licence
+
+This code is copyrighted by Ghent University - imec and released under the MIT Licence.
 
 ## Contact
 
-For any questions, please contact [Kush](mailto:mailkushbisen@gmail.com) or create an issue in the repository.
-
----
+For questions, contact [Kush](mailto:mailkushbisen@gmail.com) or open an issue in the repository.
