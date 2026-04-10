@@ -50,7 +50,7 @@ docker-compose up -d mosquitto
 ./scripts/start_http_server.sh --clean
 ```
 
-### 3. Open Dashboard
+### 3. Open Demo Client
 
 Open `examples/demo_dashboard.html` in your browser.
 

@@ -255,6 +255,6 @@ Result: Only historical, no live updates
 **Test it:**
 ```bash
 open examples/demo_dashboard.html
-# Start Replay → Wait 3s → Start Query
-# Watch for both "historical" and "live" in results!
+# Start Replay -> Wait 3s -> Start Query
+# Watch for both "historical" and "live" in results
 ```

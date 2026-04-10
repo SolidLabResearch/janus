@@ -114,13 +114,14 @@ curl http://localhost:8080/api/replay/status
 
 ## Local Demo Dashboard
 
-You can still use the demo HTML client included in this repository:
+You can use the static demo HTML client included in this repository for manual
+backend testing:
 
 ```bash
 open examples/demo_dashboard.html
 ```
 
-The maintained dashboard lives separately:
+The maintained production dashboard lives separately:
 
 - `https://github.com/SolidLabResearch/janus-dashboard`
 

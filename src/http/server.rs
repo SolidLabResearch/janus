@@ -75,6 +75,15 @@ pub struct SuccessResponse {
     pub message: String,
 }
 
+/// Response for service health.
+#[derive(Debug, Serialize)]
+pub struct HealthResponse {
+    pub status: String,
+    pub message: String,
+    pub storage_status: String,
+    pub storage_error: Option<String>,
+}
+
 /// Error response
 #[derive(Debug, Serialize)]
 pub struct ErrorResponse {
@@ -251,8 +260,27 @@ pub fn create_server_with_state(
 }
 
 /// Health check endpoint
-async fn health_check() -> impl IntoResponse {
-    Json(SuccessResponse { message: "Janus HTTP API is running".to_string() })
+async fn health_check(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    if let Some(storage_error) = state.storage.background_flush_error() {
+        let response = HealthResponse {
+            status: "degraded".to_string(),
+            message: "Janus HTTP API is running with storage errors".to_string(),
+            storage_status: "error".to_string(),
+            storage_error: Some(storage_error),
+        };
+        return (StatusCode::SERVICE_UNAVAILABLE, Json(response)).into_response();
+    }
+
+    (
+        StatusCode::OK,
+        Json(HealthResponse {
+            status: "ok".to_string(),
+            message: "Janus HTTP API is running".to_string(),
+            storage_status: "ok".to_string(),
+            storage_error: None,
+        }),
+    )
+        .into_response()
 }
 
 /// POST /api/queries - Register a new query

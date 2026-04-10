@@ -58,17 +58,6 @@ This is the shortest path to understanding the current Janus implementation.
 - [README_HTTP_API.md](./README_HTTP_API.md)
 - [QUICKSTART_HTTP_API.md](./QUICKSTART_HTTP_API.md)
 
-## Legacy Material
-
-The following files remain useful as background, but they are not the main entrypoint for the current code:
-
-- [ARCHITECTURE.md](./ARCHITECTURE.md)
-- [EXECUTION_ARCHITECTURE.md](./EXECUTION_ARCHITECTURE.md)
-- [MVP_ARCHITECTURE.md](./MVP_ARCHITECTURE.md)
-- [MVP_TODO.md](./MVP_TODO.md)
-- [RSP_INTEGRATION_COMPLETE.md](./RSP_INTEGRATION_COMPLETE.md)
-- [SPARQL_BINDINGS_UPGRADE.md](./SPARQL_BINDINGS_UPGRADE.md)
-
 ## Dashboard Boundary
 
 - Local demo dashboard in this repository: `examples/demo_dashboard.html`

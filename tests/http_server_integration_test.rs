@@ -8,7 +8,7 @@ use janus::{
 };
 use reqwest::Client;
 use serde_json::{json, Value};
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, fs, path::PathBuf, sync::Arc};
 use tempfile::TempDir;
 use tokio::{
     net::TcpListener,
@@ -23,6 +23,7 @@ struct TestServer {
     ws_base_url: String,
     client: Client,
     state: Arc<AppState>,
+    storage_dir: PathBuf,
     _temp_dir: TempDir,
     server_task: JoinHandle<()>,
 }
@@ -52,8 +53,9 @@ fn historical_query(query_id: &str) -> Value {
 
 async fn spawn_test_server() -> TestServer {
     let temp_dir = TempDir::new().expect("failed to create temp dir");
+    let storage_dir = temp_dir.path().to_path_buf();
     let mut storage = StreamingSegmentedStorage::new(StreamingConfig {
-        segment_base_path: temp_dir.path().to_string_lossy().into_owned(),
+        segment_base_path: storage_dir.to_string_lossy().into_owned(),
         max_batch_events: 10,
         max_batch_age_seconds: 60,
         max_batch_bytes: 1024 * 1024,
@@ -98,6 +100,7 @@ async fn spawn_test_server() -> TestServer {
         ws_base_url: format!("ws://{}", addr),
         client: Client::new(),
         state,
+        storage_dir,
         _temp_dir: temp_dir,
         server_task,
     }
@@ -116,7 +119,48 @@ async fn test_health_endpoint() {
 
     assert!(response.status().is_success());
     let body: Value = response.json().await.expect("invalid health response");
+    assert_eq!(body["status"], "ok");
     assert_eq!(body["message"], "Janus HTTP API is running");
+    assert_eq!(body["storage_status"], "ok");
+    assert_eq!(body["storage_error"], Value::Null);
+}
+
+#[tokio::test]
+async fn test_health_endpoint_reports_storage_degradation() {
+    let server = spawn_test_server().await;
+
+    fs::remove_dir_all(&server.storage_dir).expect("failed to remove storage directory");
+    for timestamp in 2_000..2_010 {
+        server
+            .state
+            .storage
+            .write_rdf(
+                timestamp,
+                "http://example.org/sensor2",
+                "http://example.org/temperature",
+                "22",
+                "http://example.org/sensors",
+            )
+            .expect("initial writes should succeed before background failure is observed");
+    }
+
+    sleep(Duration::from_millis(250)).await;
+
+    let response = server
+        .client
+        .get(format!("{}/health", server.base_url))
+        .send()
+        .await
+        .expect("health request failed");
+
+    assert_eq!(response.status(), reqwest::StatusCode::SERVICE_UNAVAILABLE);
+    let body: Value = response.json().await.expect("invalid health response");
+    assert_eq!(body["status"], "degraded");
+    assert_eq!(body["storage_status"], "error");
+    assert!(body["storage_error"]
+        .as_str()
+        .expect("storage error should be present")
+        .contains("Background flush failed"));
 }
 
 #[tokio::test]

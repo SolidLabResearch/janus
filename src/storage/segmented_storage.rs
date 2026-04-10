@@ -100,6 +100,11 @@ impl StreamingSegmentedStorage {
         &self.dictionary
     }
 
+    /// Return the most recent background flush error, if one has occurred.
+    pub fn background_flush_error(&self) -> Option<String> {
+        self.background_flush_error.lock().unwrap().clone()
+    }
+
     fn ensure_background_flush_healthy(&self) -> std::io::Result<()> {
         let background_error = self.background_flush_error.lock().unwrap();
         if let Some(message) = background_error.as_ref() {

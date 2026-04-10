@@ -67,7 +67,8 @@ curl http://localhost:8080/api/replay/status
 
 ## Optional Demo Client
 
-This repository still contains a demo HTML dashboard:
+This repository still contains a static demo HTML client for manual API
+testing:
 
 ```bash
 open examples/demo_dashboard.html

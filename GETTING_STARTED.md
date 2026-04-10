@@ -77,7 +77,7 @@ make ci-check
 - `src/bin`: executable binaries
 - `examples`: runnable examples and a minimal static demo
 - `tests`: integration coverage
-- `docs`: current docs plus older design notes
+- `docs`: current product docs plus a small amount of retained background material
 
 ## Where to Read Next
 

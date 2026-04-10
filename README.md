@@ -70,8 +70,6 @@ The maintained dashboard lives in a separate repository:
 
 - `https://github.com/SolidLabResearch/janus-dashboard`
 
-The `janus-dashboard/` folder in this repository is a lightweight local demo client, not the primary frontend.
-
 ## Performance
 
 Janus uses dictionary encoding and segmented storage for high-throughput ingestion and historical reads.
@@ -129,9 +127,10 @@ This example demonstrates:
 The maintained web dashboard lives in the separate
 `SolidLabResearch/janus-dashboard` repository.
 
-This repository keeps a small static demo at
+Frontend development should happen in the dedicated dashboard repo. This
+repository only keeps a small static demo at
 [`examples/demo_dashboard.html`](./examples/demo_dashboard.html) for manual API
-testing, but frontend development should happen in the dedicated dashboard repo.
+testing.
 
 ## Development
 
@@ -169,7 +168,8 @@ Start here:
 
 ## Notes
 
-- `src/main.rs` is currently a benchmark-style executable, not the main user-facing interface.
+- `src/main.rs` is now a lightweight entry binary that points to the main Janus
+  executables and benchmark helpers.
 - The primary user-facing entry point is `http_server`.
 
 ## Licence
