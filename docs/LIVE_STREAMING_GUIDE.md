@@ -50,9 +50,9 @@ docker-compose up -d mosquitto
 ./scripts/start_http_server.sh --clean
 ```
 
-### 3. Open Demo Client
+### 3. Start a Client
 
-Open `examples/demo_dashboard.html` in your browser.
+Use the maintained dashboard repository or run the local HTTP client example.
 
 ### 4. Start Replay (Publishes to MQTT + Storage)
 

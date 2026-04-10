@@ -60,7 +60,6 @@ This is the shortest path to understanding the current Janus implementation.
 
 ## Dashboard Boundary
 
-- Local demo dashboard in this repository: `examples/demo_dashboard.html`
 - Maintained dashboard repository: `https://github.com/SolidLabResearch/janus-dashboard`
 
 ## Related Code

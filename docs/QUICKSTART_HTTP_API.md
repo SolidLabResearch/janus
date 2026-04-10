@@ -12,6 +12,7 @@ cargo run --bin http_server
 
 ```bash
 curl http://localhost:8080/health
+curl http://localhost:8080/ops/status
 ```
 
 ## 3. Register a query
@@ -65,14 +66,7 @@ Check replay metrics:
 curl http://localhost:8080/api/replay/status
 ```
 
-## Optional Demo Client
-
-This repository still contains a static demo HTML client for manual API
-testing:
-
-```bash
-open examples/demo_dashboard.html
-```
+## Optional Frontend
 
 For the maintained frontend, use:
 

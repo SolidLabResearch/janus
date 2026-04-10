@@ -39,6 +39,17 @@ Service Unavailable` with:
 }
 ```
 
+### Ops Status
+
+`GET /ops/status`
+
+Returns a richer operational snapshot with:
+
+- overall service status
+- storage background-flush health
+- replay metrics
+- query lifecycle counts
+
 ### Register Query
 
 `POST /api/queries`

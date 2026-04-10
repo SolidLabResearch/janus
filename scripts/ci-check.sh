@@ -34,4 +34,10 @@ cargo build --all-targets
 echo "Build successful!"
 echo ""
 
+# Check 5: Docs link check
+echo "Checking markdown links..."
+bash ./scripts/check_doc_links.sh
+echo "Documentation link check passed!"
+echo ""
+
 echo "All CI/CD checks passed! Safe to push."

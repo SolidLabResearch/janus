@@ -8,20 +8,17 @@ cargo run --bin http_server -- --host 127.0.0.1 --port 8080 --storage-dir ./data
 cargo run --example http_client_example
 ```
 
-## Optional Manual Demo
+## Optional Frontend
 
-```bash
-open examples/demo_dashboard.html
-```
-
-The static HTML demo is only for local manual testing. The maintained web
-dashboard lives in the separate `janus-dashboard` repository.
+The maintained web dashboard lives in the separate `janus-dashboard`
+repository.
 
 ## API Endpoints
 
 ```bash
 # Health
 GET http://localhost:8080/health
+GET http://localhost:8080/ops/status
 
 # Queries
 POST   /api/queries              # Register
@@ -104,7 +101,6 @@ docker-compose restart mosquitto
 - [ ] MQTT running: `docker ps | grep mosquitto`
 - [ ] Server running: `curl localhost:8080/health`
 - [ ] Example client runs: `cargo run --example http_client_example`
-- [ ] Optional demo opens: `open examples/demo_dashboard.html`
 
 ---
 

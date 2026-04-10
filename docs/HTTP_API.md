@@ -857,7 +857,7 @@ Options:
 ## Additional Resources
 
 - [JanusQL Query Language Documentation](./JANUSQL.md)
-- [Stream Bus CLI Documentation](./STREAM_BUS.md)
+- [Stream Bus CLI Documentation](./STREAM_BUS_CLI.md)
 - [Benchmark Results](./BENCHMARK_RESULTS.md)
 
 ---

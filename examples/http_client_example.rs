@@ -36,6 +36,14 @@ struct SuccessResponse {
 }
 
 #[derive(Debug, Deserialize)]
+struct HealthResponse {
+    status: String,
+    message: String,
+    storage_status: String,
+    storage_error: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
 struct ListQueriesResponse {
     queries: Vec<String>,
     total: usize,
@@ -75,6 +83,21 @@ struct ReplayStatusResponse {
 }
 
 #[derive(Debug, Deserialize)]
+struct QueryOpsStatusResponse {
+    total_registered_queries: usize,
+    active_runtime_queries: usize,
+    running_queries: usize,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpsStatusResponse {
+    status: String,
+    message: String,
+    replay: ReplayStatusResponse,
+    queries: QueryOpsStatusResponse,
+}
+
+#[derive(Debug, Deserialize)]
 struct QueryResultMessage {
     query_id: String,
     timestamp: u64,
@@ -99,10 +122,32 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("   GET {}/health", base_url);
     let response = client.get(format!("{}/health", base_url)).send().await?;
     if response.status().is_success() {
-        let body: SuccessResponse = response.json().await?;
+        let body: HealthResponse = response.json().await?;
         println!("   ✓ {}", body.message);
+        println!("   ✓ Service status: {}", body.status);
+        println!("   ✓ Storage status: {}", body.storage_status);
+        if let Some(error) = body.storage_error {
+            println!("   ! Storage error: {}", error);
+        }
     } else {
         println!("   ✗ Health check failed: {}", response.status());
+    }
+    println!();
+
+    // 1b. Ops Status
+    println!("1b. Ops Status");
+    println!("   GET {}/ops/status", base_url);
+    let response = client.get(format!("{}/ops/status", base_url)).send().await?;
+    if response.status().is_success() {
+        let body: OpsStatusResponse = response.json().await?;
+        println!("   ✓ {}", body.message);
+        println!("   ✓ Overall status: {}", body.status);
+        println!("   ✓ Replay running: {}", body.replay.is_running);
+        println!("   ✓ Registered queries: {}", body.queries.total_registered_queries);
+        println!("   ✓ Active runtime queries: {}", body.queries.active_runtime_queries);
+        println!("   ✓ Running queries: {}", body.queries.running_queries);
+    } else {
+        println!("   ✗ Ops status failed: {}", response.status());
     }
     println!();
 

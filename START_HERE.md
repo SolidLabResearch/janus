@@ -18,7 +18,7 @@ cargo run --example http_client_example
 
 - `http_server` is the main backend entry point
 - `stream_bus_cli` is the ingestion and replay CLI
-- `examples/demo_dashboard.html` is an optional minimal manual demo
+- `examples/http_client_example.rs` is the fastest local API exercise
 - the maintained Svelte dashboard lives in the separate `janus-dashboard` repository
 
 ## Current Docs

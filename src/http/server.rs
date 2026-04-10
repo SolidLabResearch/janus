@@ -84,6 +84,13 @@ pub struct HealthResponse {
     pub storage_error: Option<String>,
 }
 
+/// Detailed storage status for ops surfaces.
+#[derive(Debug, Serialize)]
+pub struct StorageStatusResponse {
+    pub status: String,
+    pub background_flush_error: Option<String>,
+}
+
 /// Error response
 #[derive(Debug, Serialize)]
 pub struct ErrorResponse {
@@ -132,7 +139,7 @@ pub struct MqttConfigDto {
 }
 
 /// Response for replay status
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone)]
 pub struct ReplayStatusResponse {
     pub is_running: bool,
     pub events_read: u64,
@@ -142,6 +149,28 @@ pub struct ReplayStatusResponse {
     pub storage_errors: u64,
     pub events_per_second: f64,
     pub elapsed_seconds: f64,
+}
+
+/// Query lifecycle status summary for ops surfaces.
+#[derive(Debug, Serialize)]
+pub struct QueryOpsStatusResponse {
+    pub total_registered_queries: usize,
+    pub active_runtime_queries: usize,
+    pub registered_queries: usize,
+    pub warming_baseline_queries: usize,
+    pub running_queries: usize,
+    pub stopped_queries: usize,
+    pub failed_queries: usize,
+}
+
+/// Rich operational status response.
+#[derive(Debug, Serialize)]
+pub struct OpsStatusResponse {
+    pub status: String,
+    pub message: String,
+    pub storage: StorageStatusResponse,
+    pub replay: ReplayStatusResponse,
+    pub queries: QueryOpsStatusResponse,
 }
 
 /// Shared application state
@@ -252,6 +281,7 @@ pub fn create_server_with_state(
         .route("/api/replay/start", post(start_replay))
         .route("/api/replay/stop", post(stop_replay))
         .route("/api/replay/status", get(replay_status))
+        .route("/ops/status", get(ops_status))
         .route("/health", get(health_check))
         .layer(cors)
         .with_state(Arc::clone(&state));
@@ -261,11 +291,13 @@ pub fn create_server_with_state(
 
 /// Health check endpoint
 async fn health_check(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    if let Some(storage_error) = state.storage.background_flush_error() {
+    let storage = storage_status(&state.storage);
+
+    if let Some(storage_error) = storage.background_flush_error.clone() {
         let response = HealthResponse {
             status: "degraded".to_string(),
             message: "Janus HTTP API is running with storage errors".to_string(),
-            storage_status: "error".to_string(),
+            storage_status: storage.status,
             storage_error: Some(storage_error),
         };
         return (StatusCode::SERVICE_UNAVAILABLE, Json(response)).into_response();
@@ -276,8 +308,40 @@ async fn health_check(State(state): State<Arc<AppState>>) -> impl IntoResponse {
         Json(HealthResponse {
             status: "ok".to_string(),
             message: "Janus HTTP API is running".to_string(),
-            storage_status: "ok".to_string(),
+            storage_status: storage.status,
             storage_error: None,
+        }),
+    )
+        .into_response()
+}
+
+/// Operational status endpoint.
+async fn ops_status(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let storage = storage_status(&state.storage);
+    let replay = replay_status_snapshot(&state.replay_state.lock().unwrap());
+    let queries = query_ops_status(&state);
+
+    let (status, message) = if storage.background_flush_error.is_some() {
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Janus HTTP API is running with degraded storage".to_string(),
+        )
+    } else {
+        (StatusCode::OK, "Janus HTTP API is running".to_string())
+    };
+
+    (
+        status,
+        Json(OpsStatusResponse {
+            status: if status == StatusCode::OK {
+                "ok".to_string()
+            } else {
+                "degraded".to_string()
+            },
+            message,
+            storage,
+            replay,
+            queries,
         }),
     )
         .into_response()
@@ -605,7 +669,10 @@ async fn replay_status(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<ReplayStatusResponse>, ApiError> {
     let replay_state = state.replay_state.lock().unwrap();
+    Ok(Json(replay_status_snapshot(&replay_state)))
+}
 
+fn replay_status_snapshot(replay_state: &ReplayState) -> ReplayStatusResponse {
     let elapsed_seconds = if replay_state.is_running {
         replay_state.start_time.map_or(0.0, |t| t.elapsed().as_secs_f64())
     } else {
@@ -624,7 +691,7 @@ async fn replay_status(
         0.0
     };
 
-    Ok(Json(ReplayStatusResponse {
+    ReplayStatusResponse {
         is_running: replay_state.is_running,
         events_read,
         events_published,
@@ -633,7 +700,53 @@ async fn replay_status(
         storage_errors,
         events_per_second,
         elapsed_seconds,
-    }))
+    }
+}
+
+fn storage_status(storage: &StreamingSegmentedStorage) -> StorageStatusResponse {
+    StorageStatusResponse {
+        status: if storage.background_flush_error().is_some() {
+            "error".to_string()
+        } else {
+            "ok".to_string()
+        },
+        background_flush_error: storage.background_flush_error(),
+    }
+}
+
+fn query_ops_status(state: &Arc<AppState>) -> QueryOpsStatusResponse {
+    let query_ids = state.registry.list_all();
+    let mut registered_queries = 0;
+    let mut warming_baseline_queries = 0;
+    let mut running_queries = 0;
+    let mut stopped_queries = 0;
+    let mut failed_queries = 0;
+
+    for query_id in &query_ids {
+        if let Some(metadata) = state.registry.get(query_id) {
+            match metadata.status.as_str() {
+                "Registered" => registered_queries += 1,
+                "WarmingBaseline" => warming_baseline_queries += 1,
+                "Running" => running_queries += 1,
+                "Stopped" => stopped_queries += 1,
+                status if status.starts_with("Failed") => failed_queries += 1,
+                _ => {}
+            }
+        }
+    }
+
+    let active_runtime_queries =
+        query_ids.iter().filter(|query_id| state.janus_api.is_running(query_id)).count();
+
+    QueryOpsStatusResponse {
+        total_registered_queries: query_ids.len(),
+        active_runtime_queries,
+        registered_queries,
+        warming_baseline_queries,
+        running_queries,
+        stopped_queries,
+        failed_queries,
+    }
 }
 
 /// Start the HTTP server on the specified address
@@ -659,6 +772,7 @@ pub async fn start_server(
     println!("  POST   /api/replay/start         - Start stream bus replay");
     println!("  POST   /api/replay/stop          - Stop stream bus replay");
     println!("  GET    /api/replay/status        - Get replay status");
+    println!("  GET    /ops/status               - Detailed operational status");
     println!("  GET    /health                   - Health check");
     println!();
 

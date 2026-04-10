@@ -127,10 +127,7 @@ This example demonstrates:
 The maintained web dashboard lives in the separate
 `SolidLabResearch/janus-dashboard` repository.
 
-Frontend development should happen in the dedicated dashboard repo. This
-repository only keeps a small static demo at
-[`examples/demo_dashboard.html`](./examples/demo_dashboard.html) for manual API
-testing.
+Frontend development should happen in the dedicated dashboard repo.
 
 ## Development
 
@@ -154,7 +151,6 @@ The repository includes runnable examples under [`examples/`](./examples), inclu
 
 - [`examples/http_client_example.rs`](./examples/http_client_example.rs)
 - [`examples/comparator_demo.rs`](./examples/comparator_demo.rs)
-- [`examples/demo_dashboard.html`](./examples/demo_dashboard.html) for a minimal local demo
 
 ## Documentation
 

@@ -1,4 +1,4 @@
-.PHONY: help build test clean fmt lint check ci-check install run dev doc bench audit deps update watch all release
+.PHONY: help build test clean fmt lint check ci-check install run dev doc bench audit deps update watch all release doc-links
 
 # Default target
 .DEFAULT_GOAL := help
@@ -58,6 +58,10 @@ lint: ## Run clippy lints
 
 check: fmt-check lint ## Run all checks (formatting and linting)
 	@echo "$(GREEN)All checks passed!$(NC)"
+
+doc-links: ## Check local markdown links
+	@echo "$(BLUE)Checking markdown links...$(NC)"
+	@bash ./scripts/check_doc_links.sh
 
 ci-check: ## Run full CI/CD checks locally before pushing
 	@echo "$(BLUE)Running CI/CD checks...$(NC)"

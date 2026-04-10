@@ -427,7 +427,7 @@ stream_bus_cli --input large.nq --broker kafka 2>&1 | tee -a processing.log
 ## See Also
 
 - [Stream Bus Module Documentation](../src/stream_bus/stream_bus.rs)
-- [Benchmark Results](../BENCHMARK_RESULTS.md)
+- [Benchmark Results](./BENCHMARK_RESULTS.md)
 - [Getting Started Guide](../GETTING_STARTED.md)
 
 ## License

@@ -126,6 +126,44 @@ async fn test_health_endpoint() {
 }
 
 #[tokio::test]
+async fn test_ops_status_endpoint_reports_runtime_counts() {
+    let server = spawn_test_server().await;
+
+    let register_response = server
+        .client
+        .post(format!("{}/api/queries", server.base_url))
+        .json(&historical_query("ops_status"))
+        .send()
+        .await
+        .expect("register request failed");
+    assert!(register_response.status().is_success());
+
+    let start_response = server
+        .client
+        .post(format!("{}/api/queries/ops_status/start", server.base_url))
+        .send()
+        .await
+        .expect("start request failed");
+    assert!(start_response.status().is_success());
+
+    let response = server
+        .client
+        .get(format!("{}/ops/status", server.base_url))
+        .send()
+        .await
+        .expect("ops status request failed");
+
+    assert!(response.status().is_success());
+    let body: Value = response.json().await.expect("invalid ops status response");
+    assert_eq!(body["status"], "ok");
+    assert_eq!(body["storage"]["status"], "ok");
+    assert_eq!(body["replay"]["is_running"], false);
+    assert_eq!(body["queries"]["total_registered_queries"], 1);
+    assert_eq!(body["queries"]["active_runtime_queries"], 1);
+    assert_eq!(body["queries"]["running_queries"], 1);
+}
+
+#[tokio::test]
 async fn test_health_endpoint_reports_storage_degradation() {
     let server = spawn_test_server().await;
 
@@ -158,6 +196,45 @@ async fn test_health_endpoint_reports_storage_degradation() {
     assert_eq!(body["status"], "degraded");
     assert_eq!(body["storage_status"], "error");
     assert!(body["storage_error"]
+        .as_str()
+        .expect("storage error should be present")
+        .contains("Background flush failed"));
+}
+
+#[tokio::test]
+async fn test_ops_status_endpoint_reports_storage_degradation() {
+    let server = spawn_test_server().await;
+
+    fs::remove_dir_all(&server.storage_dir).expect("failed to remove storage directory");
+    for timestamp in 2_000..2_010 {
+        server
+            .state
+            .storage
+            .write_rdf(
+                timestamp,
+                "http://example.org/sensor2",
+                "http://example.org/temperature",
+                "22",
+                "http://example.org/sensors",
+            )
+            .expect("initial writes should succeed before background failure is observed");
+    }
+
+    sleep(Duration::from_millis(250)).await;
+
+    let response = server
+        .client
+        .get(format!("{}/ops/status", server.base_url))
+        .send()
+        .await
+        .expect("ops status request failed");
+
+    assert_eq!(response.status(), reqwest::StatusCode::SERVICE_UNAVAILABLE);
+    let body: Value = response.json().await.expect("invalid ops status response");
+    assert_eq!(body["status"], "degraded");
+    assert_eq!(body["storage"]["status"], "error");
+    assert_eq!(body["queries"]["total_registered_queries"], 0);
+    assert!(body["storage"]["background_flush_error"]
         .as_str()
         .expect("storage error should be present")
         .contains("Background flush failed"));
