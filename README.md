@@ -124,6 +124,15 @@ This example demonstrates:
 - replay control
 - WebSocket result consumption
 
+### Frontend Boundary
+
+The maintained web dashboard lives in the separate
+`SolidLabResearch/janus-dashboard` repository.
+
+This repository keeps a small static demo at
+[`examples/demo_dashboard.html`](./examples/demo_dashboard.html) for manual API
+testing, but frontend development should happen in the dedicated dashboard repo.
+
 ## Development
 
 ### Common Commands
@@ -145,6 +154,8 @@ make ci-check      # local CI script
 The repository includes runnable examples under [`examples/`](./examples), including:
 
 - [`examples/http_client_example.rs`](./examples/http_client_example.rs)
+- [`examples/comparator_demo.rs`](./examples/comparator_demo.rs)
+- [`examples/demo_dashboard.html`](./examples/demo_dashboard.html) for a minimal local demo
 
 ## Documentation
 

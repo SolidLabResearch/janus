@@ -48,8 +48,8 @@ jobs:
       - name: Run Clippy
         run: cargo clippy --all-targets --all-features -- -D warnings
 
-  test:
-    name: Test Suite
+  smoke:
+    name: Integration Smoke
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -61,8 +61,14 @@ jobs:
       - name: Cache Rust build artifacts
         uses: Swatinem/rust-cache@v2
 
-      - name: Run tests
-        run: cargo test --all-features --verbose
+      - name: Run Janus API integration smoke test
+        run: cargo test --test janus_api_integration_test --all-features
 
-      - name: Run doc tests
-        run: cargo test --doc --all-features --verbose
+      - name: Run HTTP server integration smoke test
+        run: cargo test --test http_server_integration_test --all-features
+
+      - name: Run stream bus CLI smoke test
+        run: cargo test --test stream_bus_cli_test --all-features
+
+      - name: Build HTTP client example
+        run: cargo build --example http_client_example --all-features

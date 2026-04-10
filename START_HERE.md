@@ -1,54 +1,32 @@
-# Janus Backend - Start Here
-
-Use this file if you want the fastest path to a working local backend.
+# Janus Start Here
 
 ## Quick Start
 
-### 1. Start the MQTT broker
-
 ```bash
 docker-compose up -d mosquitto
+cargo run --bin http_server -- --host 127.0.0.1 --port 8080 --storage-dir ./data/storage
+curl http://127.0.0.1:8080/health
 ```
 
-### 2. Start the HTTP server
+In another terminal, run:
 
 ```bash
-cargo run --bin http_server
+cargo run --example http_client_example
 ```
 
-### 3. Check health
+## What To Use
 
-```bash
-curl http://localhost:8080/health
-```
+- `http_server` is the main backend entry point
+- `stream_bus_cli` is the ingestion and replay CLI
+- `examples/demo_dashboard.html` is a minimal manual demo
+- the maintained Svelte dashboard lives in the separate `janus-dashboard` repository
 
-Expected response:
+## Current Docs
 
-```json
-{"message":"Janus HTTP API is running"}
-```
-
-## Optional: Open the local demo dashboard
-
-This repository contains a small demo dashboard:
-
-```bash
-open examples/demo_dashboard.html
-```
-
-For the maintained frontend, use the separate repository:
-
-- `https://github.com/SolidLabResearch/janus-dashboard`
-
-## Most Useful Docs
-
-- [GETTING_STARTED.md](./GETTING_STARTED.md)
-- [docs/README_HTTP_API.md](./docs/README_HTTP_API.md)
-- [docs/QUICKSTART_HTTP_API.md](./docs/QUICKSTART_HTTP_API.md)
-- [docs/README.md](./docs/README.md)
-
-## Notes
-
-- The backend is the primary concern of this repository.
-- `http_server` is the main user-facing executable.
-- `stream_bus_cli` is the replay/ingestion CLI.
+- `README.md`
+- `GETTING_STARTED.md`
+- `docs/DOCUMENTATION_INDEX.md`
+- `docs/HTTP_API_CURRENT.md`
+- `docs/README_HTTP_API.md`
+- `docs/QUICKSTART_HTTP_API.md`
+- `docs/QUICK_REFERENCE.md`

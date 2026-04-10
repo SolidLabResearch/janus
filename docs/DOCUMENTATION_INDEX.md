@@ -12,6 +12,7 @@ This is the shortest path to understanding the current Janus implementation.
 6. [BASELINES.md](./BASELINES.md)
 7. [HTTP_API_CURRENT.md](./HTTP_API_CURRENT.md)
 8. [ANOMALY_DETECTION.md](./ANOMALY_DETECTION.md)
+9. [QUICK_REFERENCE.md](./QUICK_REFERENCE.md)
 
 ## What Each File Covers
 
@@ -38,19 +39,24 @@ This is the shortest path to understanding the current Janus implementation.
   - current REST endpoints
   - WebSocket result flow
   - request and response shapes
-  - `baseline_mode` registration fallback
+  - persisted query lifecycle status
 
 - [ANOMALY_DETECTION.md](./ANOMALY_DETECTION.md)
   - when extension functions are enough
   - when baseline state helps
   - recommended query patterns
 
+- [QUICK_REFERENCE.md](./QUICK_REFERENCE.md)
+  - common local commands
+  - query lifecycle endpoints
+  - replay endpoints
+  - smoke-test flow
+
 ## Additional Current Guides
 
 - [STREAM_BUS_CLI.md](./STREAM_BUS_CLI.md)
 - [README_HTTP_API.md](./README_HTTP_API.md)
 - [QUICKSTART_HTTP_API.md](./QUICKSTART_HTTP_API.md)
-- [QUICK_REFERENCE.md](./QUICK_REFERENCE.md)
 
 ## Legacy Material
 
@@ -58,9 +64,8 @@ The following files remain useful as background, but they are not the main entry
 
 - [ARCHITECTURE.md](./ARCHITECTURE.md)
 - [EXECUTION_ARCHITECTURE.md](./EXECUTION_ARCHITECTURE.md)
-- [HTTP_API.md](./HTTP_API.md)
-- [MVP_TODO.md](./MVP_TODO.md)
 - [MVP_ARCHITECTURE.md](./MVP_ARCHITECTURE.md)
+- [MVP_TODO.md](./MVP_TODO.md)
 - [RSP_INTEGRATION_COMPLETE.md](./RSP_INTEGRATION_COMPLETE.md)
 - [SPARQL_BINDINGS_UPGRADE.md](./SPARQL_BINDINGS_UPGRADE.md)
 

@@ -1,22 +1,21 @@
-# Janus HTTP API - Quick Reference
+# Janus Quick Reference
 
-## Setup (3 Commands)
+## Setup
 
 ```bash
-./scripts/test_setup.sh            # Optional local setup helper
-docker-compose up -d mosquitto     # Start MQTT
-cargo run --bin http_server        # Start server
+docker-compose up -d mosquitto
+cargo run --bin http_server -- --host 127.0.0.1 --port 8080 --storage-dir ./data/storage
+cargo run --example http_client_example
 ```
 
-## Local Demo Dashboard
+## Optional Manual Demo
 
 ```bash
 open examples/demo_dashboard.html
 ```
 
-For the maintained frontend, use:
-
-- `https://github.com/SolidLabResearch/janus-dashboard`
+The static HTML demo is only for local manual testing. The maintained web
+dashboard lives in the separate `janus-dashboard` repository.
 
 ## API Endpoints
 
@@ -100,26 +99,13 @@ docker exec -it janus-mosquitto mosquitto_sub -t "sensors" -v
 docker-compose restart mosquitto
 ```
 
-## File Locations
-
-```
-janus/
-├── examples/demo_dashboard.html  # Local demo client
-├── docs/README_HTTP_API.md       # Current HTTP guide
-├── docs/QUICKSTART_HTTP_API.md   # Short API quickstart
-├── docs/SETUP_GUIDE.md           # Detailed setup
-└── scripts/test_setup.sh         # Local setup helper
-```
-
 ## Success Checklist
 
 - [ ] MQTT running: `docker ps | grep mosquitto`
 - [ ] Server running: `curl localhost:8080/health`
-- [ ] Data exists: `ls data/sensors.nq`
-- [ ] Query registers successfully
-- [ ] Query starts successfully
-- [ ] WebSocket receives results
+- [ ] Example client runs: `cargo run --example http_client_example`
+- [ ] Optional demo opens: `open examples/demo_dashboard.html`
 
 ---
 
-**Quick Start:** `./scripts/test_setup.sh` then `cargo run --bin http_server`
+**Quick Start:** `cargo run --bin http_server` then `cargo run --example http_client_example`

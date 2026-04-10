@@ -1,134 +1,86 @@
 # Getting Started with Janus
 
-This guide reflects the current state of the repository.
-
-Janus is primarily a backend Rust project. The most useful entry points today are:
-
-- `http_server` for the HTTP/WebSocket API
-- `stream_bus_cli` for replaying RDF files into storage and MQTT
-- the Rust test suite for validating the engine locally
+Janus is a Rust engine for querying historical and live RDF data through one
+Janus-QL model and one HTTP/WebSocket API.
 
 ## Prerequisites
 
-- Rust stable
-- Cargo
-- Git
-- Docker, if you want to run the local MQTT broker
+- Rust stable with Cargo
+- Docker and Docker Compose if you want the MQTT-backed replay flow
 
-## Clone and Build
+## Fastest Working Path
 
-```bash
-git clone https://github.com/SolidLabResearch/janus.git
-cd janus
-
-cargo build
-```
-
-## Run the Backend
-
-### Option 1: Start the HTTP API
+### 1. Build and test
 
 ```bash
-cargo run --bin http_server
+make build
+make test
 ```
 
-The server listens on `http://127.0.0.1:8080` by default.
-
-### Option 2: Inspect the replay CLI
+### 2. Start the HTTP server
 
 ```bash
-cargo run --bin stream_bus_cli -- --help
+cargo run --bin http_server -- --host 127.0.0.1 --port 8080 --storage-dir ./data/storage
 ```
 
-Typical usage:
+Verify it is up:
 
 ```bash
-cargo run --bin stream_bus_cli -- \
-  --input data/sensors.nq \
-  --broker none \
-  --rate 0
+curl http://127.0.0.1:8080/health
 ```
 
-## Run Tests
+### 3. Exercise the API
+
+The quickest end-to-end client is the example binary:
 
 ```bash
-cargo test --all-features
+cargo run --example http_client_example
 ```
 
-## Run Lint Checks
+That example covers query registration, start, stop, replay control, and
+WebSocket result consumption.
+
+## Optional Local Demo UI
+
+This repository keeps a small static demo at
+`examples/demo_dashboard.html` for manual browser testing.
+
+The maintained Svelte dashboard lives in the separate
+`SolidLabResearch/janus-dashboard` repository.
+
+## Main Binaries
+
+- `http_server`: REST and WebSocket API for query lifecycle and replay control
+- `stream_bus_cli`: replay and ingestion CLI for RDF event files
+
+## Common Commands
 
 ```bash
-cargo clippy --all-targets --all-features -- -D warnings
+make build
+make release
+make test
+make fmt
+make fmt-check
+make lint
+make check
+make ci-check
 ```
 
-## Quick HTTP Flow
+## Repository Layout
 
-1. Start the server:
+- `src/api`: query lifecycle orchestration
+- `src/http`: REST and WebSocket server
+- `src/parsing`: Janus-QL parsing
+- `src/execution`: historical execution
+- `src/stream`: live stream processing
+- `src/storage`: segmented RDF storage
+- `src/bin`: executable binaries
+- `examples`: runnable examples and a minimal static demo
+- `tests`: integration coverage
+- `docs`: current docs plus older design notes
 
-```bash
-cargo run --bin http_server
-```
+## Where to Read Next
 
-2. Register a query:
-
-```bash
-curl -X POST http://localhost:8080/api/queries \
-  -H "Content-Type: application/json" \
-  -d '{
-    "query_id": "demo_query",
-    "janusql": "PREFIX ex: <http://example.org/> SELECT ?s ?p ?o FROM NAMED WINDOW ex:w ON STREAM ex:sensorStream [START 0 END 9999999999999] WHERE { WINDOW ex:w { ?s ?p ?o . } }"
-  }'
-```
-
-3. Start the query:
-
-```bash
-curl -X POST http://localhost:8080/api/queries/demo_query/start
-```
-
-4. Subscribe to results:
-
-```text
-ws://localhost:8080/api/queries/demo_query/results
-```
-
-5. Stop the query when done:
-
-```bash
-curl -X POST http://localhost:8080/api/queries/demo_query/stop
-```
-
-## Project Layout
-
-```text
-janus/
-├── src/
-│   ├── api/           # Janus API coordination layer
-│   ├── core/          # RDF event types and encoding
-│   ├── execution/     # Historical execution and result conversion
-│   ├── http/          # HTTP and WebSocket server
-│   ├── parsing/       # JanusQL parser
-│   ├── querying/      # SPARQL execution adapters
-│   ├── storage/       # Segmented storage and indexing
-│   ├── stream/        # Live stream processing
-│   └── stream_bus/    # Replay and broker integration
-├── tests/             # Integration and module tests
-├── examples/          # Example clients and benchmarks
-├── docs/              # Documentation
-└── janus-dashboard/   # Lightweight local demo dashboard
-```
-
-## Dashboard Boundary
-
-This repository includes a small demo dashboard under `janus-dashboard/`, but the maintained dashboard lives separately:
-
-- `https://github.com/SolidLabResearch/janus-dashboard`
-
-If you are working on frontend product features, use the separate dashboard repository.
-
-## Recommended Next Reads
-
-- [START_HERE.md](./START_HERE.md)
-- [docs/README_HTTP_API.md](./docs/README_HTTP_API.md)
-- [docs/STREAM_BUS_CLI.md](./docs/STREAM_BUS_CLI.md)
-- [docs/README.md](./docs/README.md)
+- `README.md`
+- `START_HERE.md`
+- `docs/DOCUMENTATION_INDEX.md`
