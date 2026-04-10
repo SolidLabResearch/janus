@@ -24,6 +24,7 @@ pub struct StreamingSegmentedStorage {
     dictionary: Arc<RwLock<Dictionary>>,
     flush_handle: Option<JoinHandle<()>>,
     shutdown_signal: Arc<Mutex<bool>>,
+    background_flush_error: Arc<Mutex<Option<String>>>,
     config: StreamingConfig,
 }
 
@@ -64,6 +65,7 @@ impl StreamingSegmentedStorage {
             dictionary: Arc::new(RwLock::new(dictionary)),
             flush_handle: None,
             shutdown_signal: Arc::new(Mutex::new(false)),
+            background_flush_error: Arc::new(Mutex::new(None)),
             config,
         };
         storage.load_existing_segments()?;
@@ -75,6 +77,7 @@ impl StreamingSegmentedStorage {
         let batch_buffer_clone = Arc::clone(&self.batch_buffer);
         let segments_clone = Arc::clone(&self.segments);
         let shutdown_clone = Arc::clone(&self.shutdown_signal);
+        let background_error_clone = Arc::clone(&self.background_flush_error);
         let config_clone = self.config.clone();
         let dictionary_clone = Arc::clone(&self.dictionary);
 
@@ -83,6 +86,7 @@ impl StreamingSegmentedStorage {
                 batch_buffer_clone,
                 segments_clone,
                 shutdown_clone,
+                background_error_clone,
                 config_clone,
                 dictionary_clone,
             );
@@ -96,8 +100,17 @@ impl StreamingSegmentedStorage {
         &self.dictionary
     }
 
+    fn ensure_background_flush_healthy(&self) -> std::io::Result<()> {
+        let background_error = self.background_flush_error.lock().unwrap();
+        if let Some(message) = background_error.as_ref() {
+            return Err(std::io::Error::other(message.clone()));
+        }
+        Ok(())
+    }
+
     // Write an event into the storage system
     pub fn write(&self, event: Event) -> std::io::Result<()> {
+        self.ensure_background_flush_healthy()?;
         let event_size = std::mem::size_of::<Event>();
 
         {
@@ -147,6 +160,7 @@ impl StreamingSegmentedStorage {
     /// Force flush the current batch buffer to disk
     /// This is useful when you need to ensure data is persisted immediately
     pub fn flush(&self) -> std::io::Result<()> {
+        self.ensure_background_flush_healthy()?;
         self.flush_batch_buffer_to_segment()?;
         self.save_dictionary()?;
         Ok(())
@@ -287,6 +301,7 @@ impl StreamingSegmentedStorage {
 
     // Query events within a timestamp range from the storage system but result in encoded Events and not RDFEvents.
     pub fn query(&self, start_timestamp: u64, end_timestamp: u64) -> std::io::Result<Vec<Event>> {
+        self.ensure_background_flush_healthy()?;
         let mut results = Vec::new();
 
         // First try to query the immediate batch buffer which has the fastest visibility.
@@ -325,6 +340,7 @@ impl StreamingSegmentedStorage {
         start_timestamp: u64,
         end_timestamp: u64,
     ) -> std::io::Result<Vec<RDFEvent>> {
+        self.ensure_background_flush_healthy()?;
         let encoded_events = self.query(start_timestamp, end_timestamp)?;
         let dict = self.dictionary.read().unwrap();
         Ok(encoded_events.into_iter().map(|event| event.decode(&dict)).collect())
@@ -458,6 +474,7 @@ impl StreamingSegmentedStorage {
         batch_buffer: Arc<RwLock<BatchBuffer>>,
         segments: Arc<RwLock<Vec<EnhancedSegmentMetadata>>>,
         shutdown_signal: Arc<Mutex<bool>>,
+        background_flush_error: Arc<Mutex<Option<String>>>,
         config: StreamingConfig,
         dictionary: Arc<RwLock<Dictionary>>,
     ) {
@@ -479,14 +496,16 @@ impl StreamingSegmentedStorage {
             };
 
             if should_flush {
-                // TODO : Add better error handling here in this case
                 if let Err(e) = Self::flush_background(
                     batch_buffer.clone(),
                     segments.clone(),
                     config.clone(),
                     dictionary.clone(),
                 ) {
-                    eprintln!("Background flush failed: {}", e);
+                    let message = format!("Background flush failed: {}", e);
+                    eprintln!("{}", message);
+                    *background_flush_error.lock().unwrap() = Some(message);
+                    break;
                 }
             }
         }
@@ -516,90 +535,120 @@ impl StreamingSegmentedStorage {
             events
         };
 
-        // Create a new segment for these events
-        let segment_id = Self::current_timestamp();
-        let data_path = format!("{}/segment-{}.log", config.segment_base_path, segment_id);
-        let index_path = format!("{}/segment-{}.idx", config.segment_base_path, segment_id);
+        let flush_result = (|| -> std::io::Result<()> {
+            let segment_id = Self::current_timestamp();
+            let data_path = format!("{}/segment-{}.log", config.segment_base_path, segment_id);
+            let index_path = format!("{}/segment-{}.idx", config.segment_base_path, segment_id);
 
-        // Use buffered writers for performance (same as original implementation)
-        let mut data_file = BufWriter::new(std::fs::File::create(&data_path)?);
-        let mut index_file = BufWriter::new(std::fs::File::create(&index_path)?);
+            let mut data_file = BufWriter::new(std::fs::File::create(&data_path)?);
+            let mut index_file = BufWriter::new(std::fs::File::create(&index_path)?);
 
-        let mut index_directory = Vec::new();
-        let mut current_block_entries = Vec::new();
-        let mut current_block_min_ts = None;
-        let mut current_block_max_ts = 0u64;
-        let mut data_offset = 0u64;
+            let mut index_directory = Vec::new();
+            let mut current_block_entries = Vec::new();
+            let mut current_block_min_ts = None;
+            let mut current_block_max_ts = 0u64;
+            let mut data_offset = 0u64;
 
-        for (record_count, event) in events_to_flush.iter().enumerate() {
-            // Use the same serialization as the original
-            let record_bytes = Self::serialize_event_to_fixed_size_static(event);
-            data_file.write_all(&record_bytes)?;
+            for (record_count, event) in events_to_flush.iter().enumerate() {
+                let record_bytes = Self::serialize_event_to_fixed_size_static(event);
+                data_file.write_all(&record_bytes)?;
 
-            if record_count % config.sparse_interval == 0 {
-                let sparse_entry = (event.timestamp, data_offset);
+                if record_count % config.sparse_interval == 0 {
+                    let sparse_entry = (event.timestamp, data_offset);
 
-                if current_block_min_ts.is_none() {
-                    current_block_min_ts = Some(event.timestamp);
+                    if current_block_min_ts.is_none() {
+                        current_block_min_ts = Some(event.timestamp);
+                    }
+
+                    current_block_max_ts = event.timestamp;
+                    current_block_entries.push(sparse_entry);
+
+                    if current_block_entries.len() >= config.entries_per_index_block {
+                        let block_metadata = Self::flush_index_block_static(
+                            &mut index_file,
+                            &current_block_entries,
+                            current_block_min_ts.unwrap(),
+                            current_block_max_ts,
+                        )?;
+
+                        index_directory.push(block_metadata);
+
+                        current_block_entries.clear();
+                        current_block_min_ts = None;
+                    }
                 }
-
-                current_block_max_ts = event.timestamp;
-                current_block_entries.push(sparse_entry);
-
-                if current_block_entries.len() >= config.entries_per_index_block {
-                    let block_metadata = Self::flush_index_block_static(
-                        &mut index_file,
-                        &current_block_entries,
-                        current_block_min_ts.unwrap(),
-                        current_block_max_ts,
-                    )?;
-
-                    index_directory.push(block_metadata);
-
-                    current_block_entries.clear();
-                    current_block_min_ts = None;
-                }
+                data_offset += record_bytes.len() as u64;
             }
-            data_offset += record_bytes.len() as u64;
+
+            if !current_block_entries.is_empty() {
+                let block_metadata = Self::flush_index_block_static(
+                    &mut index_file,
+                    &current_block_entries,
+                    current_block_min_ts.unwrap(),
+                    current_block_max_ts,
+                )?;
+
+                index_directory.push(block_metadata);
+            }
+
+            data_file.flush()?;
+            index_file.flush()?;
+
+            let new_segment = EnhancedSegmentMetadata {
+                start_timstamp: events_to_flush.first().unwrap().timestamp,
+                end_timestamp: events_to_flush.last().unwrap().timestamp,
+                data_path,
+                index_path,
+                record_count: events_to_flush.len() as u64,
+                index_directory,
+            };
+
+            {
+                let mut segments = segments.write().unwrap();
+                segments.push(new_segment);
+                segments.sort_by_key(|s| s.start_timstamp);
+            }
+
+            let dict_path = std::path::Path::new(&config.segment_base_path).join("dictionary.bin");
+            let dict = dictionary.read().unwrap();
+            dict.save_to_file(&dict_path)?;
+
+            Ok(())
+        })();
+
+        if let Err(err) = flush_result {
+            Self::restore_failed_background_flush(&batch_buffer, &events_to_flush);
+            return Err(err);
         }
-
-        if !current_block_entries.is_empty() {
-            let block_metadata = Self::flush_index_block_static(
-                &mut index_file,
-                &current_block_entries,
-                current_block_min_ts.unwrap(),
-                current_block_max_ts,
-            )?;
-
-            index_directory.push(block_metadata);
-        }
-
-        data_file.flush()?;
-        index_file.flush()?;
-
-        // Add the new segment to the segments list
-        let new_segment = EnhancedSegmentMetadata {
-            start_timstamp: events_to_flush.first().unwrap().timestamp,
-            end_timestamp: events_to_flush.last().unwrap().timestamp,
-            data_path,
-            index_path,
-            record_count: events_to_flush.len() as u64,
-            index_directory,
-        };
-
-        {
-            let mut segments = segments.write().unwrap();
-            segments.push(new_segment);
-            // Keep segments sorted by start timestamp
-            segments.sort_by_key(|s| s.start_timstamp);
-        }
-
-        // Save dictionary after flush
-        let dict_path = std::path::Path::new(&config.segment_base_path).join("dictionary.bin");
-        let dict = dictionary.read().unwrap();
-        dict.save_to_file(&dict_path)?;
 
         Ok(())
+    }
+
+    fn restore_failed_background_flush(batch_buffer: &Arc<RwLock<BatchBuffer>>, events: &[Event]) {
+        if events.is_empty() {
+            return;
+        }
+
+        let mut buffer = batch_buffer.write().unwrap();
+        for event in events.iter().rev().cloned() {
+            buffer.events.push_front(event);
+            buffer.total_bytes += std::mem::size_of::<Event>();
+        }
+
+        let restored_oldest = events.first().map(|event| event.timestamp);
+        let restored_newest = events.last().map(|event| event.timestamp);
+
+        buffer.oldest_timestamp_bound = match (buffer.oldest_timestamp_bound, restored_oldest) {
+            (Some(existing), Some(restored)) => Some(existing.min(restored)),
+            (None, restored) => restored,
+            (existing, None) => existing,
+        };
+
+        buffer.newest_timestamp_bound = match (buffer.newest_timestamp_bound, restored_newest) {
+            (Some(existing), Some(restored)) => Some(existing.max(restored)),
+            (None, restored) => restored,
+            (existing, None) => existing,
+        };
     }
 
     fn load_existing_segments(&self) -> std::io::Result<()> {
@@ -733,15 +782,23 @@ impl StreamingSegmentedStorage {
 
     // Shutdown the storage system gracefully, ensuring all data is flushed to disk.
     pub fn shutdown(&mut self) -> std::io::Result<()> {
+        let background_error = self.ensure_background_flush_healthy().err();
         *self.shutdown_signal.lock().unwrap() = true;
 
         // Final Flush
 
-        self.flush_batch_buffer_to_segment()?;
+        if background_error.is_none() {
+            self.flush_batch_buffer_to_segment()?;
+        }
 
         if let Some(handle) = self.flush_handle.take() {
             handle.join().unwrap();
         }
+
+        if let Some(err) = background_error {
+            return Err(err);
+        }
+
         Ok(())
     }
 
