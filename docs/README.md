@@ -1,9 +1,6 @@
 # Janus Documentation
 
-This directory contains the project documentation for Janus.
-
-Some files here are current product documentation. Others are older design or
-milestone notes kept only for background context.
+This directory contains the current Janus documentation.
 
 ## Start Here
 
@@ -19,8 +16,6 @@ milestone notes kept only for background context.
 
 ## Supporting Material
 
-- [ARCHITECTURE.md](./ARCHITECTURE.md): older high-level architecture notes
-- [EXECUTION_ARCHITECTURE.md](./EXECUTION_ARCHITECTURE.md): historical execution design notes
 - [BENCHMARK_RESULTS.md](./BENCHMARK_RESULTS.md): benchmark data
 - [STREAM_BUS_CLI.md](./STREAM_BUS_CLI.md): replay and ingestion CLI
 
@@ -33,8 +28,3 @@ The maintained dashboard lives in:
 - `https://github.com/SolidLabResearch/janus-dashboard`
 
 The static demo in this repository is only for local manual backend testing.
-
-## Notes
-
-- The files listed under Start Here are the current sources of truth for `main`.
-- Older files are still useful for background, but they may describe previous milestones or implementation states.

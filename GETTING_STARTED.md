@@ -40,10 +40,7 @@ cargo run --example http_client_example
 That example covers query registration, start, stop, replay control, and
 WebSocket result consumption.
 
-## Optional Local Demo UI
-
-This repository keeps a small static demo at
-`examples/demo_dashboard.html` for manual browser testing.
+## Optional Frontend
 
 The maintained Svelte dashboard lives in the separate
 `SolidLabResearch/janus-dashboard` repository.
@@ -75,9 +72,9 @@ make ci-check
 - `src/stream`: live stream processing
 - `src/storage`: segmented RDF storage
 - `src/bin`: executable binaries
-- `examples`: runnable examples and a minimal static demo
+- `examples`: runnable examples, including the HTTP client example
 - `tests`: integration coverage
-- `docs`: current docs plus older design notes
+- `docs`: current product docs plus a small amount of retained background material
 
 ## Where to Read Next
 

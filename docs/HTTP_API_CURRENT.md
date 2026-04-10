@@ -14,7 +14,41 @@ cargo run --bin http_server -- --host 127.0.0.1 --port 8080 --storage-dir ./data
 
 `GET /health`
 
-Returns a simple success payload.
+Returns a service health payload with storage background-flush status.
+
+Healthy response:
+
+```json
+{
+  "status": "ok",
+  "message": "Janus HTTP API is running",
+  "storage_status": "ok",
+  "storage_error": null
+}
+```
+
+If background storage flushing has failed, the endpoint returns HTTP `503
+Service Unavailable` with:
+
+```json
+{
+  "status": "degraded",
+  "message": "Janus HTTP API is running with storage errors",
+  "storage_status": "error",
+  "storage_error": "Background flush failed: ..."
+}
+```
+
+### Ops Status
+
+`GET /ops/status`
+
+Returns a richer operational snapshot with:
+
+- overall service status
+- storage background-flush health
+- replay metrics
+- query lifecycle counts
 
 ### Register Query
 

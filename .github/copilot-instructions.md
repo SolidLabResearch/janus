@@ -186,7 +186,6 @@ Minimal dependency philosophy:
 - `src/storage/indexing/dictionary.rs` (172 lines) - Dictionary encoding
 - `tests/dictionary_encoding_test.rs` (624 lines) - Comprehensive integration tests
 - `BENCHMARK_RESULTS.md` - Performance metrics and analysis
-- `ARCHITECTURE.md` - High-level design (note: mentions TypeScript, but actual impl is Rust)
 - `Makefile` - Common development commands
 
 # Copilot Instructions

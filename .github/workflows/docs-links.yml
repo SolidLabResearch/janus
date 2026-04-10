@@ -1,0 +1,20 @@
+name: Docs Link Check
+
+on:
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - "**/*.md"
+      - ".github/workflows/docs-links.yml"
+      - "scripts/check_doc_links.sh"
+
+jobs:
+  docs-links:
+    name: Validate Markdown Links
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check local markdown links
+        run: bash scripts/check_doc_links.sh

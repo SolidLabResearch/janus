@@ -96,11 +96,18 @@ curl -X POST http://localhost:8080/api/replay/stop
 curl http://localhost:8080/api/replay/status
 ```
 
+### Ops status
+
+```bash
+curl http://localhost:8080/ops/status
+```
+
 ## Endpoint Summary
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/health` | Health check |
+| GET | `/ops/status` | Detailed operational status |
 | POST | `/api/queries` | Register query |
 | GET | `/api/queries` | List queries |
 | GET | `/api/queries/:id` | Query details |
@@ -112,16 +119,9 @@ curl http://localhost:8080/api/replay/status
 | POST | `/api/replay/stop` | Stop replay |
 | GET | `/api/replay/status` | Replay status |
 
-## Local Demo Dashboard
+## Dashboard
 
-You can still use the demo HTML client included in this repository:
-
-```bash
-open examples/demo_dashboard.html
-```
-
-The maintained dashboard lives separately:
-
+The maintained production dashboard lives separately:
 - `https://github.com/SolidLabResearch/janus-dashboard`
 
 ## Related Docs
