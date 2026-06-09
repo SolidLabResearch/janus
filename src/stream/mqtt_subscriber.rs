@@ -16,7 +16,6 @@ use std::{
     },
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
-use tokio::runtime::Runtime;
 
 /// Configuration for MQTT subscriber
 #[derive(Debug, Clone)]
@@ -47,7 +46,6 @@ impl Default for MqttSubscriberConfig {
 /// MQTT Subscriber that feeds events to live query processor
 pub struct MqttSubscriber {
     config: MqttSubscriberConfig,
-    runtime: Arc<Runtime>,
     should_stop: Arc<AtomicBool>,
     events_received: Arc<Mutex<u64>>,
     errors: Arc<Mutex<u64>>,
@@ -79,17 +77,8 @@ impl std::error::Error for MqttSubscriberError {}
 impl MqttSubscriber {
     /// Create a new MQTT subscriber
     pub fn new(config: MqttSubscriberConfig) -> Self {
-        let runtime = Arc::new(
-            tokio::runtime::Builder::new_multi_thread()
-                .worker_threads(2)
-                .enable_all()
-                .build()
-                .expect("Failed to create Tokio runtime"),
-        );
-
         Self {
             config,
-            runtime,
             should_stop: Arc::new(AtomicBool::new(false)),
             events_received: Arc::new(Mutex::new(0)),
             errors: Arc::new(Mutex::new(0)),
@@ -112,7 +101,13 @@ impl MqttSubscriber {
         let events_received = Arc::clone(&self.events_received);
         let errors = Arc::clone(&self.errors);
 
-        self.runtime.block_on(async move {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .map_err(|e| MqttSubscriberError::RuntimeError(e.to_string()))?;
+
+        runtime.block_on(async move {
             let mut mqttoptions = MqttOptions::new(&config.client_id, &config.host, config.port);
             mqttoptions.set_keep_alive(Duration::from_secs(config.keep_alive_secs));
 

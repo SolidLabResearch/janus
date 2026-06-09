@@ -360,6 +360,58 @@ async fn test_stop_route_stops_running_query_and_delete_requires_stop() {
 }
 
 #[tokio::test]
+async fn test_replay_completion_clears_stream_bus_for_safe_shutdown() {
+    let server = spawn_test_server().await;
+    let replay_file = server.storage_dir.join("replay_input.nq");
+    fs::write(
+        &replay_file,
+        "<http://example.org/sensor1> <http://example.org/temperature> \"24.5\" <http://example.org/graph1> .\n",
+    )
+    .expect("failed to write replay input");
+
+    let start_response = server
+        .client
+        .post(format!("{}/api/replay/start", server.base_url))
+        .json(&json!({
+            "input_file": replay_file.to_string_lossy().to_string(),
+            "broker_type": "none",
+            "topics": ["sensors"],
+            "rate_of_publishing": 0,
+            "loop_file": false,
+            "add_timestamps": true
+        }))
+        .send()
+        .await
+        .expect("replay start request failed");
+    assert!(start_response.status().is_success());
+
+    let mut completed = false;
+    for _ in 0..40 {
+        let response = server
+            .client
+            .get(format!("{}/api/replay/status", server.base_url))
+            .send()
+            .await
+            .expect("replay status request failed");
+        assert!(response.status().is_success());
+        let body: Value = response.json().await.expect("invalid replay status response");
+        if body["is_running"] == Value::Bool(false) {
+            assert_eq!(body["events_read"], 1);
+            assert_eq!(body["events_stored"], 1);
+            completed = true;
+            break;
+        }
+        sleep(Duration::from_millis(50)).await;
+    }
+
+    assert!(completed, "replay should complete for a one-line input file");
+    assert!(
+        server.state.replay_state.lock().unwrap().stream_bus.is_none(),
+        "replay state should release the stream bus once replay completes"
+    );
+}
+
+#[tokio::test]
 async fn test_results_websocket_requires_running_query() {
     let server = spawn_test_server().await;
 

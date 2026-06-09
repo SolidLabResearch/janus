@@ -244,6 +244,12 @@ impl From<JanusApiError> for ApiError {
     }
 }
 
+fn schedule_stream_bus_drop(stream_bus: Arc<StreamBus>) {
+    std::thread::spawn(move || {
+        drop(stream_bus);
+    });
+}
+
 /// Create the HTTP server with all routes
 pub fn create_server(
     janus_api: Arc<JanusApi>,
@@ -604,37 +610,40 @@ async fn start_replay(
 
     let replay_state_clone = Arc::clone(&state.replay_state);
 
+    let old_stream_bus = replay_state.stream_bus.take();
+    replay_state.is_running = true;
+    replay_state.start_time = Some(Instant::now());
+    replay_state.input_file = Some(input_file_clone);
+    replay_state.stream_bus = Some(Arc::clone(&stream_bus));
+    replay_state.events_read = events_read;
+    replay_state.events_published = events_published;
+    replay_state.events_stored = events_stored;
+    replay_state.publish_errors = publish_errors;
+    replay_state.storage_errors = storage_errors;
+    drop(replay_state);
+
+    if let Some(bus) = old_stream_bus {
+        schedule_stream_bus_drop(bus);
+    }
+
     // Spawn replay in a blocking thread to avoid runtime conflict
     std::thread::spawn(move || {
         if let Err(e) = stream_bus_clone.start() {
             eprintln!("Stream bus replay error: {}", e);
         }
 
-        // Reset running state when finished
-        if let Ok(mut rs) = replay_state_clone.lock() {
+        let finished_bus = replay_state_clone.lock().ok().and_then(|mut rs| {
             rs.is_running = false;
             rs.start_time = None;
+            rs.input_file = None;
             println!("Stream bus replay finished");
+            rs.stream_bus.take()
+        });
+
+        if let Some(bus) = finished_bus {
+            schedule_stream_bus_drop(bus);
         }
     });
-
-    // Safely drop the old stream_bus if it exists, to avoid dropping a Runtime in async context
-    let old_stream_bus = replay_state.stream_bus.take();
-    if let Some(bus) = old_stream_bus {
-        tokio::task::spawn_blocking(move || {
-            drop(bus);
-        });
-    }
-
-    replay_state.is_running = true;
-    replay_state.start_time = Some(Instant::now());
-    replay_state.input_file = Some(input_file_clone);
-    replay_state.stream_bus = Some(stream_bus);
-    replay_state.events_read = events_read;
-    replay_state.events_published = events_published;
-    replay_state.events_stored = events_stored;
-    replay_state.publish_errors = publish_errors;
-    replay_state.storage_errors = storage_errors;
 
     Ok(Json(SuccessResponse {
         message: format!("Stream bus replay started with file: {}", payload.input_file),
@@ -651,15 +660,18 @@ async fn stop_replay(
         return Err(ApiError::BadRequest("Replay is not running".to_string()));
     }
 
-    // Stop the stream bus if it exists
-    if let Some(stream_bus) = &replay_state.stream_bus {
-        stream_bus.stop();
+    let stream_bus = replay_state.stream_bus.take();
+    if let Some(bus) = stream_bus.as_ref() {
+        bus.stop();
     }
-
     replay_state.is_running = false;
     replay_state.start_time = None;
     replay_state.input_file = None;
-    replay_state.stream_bus = None;
+    drop(replay_state);
+
+    if let Some(bus) = stream_bus {
+        schedule_stream_bus_drop(bus);
+    }
 
     Ok(Json(SuccessResponse { message: "Stream bus replay stopped".to_string() }))
 }

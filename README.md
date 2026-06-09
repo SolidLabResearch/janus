@@ -80,6 +80,7 @@ Janus uses dictionary encoding and segmented storage for high-throughput ingesti
 - Space efficiency: about 40% smaller encoded events
 
 Detailed benchmark data is in [docs/BENCHMARK_RESULTS.md](./docs/BENCHMARK_RESULTS.md).
+Current benchmark commands and scope are in [docs/BENCHMARKING.md](./docs/BENCHMARKING.md).
 
 ## Quick Start
 

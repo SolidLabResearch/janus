@@ -119,20 +119,19 @@ For benchmark reproducibility, document:
 
 ## Running Benchmarks
 
-To reproduce these results:
+To run the current benchmark harness:
 
 ```bash
-# Write performance
-cargo bench --bench write_benchmark --release
-
-# Read performance
-cargo bench --bench benchmark --release
-
-# Point query performance
-cargo bench --bench benchmark --release
+cargo bench --bench storage_write
+cargo bench --bench historical_fixed
+cargo bench --bench historical_sliding
+cargo bench --bench live_injection
+cargo bench --bench hybrid_baseline
+cargo bench --bench janusql_e2e
+cargo bench --bench janusql_live_mqtt_e2e
 ```
 
-For detailed testing instructions, see [WRITING_BENCHMARKS.md](./WRITING_BENCHMARKS.md).
+For detailed testing instructions, see [BENCHMARKING.md](./BENCHMARKING.md).
 
 ## Historical Results
 
@@ -145,11 +144,11 @@ This section will track benchmark results across releases:
 
 When adding new benchmark results:
 
-1. Use release build: `--release`
+1. Use `cargo bench` so the optimized bench profile is active
 2. Run on quiet system (minimal background load)
 3. Include dataset size and query pattern
 4. Document hardware configuration
 5. Report mean and variance
 6. Submit results via PR with hardware details
 
-See [WRITING_BENCHMARKS.md](./WRITING_BENCHMARKS.md) for comprehensive benchmark testing guide.
+See [BENCHMARKING.md](./BENCHMARKING.md) for the current benchmark guide.

@@ -29,10 +29,7 @@ fn create_test_storage_with_data() -> Result<Arc<StreamingSegmentedStorage>, std
         entries_per_index_block: 100,
     };
 
-    let mut storage = StreamingSegmentedStorage::new(config)?;
-
-    // Start background flushing
-    storage.start_background_flushing();
+    let storage = StreamingSegmentedStorage::new(config)?;
 
     // Add some test data (timestamps from 100 to 5000 ms)
     for i in 1..=50 {
@@ -42,12 +39,11 @@ fn create_test_storage_with_data() -> Result<Arc<StreamingSegmentedStorage>, std
             &format!("http://example.org/sensor{}", i % 5),
             "http://example.org/temperature",
             &format!("{}", 20 + (i % 10)),
-            "http://example.org/graph1",
+            "http://example.org/sensors",
         )?;
     }
 
-    // Wait for background flush to complete
-    std::thread::sleep(Duration::from_secs(2));
+    storage.flush()?;
 
     Ok(Arc::new(storage))
 }
@@ -171,14 +167,11 @@ fn test_historical_fixed_window_query() {
 
     println!("Total results received: {}", results.len());
 
-    // Note: Historical queries may not return results if storage hasn't flushed yet
-    // This is a known limitation of the current test setup
-    if results.is_empty() {
-        println!("WARNING: No historical results received - storage may not have flushed data yet");
-        println!("This test is expected to pass once storage flushing is more reliable");
-        // Don't fail the test - it's a test infrastructure issue, not API issue
-        return;
-    }
+    assert!(!results.is_empty(), "Historical query should emit at least one result");
+    assert!(
+        results.iter().any(|result| !result.bindings.is_empty()),
+        "Historical query should return at least one binding"
+    );
 
     // Verify all results are historical
     for result in &results {

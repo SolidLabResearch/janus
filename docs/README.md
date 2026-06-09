@@ -17,6 +17,7 @@ This directory contains the current Janus documentation.
 ## Supporting Material
 
 - [BENCHMARK_RESULTS.md](./BENCHMARK_RESULTS.md): benchmark data
+- [BENCHMARKING.md](./BENCHMARKING.md): current benchmark harness and run commands
 - [STREAM_BUS_CLI.md](./STREAM_BUS_CLI.md): replay and ingestion CLI
 
 ## Repo Boundary

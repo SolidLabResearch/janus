@@ -22,7 +22,7 @@ curl -X POST http://localhost:8080/api/queries \
   -H "Content-Type: application/json" \
   -d '{
     "query_id": "test_query",
-    "janusql": "PREFIX ex: <http://example.org/> SELECT ?s ?p ?o FROM NAMED WINDOW ex:w ON STREAM ex:sensorStream [START 0 END 9999999999999] WHERE { WINDOW ex:w { ?s ?p ?o . } }"
+    "janusql": "PREFIX ex: <http://example.org/> SELECT ?s ?p ?o FROM NAMED WINDOW ex:w ON STREAM ex:graph1 [START 0 END 9999999999999] WHERE { WINDOW ex:w { ?s ?p ?o . } }"
   }'
 ```
 

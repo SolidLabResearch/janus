@@ -109,6 +109,10 @@ struct QueryResultMessage {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let base_url = "http://127.0.0.1:8080";
     let client = reqwest::Client::new();
+    let mut had_errors = false;
+    let run_id = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_secs();
+    let sensor_query_id = format!("sensor_query_{run_id}");
+    let live_query_id = format!("live_sensor_query_{run_id}");
 
     println!("╔════════════════════════════════════════════════════════════════╗");
     println!("║         Janus HTTP API Client Example                         ║");
@@ -155,11 +159,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("2. Register a Query");
     println!("   POST {}/api/queries", base_url);
     let query_request = RegisterQueryRequest {
-        query_id: "sensor_query_1".to_string(),
+        query_id: sensor_query_id.clone(),
         janusql: r#"
             PREFIX ex: <http://example.org/>
             SELECT ?sensor ?temp ?time
-            FROM NAMED WINDOW ex:histWindow ON STREAM ex:sensorStream [START 1704067200 END 1704153600]
+            FROM NAMED WINDOW ex:histWindow ON STREAM ex:graph1 [START 0 END 9999999999999]
             WHERE {
                 WINDOW ex:histWindow {
                     ?sensor ex:temperature ?temp .
@@ -184,6 +188,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         let error_text = response.text().await?;
         println!("   ✗ Registration failed: {}", error_text);
+        had_errors = true;
     }
     println!();
 
@@ -191,11 +196,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("3. Register Another Query (Live Stream)");
     println!("   POST {}/api/queries", base_url);
     let live_query_request = RegisterQueryRequest {
-        query_id: "live_sensor_query".to_string(),
+        query_id: live_query_id.clone(),
         janusql: r#"
             PREFIX ex: <http://example.org/>
             SELECT ?sensor ?temp
-            FROM NAMED WINDOW ex:liveWindow ON STREAM ex:sensorStream [RANGE 10000 STEP 5000]
+            FROM NAMED WINDOW ex:liveWindow ON STREAM ex:graph1 [RANGE 10000 STEP 5000]
             WHERE {
                 WINDOW ex:liveWindow {
                     ?sensor ex:temperature ?temp .
@@ -219,6 +224,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         let error_text = response.text().await?;
         println!("   ✗ Registration failed: {}", error_text);
+        had_errors = true;
     }
     println!();
 
@@ -235,13 +241,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     } else {
         println!("   ✗ Failed to list queries");
+        had_errors = true;
     }
     println!();
 
     // 5. Get Query Details
     println!("5. Get Query Details");
-    println!("   GET {}/api/queries/sensor_query_1", base_url);
-    let response = client.get(format!("{}/api/queries/sensor_query_1", base_url)).send().await?;
+    println!("   GET {}/api/queries/{}", base_url, sensor_query_id);
+    let response = client
+        .get(format!("{}/api/queries/{}", base_url, sensor_query_id))
+        .send()
+        .await?;
 
     if response.status().is_success() {
         let body: QueryDetailsResponse = response.json().await?;
@@ -253,6 +263,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("   ✓ Status: {}", body.status);
     } else {
         println!("   ✗ Failed to get query details");
+        had_errors = true;
     }
     println!();
 
@@ -280,6 +291,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         let error_text = response.text().await?;
         println!("   ✗ Replay start failed: {}", error_text);
+        had_errors = true;
     }
     println!();
 
@@ -300,14 +312,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("   ✓ Elapsed: {:.2}s", body.elapsed_seconds);
     } else {
         println!("   ✗ Failed to get replay status");
+        had_errors = true;
     }
     println!();
 
     // 8. Start Query Execution
     println!("8. Start Query Execution");
-    println!("   POST {}/api/queries/sensor_query_1/start", base_url);
+    println!("   POST {}/api/queries/{}/start", base_url, sensor_query_id);
     let response = client
-        .post(format!("{}/api/queries/sensor_query_1/start", base_url))
+        .post(format!("{}/api/queries/{}/start", base_url, sensor_query_id))
         .send()
         .await?;
 
@@ -317,17 +330,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         let error_text = response.text().await?;
         println!("   ✗ Query start failed: {}", error_text);
+        had_errors = true;
     }
     println!();
 
     // 9. WebSocket Connection for Streaming Results
     println!("9. Connect to WebSocket for Query Results");
-    println!("   WS ws://127.0.0.1:8080/api/queries/sensor_query_1/results");
+    println!("   WS ws://127.0.0.1:8080/api/queries/{}/results", sensor_query_id);
     println!("   (Streaming results for 5 seconds...)");
 
-    let ws_url = "ws://127.0.0.1:8080/api/queries/sensor_query_1/results";
+    let ws_url = format!("ws://127.0.0.1:8080/api/queries/{}/results", sensor_query_id);
 
-    match tokio_tungstenite::connect_async(ws_url).await {
+    match tokio_tungstenite::connect_async(&ws_url).await {
         Ok((mut ws_stream, _)) => {
             use futures_util::StreamExt;
             use tokio_tungstenite::tungstenite::Message;
@@ -357,6 +371,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     }
                                     Err(e) => {
                                         println!("   ✗ Failed to parse result: {}", e);
+                                        had_errors = true;
                                     }
                                 }
                             }
@@ -366,6 +381,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             }
                             Some(Err(e)) => {
                                 println!("   ✗ WebSocket error: {}", e);
+                                had_errors = true;
                                 break;
                             }
                             None => {
@@ -383,18 +399,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
 
             println!("   ✓ Received {} results", result_count);
+            if result_count == 0 {
+                println!("   ✗ Query returned no result messages");
+                had_errors = true;
+            }
         }
         Err(e) => {
             println!("   ✗ WebSocket connection failed: {}", e);
-            println!("   (This is expected if the query has no results yet)");
+            println!("   (The query should already have results at this point)");
+            had_errors = true;
         }
     }
     println!();
 
     // 10. Stop Query
     println!("10. Stop Query Execution");
-    println!("   DELETE {}/api/queries/sensor_query_1", base_url);
-    let response = client.delete(format!("{}/api/queries/sensor_query_1", base_url)).send().await?;
+    println!("   POST {}/api/queries/{}/stop", base_url, sensor_query_id);
+    let response = client
+        .post(format!("{}/api/queries/{}/stop", base_url, sensor_query_id))
+        .send()
+        .await?;
 
     if response.status().is_success() {
         let body: SuccessResponse = response.json().await?;
@@ -402,22 +426,61 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         let error_text = response.text().await?;
         println!("   ✗ Query stop failed: {}", error_text);
+        had_errors = true;
     }
     println!();
 
-    // 11. Stop Replay
-    println!("11. Stop Stream Bus Replay");
-    println!("   POST {}/api/replay/stop", base_url);
-    let response = client.post(format!("{}/api/replay/stop", base_url)).send().await?;
+    // 11. Delete Registered Queries
+    println!("11. Delete Registered Queries");
+    for query_id in [&sensor_query_id, &live_query_id] {
+        println!("   DELETE {}/api/queries/{}", base_url, query_id);
+        let response =
+            client.delete(format!("{}/api/queries/{}", base_url, query_id)).send().await?;
+
+        if response.status().is_success() {
+            let body: SuccessResponse = response.json().await?;
+            println!("   ✓ {}", body.message);
+        } else {
+            let error_text = response.text().await?;
+            println!("   ✗ Query delete failed for {}: {}", query_id, error_text);
+            had_errors = true;
+        }
+    }
+    println!();
+
+    // 12. Replay Cleanup
+    println!("12. Replay Cleanup");
+    println!("   GET {}/api/replay/status", base_url);
+    let response = client.get(format!("{}/api/replay/status", base_url)).send().await?;
 
     if response.status().is_success() {
-        let body: SuccessResponse = response.json().await?;
-        println!("   ✓ {}", body.message);
+        let body: ReplayStatusResponse = response.json().await?;
+        if body.is_running {
+            println!("   POST {}/api/replay/stop", base_url);
+            let stop_response = client.post(format!("{}/api/replay/stop", base_url)).send().await?;
+            if stop_response.status().is_success() {
+                let body: SuccessResponse = stop_response.json().await?;
+                println!("   ✓ {}", body.message);
+            } else {
+                let error_text = stop_response.text().await?;
+                println!("   ✗ Replay stop failed: {}", error_text);
+                had_errors = true;
+            }
+        } else {
+            println!("   ✓ Replay already completed");
+        }
     } else {
-        let error_text = response.text().await?;
-        println!("   ✗ Replay stop failed: {}", error_text);
+        println!("   ✗ Failed to get replay status");
+        had_errors = true;
     }
     println!();
+
+    if had_errors {
+        println!("╔════════════════════════════════════════════════════════════════╗");
+        println!("║             Example Completed With Errors                      ║");
+        println!("╚════════════════════════════════════════════════════════════════╝");
+        return Err("one or more HTTP example steps failed".into());
+    }
 
     println!("╔════════════════════════════════════════════════════════════════╗");
     println!("║              Example Completed Successfully                    ║");
