@@ -116,6 +116,7 @@ pub mod http;
 
 /// Janus-specific SPARQL extension functions.
 pub mod extensions;
+pub mod paper_bench;
 
 pub mod error {
     //! Error types and result definitions
