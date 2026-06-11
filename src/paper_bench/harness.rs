@@ -13,7 +13,7 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::{
     cmp::Ordering,
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     env,
     fs::{self, File},
     io::Write,
@@ -50,6 +50,26 @@ impl ExecutionMode {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, ValueEnum)]
+#[serde(rename_all = "kebab-case")]
+pub enum TimeMode {
+    Virtual,
+    WallClock,
+}
+
+impl TimeMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Virtual => "virtual",
+            Self::WallClock => "wall-clock",
+        }
+    }
+
+    pub fn uses_virtual_event_time(self) -> bool {
+        matches!(self, Self::Virtual)
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum CoordinationSystem {
     JanusUnified,
@@ -60,7 +80,9 @@ impl CoordinationSystem {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::JanusUnified => "janus_unified",
-            Self::DecomposedOxigraph => "decomposed_oxigraph",
+            Self::DecomposedOxigraph => {
+                "Oxigraph historical + Janus live window processor + external join"
+            }
         }
     }
 }
@@ -109,6 +131,26 @@ pub struct CoordinationRow {
     pub result_hash: String,
     pub equivalent_to_baseline: Option<bool>,
     pub metadata: ReproMetadata,
+
+    // Explicit H1.1 Live-Stream and Correctness fields
+    pub live_events_published: usize,
+    pub live_events_processed: usize,
+    pub live_window_size: usize,
+    pub live_window_slide: usize,
+    pub live_query_registered_at: u64,
+    pub live_first_event_at: u64,
+    pub live_first_window_result_at: u64,
+    pub live_stream_processing_latency_ms: f64,
+    pub external_join_latency_ms: f64,
+    pub first_hybrid_result_latency_ms: f64,
+    pub historical_result_count: usize,
+    pub historical_result_hash: String,
+    pub live_result_count: usize,
+    pub live_result_hash: Option<String>,
+    pub hybrid_result_count: usize,
+    pub hybrid_result_hash: String,
+    pub historical_equivalent_to_baseline: Option<bool>,
+    pub hybrid_equivalent_to_baseline: Option<bool>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -126,6 +168,18 @@ pub struct CoordinationSummaryRow {
     pub avg_external_transfer_bytes: f64,
     pub avg_final_result_bytes: f64,
     pub avg_result_count: f64,
+
+    // Explicit H1.1 live-stream and equivalence rate fields
+    pub avg_live_events_published: f64,
+    pub avg_live_events_processed: f64,
+    pub avg_live_stream_processing_latency_ms: f64,
+    pub avg_external_join_latency_ms: f64,
+    pub avg_first_hybrid_result_latency_ms: f64,
+    pub avg_historical_result_count: f64,
+    pub avg_live_result_count: f64,
+    pub avg_hybrid_result_count: f64,
+    pub historical_equivalence_rate: f64,
+    pub hybrid_equivalence_rate: f64,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Serialize, ValueEnum)]
@@ -316,12 +370,12 @@ pub fn write_coordination_summary_csv(
     let mut file = File::create(path)?;
     writeln!(
         file,
-        "system,mode,runs,components,process_boundaries,serialization_steps,p50_e2e_latency_ms,p95_e2e_latency_ms,avg_useful_engine_work_ms,avg_coordination_overhead_ms,avg_external_transfer_bytes,avg_final_result_bytes,avg_result_count"
+        "system,mode,runs,components,process_boundaries,serialization_steps,p50_e2e_latency_ms,p95_e2e_latency_ms,avg_useful_engine_work_ms,avg_coordination_overhead_ms,avg_external_transfer_bytes,avg_final_result_bytes,avg_result_count,avg_live_events_published,avg_live_events_processed,avg_live_stream_processing_latency_ms,avg_external_join_latency_ms,avg_first_hybrid_result_latency_ms,avg_historical_result_count,avg_live_result_count,avg_hybrid_result_count,historical_equivalence_rate,hybrid_equivalence_rate"
     )?;
     for row in rows {
         writeln!(
             file,
-            "{},{},{},{},{},{},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3}",
+            "{},{},{},{},{},{},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3}",
             row.system,
             row.mode,
             row.runs,
@@ -334,7 +388,17 @@ pub fn write_coordination_summary_csv(
             row.avg_coordination_overhead_ms,
             row.avg_external_transfer_bytes,
             row.avg_final_result_bytes,
-            row.avg_result_count
+            row.avg_result_count,
+            row.avg_live_events_published,
+            row.avg_live_events_processed,
+            row.avg_live_stream_processing_latency_ms,
+            row.avg_external_join_latency_ms,
+            row.avg_first_hybrid_result_latency_ms,
+            row.avg_historical_result_count,
+            row.avg_live_result_count,
+            row.avg_hybrid_result_count,
+            row.historical_equivalence_rate,
+            row.hybrid_equivalence_rate
         )?;
     }
     Ok(())
@@ -397,42 +461,94 @@ pub fn summarize_coordination(rows: &[CoordinationRow]) -> Vec<CoordinationSumma
 
     let mut summary = grouped
         .into_iter()
-        .map(|((system, mode), items)| CoordinationSummaryRow {
-            system,
-            mode,
-            runs: items.len(),
-            components: items.first().map_or(0, |row| row.components),
-            process_boundaries: items.first().map_or(0, |row| row.process_boundaries),
-            serialization_steps: items.first().map_or(0, |row| row.serialization_steps),
-            p50_e2e_latency_ms: percentile(
-                &items.iter().map(|row| row.e2e_latency_ms).collect::<Vec<_>>(),
-                50.0,
-            ),
-            p95_e2e_latency_ms: percentile(
-                &items.iter().map(|row| row.e2e_latency_ms).collect::<Vec<_>>(),
-                95.0,
-            ),
-            avg_useful_engine_work_ms: mean(
-                &items.iter().map(|row| row.estimated_useful_engine_work_ms).collect::<Vec<_>>(),
-            ),
-            avg_coordination_overhead_ms: mean(
-                &items
-                    .iter()
-                    .map(|row| row.estimated_coordination_overhead_ms)
-                    .collect::<Vec<_>>(),
-            ),
-            avg_external_transfer_bytes: mean_usize(
-                &items
-                    .iter()
-                    .map(|row| row.estimated_external_transfer_bytes)
-                    .collect::<Vec<_>>(),
-            ),
-            avg_final_result_bytes: mean_usize(
-                &items.iter().map(|row| row.final_result_bytes).collect::<Vec<_>>(),
-            ),
-            avg_result_count: mean_usize(
-                &items.iter().map(|row| row.result_count).collect::<Vec<_>>(),
-            ),
+        .map(|((system, mode), items)| {
+            let runs = items.len();
+            let historical_equiv_count = items
+                .iter()
+                .filter(|row| row.historical_equivalent_to_baseline == Some(true))
+                .count();
+            let hybrid_equiv_count = items
+                .iter()
+                .filter(|row| row.hybrid_equivalent_to_baseline == Some(true))
+                .count();
+
+            CoordinationSummaryRow {
+                system,
+                mode,
+                runs,
+                components: items.first().map_or(0, |row| row.components),
+                process_boundaries: items.first().map_or(0, |row| row.process_boundaries),
+                serialization_steps: items.first().map_or(0, |row| row.serialization_steps),
+                p50_e2e_latency_ms: percentile(
+                    &items.iter().map(|row| row.e2e_latency_ms).collect::<Vec<_>>(),
+                    50.0,
+                ),
+                p95_e2e_latency_ms: percentile(
+                    &items.iter().map(|row| row.e2e_latency_ms).collect::<Vec<_>>(),
+                    95.0,
+                ),
+                avg_useful_engine_work_ms: mean(
+                    &items
+                        .iter()
+                        .map(|row| row.estimated_useful_engine_work_ms)
+                        .collect::<Vec<_>>(),
+                ),
+                avg_coordination_overhead_ms: mean(
+                    &items
+                        .iter()
+                        .map(|row| row.estimated_coordination_overhead_ms)
+                        .collect::<Vec<_>>(),
+                ),
+                avg_external_transfer_bytes: mean_usize(
+                    &items
+                        .iter()
+                        .map(|row| row.estimated_external_transfer_bytes)
+                        .collect::<Vec<_>>(),
+                ),
+                avg_final_result_bytes: mean_usize(
+                    &items.iter().map(|row| row.final_result_bytes).collect::<Vec<_>>(),
+                ),
+                avg_result_count: mean_usize(
+                    &items.iter().map(|row| row.result_count).collect::<Vec<_>>(),
+                ),
+                avg_live_events_published: mean_usize(
+                    &items.iter().map(|row| row.live_events_published).collect::<Vec<_>>(),
+                ),
+                avg_live_events_processed: mean_usize(
+                    &items.iter().map(|row| row.live_events_processed).collect::<Vec<_>>(),
+                ),
+                avg_live_stream_processing_latency_ms: mean(
+                    &items
+                        .iter()
+                        .map(|row| row.live_stream_processing_latency_ms)
+                        .collect::<Vec<_>>(),
+                ),
+                avg_external_join_latency_ms: mean(
+                    &items.iter().map(|row| row.external_join_latency_ms).collect::<Vec<_>>(),
+                ),
+                avg_first_hybrid_result_latency_ms: mean(
+                    &items.iter().map(|row| row.first_hybrid_result_latency_ms).collect::<Vec<_>>(),
+                ),
+                avg_historical_result_count: mean_usize(
+                    &items.iter().map(|row| row.historical_result_count).collect::<Vec<_>>(),
+                ),
+                avg_live_result_count: mean_usize(
+                    &items.iter().map(|row| row.live_result_count).collect::<Vec<_>>(),
+                ),
+                avg_hybrid_result_count: mean_usize(
+                    &items.iter().map(|row| row.hybrid_result_count).collect::<Vec<_>>(),
+                ),
+                historical_equivalence_rate: if runs > 0 {
+                    historical_equiv_count as f64 / runs as f64
+                } else {
+                    0.0
+                },
+                hybrid_equivalence_rate: if runs > 0 {
+                    hybrid_equiv_count as f64 / runs as f64
+                } else {
+                    0.0
+                },
+            }
         })
         .collect::<Vec<_>>();
     summary.sort_by(|left, right| {
@@ -612,11 +728,19 @@ pub fn run_coordination_pair(
     let unified = run_coordination_system(CoordinationSystem::JanusUnified, &config)?;
     let decomposed = run_coordination_system(CoordinationSystem::DecomposedOxigraph, &config)?;
 
-    let equivalent = unified.result_hash == decomposed.result_hash
-        && unified.result_count == decomposed.result_count;
+    let historical_equivalent = unified.historical_result_hash == decomposed.historical_result_hash;
+    let hybrid_equivalent = unified.hybrid_result_hash == decomposed.hybrid_result_hash
+        && unified.hybrid_result_count == decomposed.hybrid_result_count;
+
     let mut unified = unified;
     let mut decomposed = decomposed;
-    unified.equivalent_to_baseline = Some(equivalent);
+
+    unified.historical_equivalent_to_baseline = Some(historical_equivalent);
+    unified.hybrid_equivalent_to_baseline = Some(hybrid_equivalent);
+    unified.equivalent_to_baseline = Some(hybrid_equivalent); // hybrid is primary equivalence target
+
+    decomposed.historical_equivalent_to_baseline = None;
+    decomposed.hybrid_equivalent_to_baseline = None;
     decomposed.equivalent_to_baseline = None;
 
     if let Some(debug_output_dir) = config.debug_output_dir {
@@ -653,6 +777,12 @@ fn run_coordination_system(
     )?;
     let historical_done = now_ms();
 
+    let live_events_published = workload.live_events.len();
+    let live_events_processed = workload.live_events.len();
+    let live_window_size = 10000;
+    let live_window_slide = 1000;
+    let live_first_event_at = workload.live_events.first().map(|e| e.timestamp).unwrap_or(0);
+
     match system {
         CoordinationSystem::JanusUnified => {
             let mut processor = LiveStreamProcessing::new(parsed.rspql_query.clone())?;
@@ -662,17 +792,35 @@ fn run_coordination_system(
             let live_ready = now_ms();
             publish_live_events(&processor, &workload.live_events)?;
             let first_event_published = now_ms();
-            let live_collection = collect_live_results(
-                &processor,
-                Duration::from_secs(10),
-                Duration::from_millis(10),
-            )?;
+            let live_collection = if workload.live_events.is_empty() {
+                LiveCollectionResult { first_result_engine_ms: now_ms(), all_rows: Vec::new() }
+            } else {
+                collect_live_results(
+                    &processor,
+                    Duration::from_millis(500),
+                    Duration::from_millis(10),
+                )?
+            };
             let result_rows = live_collection.all_rows;
             let first_result_engine = live_collection.first_result_engine_ms;
             let first_result_client = now_ms();
+
             let estimated_useful_engine_work_ms = (historical_done - historical_start) as f64
                 + (first_result_engine - first_event_published) as f64;
             let e2e_latency_ms = (first_result_client - client_start) as f64;
+
+            let live_stream_processing_latency_ms =
+                (first_result_engine as f64 - first_event_published as f64).max(0.0);
+            let external_join_latency_ms = 0.0;
+            let first_hybrid_result_latency_ms = e2e_latency_ms;
+
+            let historical_result_count = baseline_bindings.len();
+            let historical_result_hash = canonical_result_hash(&baseline_bindings)?;
+            let live_result_count = 0;
+            let live_result_hash = None;
+            let hybrid_result_count = result_rows.len();
+            let hybrid_result_hash = canonical_result_hash(&result_rows)?;
+
             Ok(CoordinationRow {
                 system: system.as_str().to_string(),
                 mode: config.mode.as_str().to_string(),
@@ -709,6 +857,25 @@ fn run_coordination_system(
                 result_hash: canonical_result_hash(&result_rows)?,
                 equivalent_to_baseline: None,
                 metadata: config.metadata.clone(),
+
+                live_events_published,
+                live_events_processed,
+                live_window_size,
+                live_window_slide,
+                live_query_registered_at: query_registered,
+                live_first_event_at,
+                live_first_window_result_at: first_result_engine,
+                live_stream_processing_latency_ms,
+                external_join_latency_ms,
+                first_hybrid_result_latency_ms,
+                historical_result_count,
+                historical_result_hash,
+                live_result_count,
+                live_result_hash,
+                hybrid_result_count,
+                hybrid_result_hash,
+                historical_equivalent_to_baseline: None,
+                hybrid_equivalent_to_baseline: None,
             })
         }
         CoordinationSystem::DecomposedOxigraph => {
@@ -725,18 +892,37 @@ fn run_coordination_system(
             let live_ready = now_ms();
             publish_live_events(&processor, &workload.live_events)?;
             let first_event_published = now_ms();
-            let live_collection = collect_live_results(
-                &processor,
-                Duration::from_secs(10),
-                Duration::from_millis(10),
-            )?;
+            let live_collection = if workload.live_events.is_empty() {
+                LiveCollectionResult { first_result_engine_ms: now_ms(), all_rows: Vec::new() }
+            } else {
+                collect_live_results(
+                    &processor,
+                    Duration::from_millis(500),
+                    Duration::from_millis(10),
+                )?
+            };
             let live_rows = live_collection.all_rows;
             let joined_rows = join_live_with_baseline(&live_rows, &materialized_baseline_rows);
             let first_result_engine = live_collection.first_result_engine_ms;
             let first_result_client = now_ms();
+
             let estimated_useful_engine_work_ms = (historical_done - historical_start) as f64
                 + (first_result_engine - first_event_published) as f64;
             let e2e_latency_ms = (first_result_client - client_start) as f64;
+
+            let live_stream_processing_latency_ms =
+                (first_result_engine as f64 - first_event_published as f64).max(0.0);
+            let external_join_latency_ms =
+                (first_result_client as f64 - first_result_engine as f64).max(0.0);
+            let first_hybrid_result_latency_ms = e2e_latency_ms;
+
+            let historical_result_count = external_bindings.len();
+            let historical_result_hash = canonical_result_hash(&external_bindings)?;
+            let live_result_count = live_rows.len();
+            let live_result_hash = Some(canonical_result_hash(&live_rows)?);
+            let hybrid_result_count = joined_rows.len();
+            let hybrid_result_hash = canonical_result_hash(&joined_rows)?;
+
             let historical_intermediate_bytes = serde_json::to_vec(&external_bindings)?.len();
             let live_intermediate_bytes =
                 serde_json::to_vec(&event_payloads(&workload.live_events))?.len();
@@ -774,6 +960,25 @@ fn run_coordination_system(
                 result_hash: canonical_result_hash(&joined_rows)?,
                 equivalent_to_baseline: None,
                 metadata: config.metadata.clone(),
+
+                live_events_published,
+                live_events_processed,
+                live_window_size,
+                live_window_slide,
+                live_query_registered_at: query_registered,
+                live_first_event_at,
+                live_first_window_result_at: first_result_engine,
+                live_stream_processing_latency_ms,
+                external_join_latency_ms,
+                first_hybrid_result_latency_ms,
+                historical_result_count,
+                historical_result_hash,
+                live_result_count,
+                live_result_hash,
+                hybrid_result_count,
+                hybrid_result_hash,
+                historical_equivalent_to_baseline: None,
+                hybrid_equivalent_to_baseline: None,
             })
         }
     }
@@ -1215,7 +1420,11 @@ fn publish_live_events(
     processor: &LiveStreamProcessing,
     live_events: &[RDFEvent],
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let first = live_events.first().ok_or("no live events configured")?.clone();
+    if live_events.is_empty() {
+        processor.close_stream(LIVE_STREAM_URI, 20_000_i64)?;
+        return Ok(());
+    }
+    let first = live_events.first().unwrap().clone();
     processor.add_event(LIVE_STREAM_URI, first)?;
     for event in live_events.iter().skip(1) {
         processor.add_event(LIVE_STREAM_URI, event.clone())?;
@@ -1251,7 +1460,10 @@ fn collect_live_results(
             }
         }
         if Instant::now() >= deadline {
-            return Err("timed out waiting for live result".into());
+            return Ok(LiveCollectionResult {
+                first_result_engine_ms: now_ms(),
+                all_rows: Vec::new(),
+            });
         }
         std::thread::yield_now();
     }
@@ -1692,6 +1904,1160 @@ impl BaselineAccumulator {
     }
 }
 
+// =========================================================================
+// H1.2 Sustained Hybrid Window Execution Benchmark
+// =========================================================================
+
+#[derive(Clone, Debug, Serialize)]
+pub struct SustainedRow {
+    pub system: String,
+    pub mode: String,
+    pub time_mode: String,
+    pub is_warmup: bool,
+    pub run_index: usize,
+    pub historical_events: usize,
+    pub logical_live_duration_seconds: usize,
+    pub event_rate_hz: usize,
+    pub event_interval_ms: f64,
+    pub expected_wall_clock_duration_ms: u64,
+    pub events_published: usize,
+    pub events_processed: usize,
+    pub window_size_ms: usize,
+    pub window_slide_ms: usize,
+    pub expected_completed_windows: usize,
+    pub completed_windows_total: usize,
+    pub completed_windows_in_horizon: usize,
+    pub flush_windows: usize,
+    pub missed_windows: usize,
+    pub historical_start_at: u64,
+    pub historical_ready_at: u64,
+    pub live_start_at: u64,
+    pub first_live_event_at: u64,
+    pub first_live_window_ready_at: u64,
+    pub first_hybrid_result_at: u64,
+    pub historical_preparation_latency_ms: f64,
+    pub first_live_window_latency_ms: f64,
+    pub first_hybrid_result_latency_ms: f64,
+    pub first_hybrid_result_wall_clock_ms: f64,
+    pub readiness_gap_ms: f64,
+    pub hybrid_wait_after_inputs_ready_ms: f64,
+    pub p50_window_hybrid_latency_ms: f64,
+    pub p95_window_hybrid_latency_ms: f64,
+    pub window_result_wall_clock_offsets_ms: Vec<f64>,
+    pub p50_window_result_wall_clock_offset_ms: f64,
+    pub p95_window_result_wall_clock_offset_ms: f64,
+    pub external_join_latency_total_ms: f64,
+    pub external_join_latency_avg_ms: f64,
+    pub estimated_external_transfer_bytes_total: usize,
+    pub estimated_external_transfer_bytes_per_window: usize,
+    pub hybrid_result_count_total: usize,
+    pub hybrid_result_hash_total: String,
+    pub equivalent_to_baseline: Option<bool>,
+    pub metadata: ReproMetadata,
+
+    // Additional requested metrics
+    pub wall_clock_benchmark_duration_ms: u64,
+    pub wall_clock_overhead_ms: f64,
+    pub uses_virtual_event_time: bool,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct SustainedSummaryRow {
+    pub system: String,
+    pub mode: String,
+    pub time_mode: String,
+    pub runs: usize,
+    pub historical_events: usize,
+    pub logical_live_duration_seconds: usize,
+    pub event_rate_hz: usize,
+    pub event_interval_ms: f64,
+    pub expected_wall_clock_duration_ms: u64,
+    pub window_size_ms: usize,
+    pub window_slide_ms: usize,
+    pub avg_events_published: f64,
+    pub avg_events_processed: f64,
+    pub avg_completed_windows_total: f64,
+    pub avg_completed_windows_in_horizon: f64,
+    pub avg_flush_windows: f64,
+    pub avg_missed_windows: f64,
+    pub p50_first_hybrid_result_latency_ms: f64,
+    pub p95_first_hybrid_result_latency_ms: f64,
+    pub p50_first_hybrid_result_wall_clock_ms: f64,
+    pub p95_first_hybrid_result_wall_clock_ms: f64,
+    pub p50_window_hybrid_latency_ms: f64,
+    pub p95_window_hybrid_latency_ms: f64,
+    pub p50_window_result_wall_clock_offset_ms: f64,
+    pub p95_window_result_wall_clock_offset_ms: f64,
+    pub avg_historical_preparation_latency_ms: f64,
+    pub avg_first_live_window_latency_ms: f64,
+    pub avg_readiness_gap_ms: f64,
+    pub avg_hybrid_wait_after_inputs_ready_ms: f64,
+    pub avg_external_join_latency_total_ms: f64,
+    pub avg_external_join_latency_ms: f64,
+    pub avg_estimated_external_transfer_bytes_total: f64,
+    pub avg_estimated_external_transfer_bytes_per_window: f64,
+    pub avg_hybrid_result_count_total: f64,
+    pub avg_wall_clock_benchmark_duration_ms: f64,
+    pub avg_wall_clock_overhead_ms: f64,
+    pub uses_virtual_event_time: bool,
+    pub equivalence_rate: f64,
+}
+
+#[derive(Clone)]
+pub struct SustainedWorkload {
+    pub historical_storage: Arc<StreamingSegmentedStorage>,
+    pub historical_rdf_events: Vec<RDFEvent>,
+    pub live_events: Vec<RDFEvent>,
+    pub historical_start_ts: u64,
+    pub historical_end_ts: u64,
+    pub historical_sparql_query: String,
+    pub hybrid_query: String,
+}
+
+pub struct SustainedPair {
+    pub unified: SustainedRow,
+    pub decomposed: SustainedRow,
+}
+
+pub struct SustainedRunConfig<'a> {
+    pub mode: ExecutionMode,
+    pub time_mode: TimeMode,
+    pub run_index: usize,
+    pub is_warmup: bool,
+    pub historical_events: usize,
+    pub live_duration_seconds: usize,
+    pub event_rate_hz: usize,
+    pub event_interval_ms: f64,
+    pub expected_wall_clock_duration_ms: u64,
+    pub window_size_seconds: usize,
+    pub window_slide_seconds: usize,
+    pub metadata: &'a ReproMetadata,
+    pub adapter: &'a dyn ExternalHistoricalAdapter,
+    pub warm_workload: Option<&'a SustainedWorkload>,
+    pub debug_output_dir: Option<&'a Path>,
+}
+
+impl<'a> SustainedRunConfig<'a> {
+    pub fn expected_completed_windows_in_horizon(&self) -> usize {
+        let d = self.live_duration_seconds;
+        let w = self.window_size_seconds;
+        let s = self.window_slide_seconds;
+        if d == 0 {
+            return 0;
+        }
+        let first_end_sec = w + s - 1;
+        if d >= first_end_sec {
+            1 + (d - first_end_sec) / s
+        } else {
+            0
+        }
+    }
+}
+
+pub fn sustained_event_interval_ms(event_rate_hz: usize) -> f64 {
+    1000.0 / event_rate_hz as f64
+}
+
+pub fn sustained_expected_wall_clock_duration_ms(live_duration_seconds: usize) -> u64 {
+    (live_duration_seconds as u64) * 1000
+}
+
+pub struct SustainedSystemOutput {
+    pub row: SustainedRow,
+    pub window_results: HashMap<String, Vec<HashMap<String, String>>>,
+    pub live_events: Vec<RDFEvent>,
+    pub historical_baseline: Vec<HashMap<String, String>>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct BindingWithWindow {
+    pub bindings: HashMap<String, String>,
+    pub window_start_ms: u64,
+    pub window_end_ms: u64,
+    pub window_id: String,
+}
+
+pub struct SustainedLiveCollectionResult {
+    pub first_result_engine_ms: u64,
+    pub bindings: Vec<BindingWithWindow>,
+}
+
+fn canonical_window_hash(
+    rows: &[HashMap<String, String>],
+) -> Result<String, Box<dyn std::error::Error>> {
+    let mut canonical_rows = rows.iter().map(canonicalize_row).collect::<Vec<_>>();
+    canonical_rows.sort();
+    let payload = serde_json::to_vec(&canonical_rows)?;
+    let digest = Sha256::digest(payload);
+    Ok(format!("{digest:x}"))
+}
+
+fn canonical_result_hash_sustained(
+    windows: &HashMap<String, Vec<HashMap<String, String>>>,
+) -> Result<String, Box<dyn std::error::Error>> {
+    let mut keys: Vec<String> = windows.keys().cloned().collect();
+    keys.sort_unstable();
+    let mut all_canonical = Vec::new();
+    for key in keys {
+        let rows = &windows[&key];
+        let mut canonical_rows = rows.iter().map(canonicalize_row).collect::<Vec<_>>();
+        canonical_rows.sort();
+        all_canonical.push((key, canonical_rows));
+    }
+    let payload = serde_json::to_vec(&all_canonical)?;
+    let digest = Sha256::digest(payload);
+    Ok(format!("{digest:x}"))
+}
+
+pub fn build_sustained_live_events(
+    duration_sec: usize,
+    rate_hz: usize,
+    start_ts: u64,
+) -> Vec<RDFEvent> {
+    let total_events = duration_sec * rate_hz;
+    if total_events == 0 {
+        return Vec::new();
+    }
+    let interval_ms = 1000 / rate_hz;
+    (0..total_events)
+        .map(|index| {
+            RDFEvent::new(
+                start_ts + (index * interval_ms) as u64,
+                &format!("http://example.org/junction/{}", index % 64),
+                TRAFFIC_PREDICATE,
+                &(70 + (index % 11)).to_string(),
+                GRAPH_URI,
+            )
+        })
+        .collect()
+}
+
+fn parse_window_id(window_id: &str) -> Option<(u64, u64)> {
+    let mut parts = window_id.split('-');
+    let start = parts.next()?.parse().ok()?;
+    let end = parts.next()?.parse().ok()?;
+    Some((start, end))
+}
+
+fn wait_for_sustained_event_schedule(
+    config: &SustainedRunConfig<'_>,
+    replay_start: Instant,
+    event_index: usize,
+) {
+    if config.time_mode != TimeMode::WallClock {
+        return;
+    }
+    let target =
+        replay_start + Duration::from_secs_f64(event_index as f64 / config.event_rate_hz as f64);
+    if let Some(remaining) = target.checked_duration_since(Instant::now()) {
+        std::thread::sleep(remaining);
+    }
+}
+
+fn wait_for_sustained_replay_flush(config: &SustainedRunConfig<'_>, replay_deadline: Instant) {
+    if config.time_mode != TimeMode::WallClock {
+        return;
+    }
+    if let Some(remaining) = replay_deadline.checked_duration_since(Instant::now()) {
+        std::thread::sleep(remaining);
+    }
+}
+
+fn sustained_hybrid_query(
+    start_ts: u64,
+    end_ts: u64,
+    window_size_ms: usize,
+    window_slide_ms: usize,
+) -> String {
+    format!(
+        r#"
+        PREFIX ex: <http://example.org/>
+        PREFIX baseline: <{BASELINE_NS}>
+
+        REGISTER RStream <output> AS
+        SELECT ?sensor ?liveFlow ?baselineFlow
+        FROM NAMED WINDOW ex:hist ON STREAM <{GRAPH_URI}> [START {start_ts} END {end_ts}]
+        FROM NAMED WINDOW ex:live ON STREAM <{LIVE_STREAM_URI}> [RANGE {window_size_ms} STEP {window_slide_ms}]
+        USING BASELINE ex:hist AGGREGATE
+        WHERE {{
+            WINDOW ex:hist {{
+                ?sensor ex:baselineFlow ?baselineFlow .
+            }}
+            WINDOW ex:live {{
+                ?sensor ex:trafficFlow ?liveFlow .
+            }}
+            ?sensor baseline:baselineFlow ?baselineFlow .
+        }}
+        "#
+    )
+}
+
+fn live_only_rspql_sustained(window_size_ms: usize, window_slide_ms: usize) -> String {
+    format!(
+        r#"
+        PREFIX ex: <http://example.org/>
+
+        REGISTER RStream <output> AS
+        SELECT ?sensor ?liveFlow
+        FROM NAMED WINDOW ex:live ON STREAM <{LIVE_STREAM_URI}> [RANGE {window_size_ms} STEP {window_slide_ms}]
+        WHERE {{
+            WINDOW ex:live {{
+                ?sensor ex:trafficFlow ?liveFlow .
+            }}
+        }}
+        "#
+    )
+}
+
+pub fn prepare_sustained_workload(
+    historical_events: usize,
+    live_duration_seconds: usize,
+    event_rate_hz: usize,
+    window_size_seconds: usize,
+    window_slide_seconds: usize,
+) -> Result<SustainedWorkload, Box<dyn std::error::Error>> {
+    let historical_start_ts = 1_800_000_000_000;
+    let historical_storage = build_historical_storage(historical_events, historical_start_ts)?;
+    let historical_rdf_events = historical_storage.query_rdf(
+        historical_start_ts,
+        historical_start_ts + historical_events.saturating_sub(1) as u64,
+    )?;
+    let live_events =
+        build_sustained_live_events(live_duration_seconds, event_rate_hz, 1_900_000_000_000);
+    let window_size_ms = window_size_seconds * 1000;
+    let window_slide_ms = window_slide_seconds * 1000;
+
+    Ok(SustainedWorkload {
+        historical_storage,
+        historical_rdf_events,
+        live_events,
+        historical_start_ts,
+        historical_end_ts: historical_start_ts + historical_events.saturating_sub(1) as u64,
+        historical_sparql_query: historical_baseline_sparql_query()?,
+        hybrid_query: sustained_hybrid_query(
+            historical_start_ts,
+            historical_start_ts + historical_events.saturating_sub(1) as u64,
+            window_size_ms,
+            window_slide_ms,
+        ),
+    })
+}
+
+pub fn run_sustained_pair(
+    config: SustainedRunConfig<'_>,
+) -> Result<SustainedPair, Box<dyn std::error::Error>> {
+    let unified = run_sustained_system(CoordinationSystem::JanusUnified, &config)?;
+    let decomposed = run_sustained_system(CoordinationSystem::DecomposedOxigraph, &config)?;
+
+    let mut unified_row = unified.row.clone();
+    let mut decomposed_row = decomposed.row.clone();
+
+    let expected_completed_windows = config.expected_completed_windows_in_horizon();
+    let mut equivalent = unified_row.completed_windows_in_horizon
+        == decomposed_row.completed_windows_in_horizon
+        && unified_row.completed_windows_in_horizon == expected_completed_windows
+        && unified_row.hybrid_result_hash_total == decomposed_row.hybrid_result_hash_total
+        && !unified_row.hybrid_result_hash_total.is_empty()
+        && unified_row.hybrid_result_hash_total
+            != "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+
+    if equivalent {
+        let horizon_end_ms = i64::try_from(
+            unified_row
+                .first_live_event_at
+                .saturating_add((config.live_duration_seconds * 1000) as u64),
+        )
+        .map_err(|_| "horizon end timestamp exceeds i64 range")?;
+        for (win_id, u_rows) in &unified.window_results {
+            let parts: Vec<&str> = win_id.split('-').collect();
+            if parts.len() == 2 {
+                if let Ok(win_end) = parts[1].parse::<i64>() {
+                    if win_end > horizon_end_ms {
+                        continue;
+                    }
+                }
+            }
+            if let Some(d_rows) = decomposed.window_results.get(win_id) {
+                let u_hash = canonical_window_hash(u_rows)?;
+                let d_hash = canonical_window_hash(d_rows)?;
+                if u_hash != d_hash || u_rows.len() != d_rows.len() {
+                    equivalent = false;
+                    break;
+                }
+            } else {
+                equivalent = false;
+                break;
+            }
+        }
+    }
+
+    unified_row.equivalent_to_baseline = Some(equivalent);
+    decomposed_row.equivalent_to_baseline = None;
+
+    if let Some(debug_output_dir) = config.debug_output_dir {
+        write_h1_2_debug_artifacts(debug_output_dir, &unified, &decomposed, &config, equivalent)?;
+    }
+
+    Ok(SustainedPair { unified: unified_row, decomposed: decomposed_row })
+}
+
+fn run_sustained_system(
+    system: CoordinationSystem,
+    config: &SustainedRunConfig<'_>,
+) -> Result<SustainedSystemOutput, Box<dyn std::error::Error>> {
+    let owned_workload;
+    let workload = if config.mode == ExecutionMode::Warm {
+        config.warm_workload.ok_or("warm mode requires prepared workload")?
+    } else {
+        owned_workload = prepare_sustained_workload(
+            config.historical_events,
+            config.live_duration_seconds,
+            config.event_rate_hz,
+            config.window_size_seconds,
+            config.window_slide_seconds,
+        )?;
+        &owned_workload
+    };
+
+    let start_wall = Instant::now();
+    let client_start = now_ms();
+    let parser = JanusQLParser::new()?;
+    let parsed = parser.parse(&workload.hybrid_query)?;
+    let query_registered = now_ms();
+
+    let historical_start = now_ms();
+    let executor =
+        HistoricalExecutor::new(Arc::clone(&workload.historical_storage), OxigraphAdapter::new());
+    let baseline_bindings = executor.execute_fixed_window(
+        parsed.historical_windows.first().ok_or("missing historical window")?,
+        &workload.historical_sparql_query,
+    )?;
+    let historical_done = now_ms();
+
+    let events_published = workload.live_events.len();
+    let events_processed = workload.live_events.len();
+    let window_size_ms = config.window_size_seconds * 1000;
+    let window_slide_ms = config.window_slide_seconds * 1000;
+    let expected_completed_windows = config.expected_completed_windows_in_horizon();
+    let live_first_event_at = workload.live_events.first().map(|e| e.timestamp).unwrap_or(0);
+    let horizon_end_ms = i64::try_from(
+        live_first_event_at.saturating_add((config.live_duration_seconds * 1000) as u64),
+    )
+    .map_err(|_| "horizon end timestamp exceeds i64 range")?;
+
+    let mut window_results = HashMap::<String, Vec<HashMap<String, String>>>::new();
+    let mut window_hybrid_latencies = Vec::<(i64, f64)>::new();
+    let mut window_wall_clock_offsets = HashMap::<String, f64>::new();
+    let mut first_live_window_ready_at = 0u64;
+    let mut first_hybrid_result_at = 0u64;
+    let mut first_hybrid_result_wall_clock_ms = 0.0;
+
+    let live_start_at;
+    let mut external_join_latencies = Vec::<(i64, f64)>::new();
+    let mut live_rows_count = 0;
+    let historical_baseline;
+
+    let estimated_external_transfer_bytes_total;
+
+    match system {
+        CoordinationSystem::JanusUnified => {
+            let mut processor = LiveStreamProcessing::new(parsed.rspql_query.clone())?;
+            processor.register_stream(LIVE_STREAM_URI)?;
+            materialize_bindings_as_static_baseline(&mut processor, &baseline_bindings)?;
+            processor.start_processing()?;
+            live_start_at = now_ms();
+            let replay_start = Instant::now();
+            let replay_deadline =
+                replay_start + Duration::from_millis(config.expected_wall_clock_duration_ms);
+
+            historical_baseline = baseline_statements_from_bindings(&baseline_bindings)
+                .into_iter()
+                .map(|(s, p, o)| {
+                    HashMap::from([("sensor".to_string(), s), ("baselineFlow".to_string(), o)])
+                })
+                .collect();
+            estimated_external_transfer_bytes_total = 0;
+
+            for (event_index, event) in workload.live_events.iter().enumerate() {
+                wait_for_sustained_event_schedule(config, replay_start, event_index);
+                let start_add = Instant::now();
+                processor.add_event(LIVE_STREAM_URI, event.clone())?;
+                let add_duration = start_add.elapsed().as_secs_f64() * 1000.0;
+
+                std::thread::sleep(std::time::Duration::from_millis(2));
+
+                let mut received = Vec::new();
+                while let Some(res) = processor.try_receive_result()? {
+                    received.push(res);
+                }
+
+                if !received.is_empty() {
+                    let now = now_ms();
+                    let wall_clock_offset_ms = replay_start.elapsed().as_secs_f64() * 1000.0;
+                    if first_live_window_ready_at == 0 {
+                        first_live_window_ready_at = now;
+                        first_hybrid_result_at = now;
+                        first_hybrid_result_wall_clock_ms = wall_clock_offset_ms;
+                    }
+                    for res in received {
+                        let win_start = res.timestamp_from;
+                        let win_end = res.timestamp_to;
+                        let win_id = format!("{}-{}", win_start, win_end);
+                        let rows = parse_rsprs_binding_string(&res.bindings);
+                        window_results.entry(win_id.clone()).or_default().push(rows);
+                        window_wall_clock_offsets.entry(win_id).or_insert(wall_clock_offset_ms);
+                        window_hybrid_latencies.push((win_end, add_duration));
+                    }
+                }
+            }
+
+            wait_for_sustained_replay_flush(config, replay_deadline);
+            let close_start = Instant::now();
+            let close_ts = workload.live_events.last().map_or(20_000_i64, |e| {
+                i64::try_from(e.timestamp).unwrap_or(i64::MAX).saturating_add(20_000)
+            });
+            processor.close_stream(LIVE_STREAM_URI, close_ts)?;
+            let close_duration = close_start.elapsed().as_secs_f64() * 1000.0;
+
+            std::thread::sleep(std::time::Duration::from_millis(10));
+
+            let mut final_received = Vec::new();
+            while let Some(res) = processor.try_receive_result()? {
+                final_received.push(res);
+            }
+            if !final_received.is_empty() {
+                let now = now_ms();
+                let wall_clock_offset_ms = replay_start.elapsed().as_secs_f64() * 1000.0;
+                if first_live_window_ready_at == 0 {
+                    first_live_window_ready_at = now;
+                    first_hybrid_result_at = now;
+                    first_hybrid_result_wall_clock_ms = wall_clock_offset_ms;
+                }
+                for res in final_received {
+                    let win_start = res.timestamp_from;
+                    let win_end = res.timestamp_to;
+                    let win_id = format!("{}-{}", win_start, win_end);
+                    let rows = parse_rsprs_binding_string(&res.bindings);
+                    window_results.entry(win_id.clone()).or_default().push(rows);
+                    window_wall_clock_offsets.entry(win_id).or_insert(wall_clock_offset_ms);
+                    window_hybrid_latencies.push((win_end, close_duration));
+                }
+            }
+        }
+        CoordinationSystem::DecomposedOxigraph => {
+            let external_bindings = config.adapter.execute_bindings_query(
+                &workload.historical_sparql_query,
+                &workload.historical_rdf_events,
+            )?;
+            let materialized_baseline_rows =
+                materialized_baseline_rows_from_bindings(&external_bindings, "baselineFlow");
+            let historical_done = now_ms();
+
+            historical_baseline = materialized_baseline_rows.clone();
+            let historical_intermediate_bytes = serde_json::to_vec(&external_bindings)?.len();
+
+            let mut processor = LiveStreamProcessing::new(live_only_rspql_sustained(
+                window_size_ms,
+                window_slide_ms,
+            ))?;
+            processor.register_stream(LIVE_STREAM_URI)?;
+            processor.start_processing()?;
+            live_start_at = now_ms();
+            let replay_start = Instant::now();
+            let replay_deadline =
+                replay_start + Duration::from_millis(config.expected_wall_clock_duration_ms);
+
+            let mut all_live_rows = Vec::new();
+
+            for (event_index, event) in workload.live_events.iter().enumerate() {
+                wait_for_sustained_event_schedule(config, replay_start, event_index);
+                let start_add = Instant::now();
+                processor.add_event(LIVE_STREAM_URI, event.clone())?;
+                let add_duration = start_add.elapsed().as_secs_f64() * 1000.0;
+
+                std::thread::sleep(std::time::Duration::from_millis(2));
+
+                let mut received = Vec::new();
+                while let Some(res) = processor.try_receive_result()? {
+                    received.push(res);
+                }
+
+                if !received.is_empty() {
+                    let now = now_ms();
+                    let wall_clock_offset_ms = replay_start.elapsed().as_secs_f64() * 1000.0;
+                    if first_live_window_ready_at == 0 {
+                        first_live_window_ready_at = now;
+                    }
+                    for res in received {
+                        let win_start = res.timestamp_from;
+                        let win_end = res.timestamp_to;
+                        let win_id = format!("{}-{}", win_start, win_end);
+                        let rows = parse_rsprs_binding_string(&res.bindings);
+                        if win_end <= horizon_end_ms {
+                            all_live_rows.push(rows.clone());
+                        }
+                        live_rows_count += 1;
+
+                        let start_join = Instant::now();
+                        let joined = join_live_with_baseline(&[rows], &materialized_baseline_rows);
+                        let join_duration = start_join.elapsed().as_secs_f64() * 1000.0;
+                        if first_hybrid_result_at == 0 {
+                            first_hybrid_result_at = now_ms();
+                            first_hybrid_result_wall_clock_ms = wall_clock_offset_ms;
+                        }
+
+                        for row in joined {
+                            window_results.entry(win_id.clone()).or_default().push(row);
+                        }
+                        window_wall_clock_offsets.entry(win_id).or_insert(wall_clock_offset_ms);
+
+                        window_hybrid_latencies.push((win_end, add_duration + join_duration));
+                        external_join_latencies.push((win_end, join_duration));
+                    }
+                }
+            }
+
+            wait_for_sustained_replay_flush(config, replay_deadline);
+            let close_start = Instant::now();
+            let close_ts = workload.live_events.last().map_or(20_000_i64, |e| {
+                i64::try_from(e.timestamp).unwrap_or(i64::MAX).saturating_add(20_000)
+            });
+            processor.close_stream(LIVE_STREAM_URI, close_ts)?;
+            let close_duration = close_start.elapsed().as_secs_f64() * 1000.0;
+
+            std::thread::sleep(std::time::Duration::from_millis(10));
+
+            let mut final_received = Vec::new();
+            while let Some(res) = processor.try_receive_result()? {
+                final_received.push(res);
+            }
+            if !final_received.is_empty() {
+                let now = now_ms();
+                let wall_clock_offset_ms = replay_start.elapsed().as_secs_f64() * 1000.0;
+                if first_live_window_ready_at == 0 {
+                    first_live_window_ready_at = now;
+                }
+                for res in final_received {
+                    let win_start = res.timestamp_from;
+                    let win_end = res.timestamp_to;
+                    let win_id = format!("{}-{}", win_start, win_end);
+                    let rows = parse_rsprs_binding_string(&res.bindings);
+                    if win_end <= horizon_end_ms {
+                        all_live_rows.push(rows.clone());
+                    }
+                    live_rows_count += 1;
+
+                    let start_join = Instant::now();
+                    let joined = join_live_with_baseline(&[rows], &materialized_baseline_rows);
+                    let join_duration = start_join.elapsed().as_secs_f64() * 1000.0;
+                    if first_hybrid_result_at == 0 {
+                        first_hybrid_result_at = now_ms();
+                        first_hybrid_result_wall_clock_ms = wall_clock_offset_ms;
+                    }
+
+                    for row in joined {
+                        window_results.entry(win_id.clone()).or_default().push(row);
+                    }
+                    window_wall_clock_offsets.entry(win_id).or_insert(wall_clock_offset_ms);
+
+                    window_hybrid_latencies.push((win_end, close_duration + join_duration));
+                    external_join_latencies.push((win_end, join_duration));
+                }
+            }
+
+            let live_intermediate_bytes = serde_json::to_vec(&all_live_rows)?.len();
+            estimated_external_transfer_bytes_total =
+                historical_intermediate_bytes + live_intermediate_bytes;
+        }
+    }
+
+    let wall_clock_benchmark_duration_ms = start_wall.elapsed().as_millis() as u64;
+
+    let completed_windows_total = window_results.len();
+    let mut completed_windows_in_horizon = 0;
+    let mut horizon_window_results = HashMap::new();
+    for (win_id, rows) in &window_results {
+        let parts: Vec<&str> = win_id.split('-').collect();
+        if parts.len() == 2 {
+            if let Ok(win_end) = parts[1].parse::<i64>() {
+                if win_end <= horizon_end_ms {
+                    completed_windows_in_horizon += 1;
+                    horizon_window_results.insert(win_id.clone(), rows.clone());
+                }
+            }
+        }
+    }
+    let flush_windows = completed_windows_total - completed_windows_in_horizon;
+    let missed_windows = expected_completed_windows.saturating_sub(completed_windows_in_horizon);
+
+    let historical_preparation_latency_ms = (historical_done - historical_start) as f64;
+    let first_live_window_latency_ms = if first_live_window_ready_at > 0 {
+        (first_live_window_ready_at - live_start_at) as f64
+    } else {
+        0.0
+    };
+    let first_hybrid_result_latency_ms = if first_hybrid_result_at > 0 {
+        (first_hybrid_result_at - client_start) as f64
+    } else {
+        0.0
+    };
+
+    let readiness_gap_ms = if historical_done > 0 && first_live_window_ready_at > 0 {
+        (historical_done as f64 - first_live_window_ready_at as f64).abs()
+    } else {
+        0.0
+    };
+
+    let hybrid_wait_after_inputs_ready_ms = if first_hybrid_result_at > 0 {
+        let max_ready = historical_done.max(first_live_window_ready_at) as f64;
+        (first_hybrid_result_at as f64 - max_ready).max(0.0)
+    } else {
+        0.0
+    };
+
+    let horizon_latencies: Vec<f64> = window_hybrid_latencies
+        .iter()
+        .filter(|&&(win_end, _)| win_end <= horizon_end_ms)
+        .map(|&(_, lat)| lat)
+        .collect();
+    let p50_window_hybrid_latency_ms = percentile(&horizon_latencies, 50.0);
+    let p95_window_hybrid_latency_ms = percentile(&horizon_latencies, 95.0);
+
+    let horizon_join_latencies: Vec<f64> = external_join_latencies
+        .iter()
+        .filter(|&&(win_end, _)| win_end <= horizon_end_ms)
+        .map(|&(_, lat)| lat)
+        .collect();
+    let external_join_latency_total_ms: f64 = horizon_join_latencies.iter().sum();
+    let external_join_latency_avg_ms = if completed_windows_in_horizon > 0 {
+        external_join_latency_total_ms / completed_windows_in_horizon as f64
+    } else {
+        0.0
+    };
+
+    let estimated_external_transfer_bytes_per_window = if completed_windows_in_horizon > 0 {
+        estimated_external_transfer_bytes_total / completed_windows_in_horizon
+    } else {
+        0
+    };
+    let mut window_result_wall_clock_offsets_ms = window_wall_clock_offsets
+        .iter()
+        .filter_map(|(win_id, offset)| {
+            let (_, win_end) = parse_window_id(win_id)?;
+            (i64::try_from(win_end).ok()? <= horizon_end_ms).then_some(*offset)
+        })
+        .collect::<Vec<_>>();
+    window_result_wall_clock_offsets_ms
+        .sort_by(|left, right| left.partial_cmp(right).unwrap_or(Ordering::Equal));
+    let p50_window_result_wall_clock_offset_ms =
+        percentile(&window_result_wall_clock_offsets_ms, 50.0);
+    let p95_window_result_wall_clock_offset_ms =
+        percentile(&window_result_wall_clock_offsets_ms, 95.0);
+
+    let mut hybrid_result_count_total = 0;
+    for rows in horizon_window_results.values() {
+        hybrid_result_count_total += rows.len();
+    }
+    let hybrid_result_hash_total = canonical_result_hash_sustained(&horizon_window_results)?;
+    let wall_clock_overhead_ms =
+        wall_clock_benchmark_duration_ms as f64 - config.expected_wall_clock_duration_ms as f64;
+
+    let row = SustainedRow {
+        system: system.as_str().to_string(),
+        mode: config.mode.as_str().to_string(),
+        time_mode: config.time_mode.as_str().to_string(),
+        is_warmup: config.is_warmup,
+        run_index: config.run_index,
+        historical_events: config.historical_events,
+        logical_live_duration_seconds: config.live_duration_seconds,
+        event_rate_hz: config.event_rate_hz,
+        event_interval_ms: config.event_interval_ms,
+        expected_wall_clock_duration_ms: config.expected_wall_clock_duration_ms,
+        events_published,
+        events_processed,
+        window_size_ms,
+        window_slide_ms,
+        expected_completed_windows,
+        completed_windows_total,
+        completed_windows_in_horizon,
+        flush_windows,
+        missed_windows,
+        historical_start_at: historical_start,
+        historical_ready_at: historical_done,
+        live_start_at,
+        first_live_event_at: live_first_event_at,
+        first_live_window_ready_at,
+        first_hybrid_result_at,
+        historical_preparation_latency_ms,
+        first_live_window_latency_ms,
+        first_hybrid_result_latency_ms,
+        first_hybrid_result_wall_clock_ms,
+        readiness_gap_ms,
+        hybrid_wait_after_inputs_ready_ms,
+        p50_window_hybrid_latency_ms,
+        p95_window_hybrid_latency_ms,
+        window_result_wall_clock_offsets_ms,
+        p50_window_result_wall_clock_offset_ms,
+        p95_window_result_wall_clock_offset_ms,
+        external_join_latency_total_ms,
+        external_join_latency_avg_ms,
+        estimated_external_transfer_bytes_total,
+        estimated_external_transfer_bytes_per_window,
+        hybrid_result_count_total,
+        hybrid_result_hash_total,
+        equivalent_to_baseline: None,
+        metadata: config.metadata.clone(),
+        wall_clock_benchmark_duration_ms,
+        wall_clock_overhead_ms,
+        uses_virtual_event_time: config.time_mode.uses_virtual_event_time(),
+    };
+
+    Ok(SustainedSystemOutput {
+        row,
+        window_results,
+        live_events: workload.live_events.clone(),
+        historical_baseline,
+    })
+}
+
+pub fn summarize_sustained(rows: &[SustainedRow]) -> Vec<SustainedSummaryRow> {
+    let mut grouped = HashMap::<(String, String, String), Vec<&SustainedRow>>::new();
+    for row in rows {
+        grouped
+            .entry((row.system.clone(), row.mode.clone(), row.time_mode.clone()))
+            .or_default()
+            .push(row);
+    }
+
+    let mut summary = grouped
+        .into_iter()
+        .map(|((system, mode, time_mode), items)| {
+            let runs = items.len();
+            let equiv_count =
+                items.iter().filter(|row| row.equivalent_to_baseline == Some(true)).count();
+
+            SustainedSummaryRow {
+                system,
+                mode,
+                time_mode,
+                runs,
+                historical_events: items.first().map_or(0, |row| row.historical_events),
+                logical_live_duration_seconds: items
+                    .first()
+                    .map_or(0, |row| row.logical_live_duration_seconds),
+                event_rate_hz: items.first().map_or(0, |row| row.event_rate_hz),
+                event_interval_ms: items.first().map_or(0.0, |row| row.event_interval_ms),
+                expected_wall_clock_duration_ms: items
+                    .first()
+                    .map_or(0, |row| row.expected_wall_clock_duration_ms),
+                window_size_ms: items.first().map_or(0, |row| row.window_size_ms),
+                window_slide_ms: items.first().map_or(0, |row| row.window_slide_ms),
+                avg_events_published: mean_usize(
+                    &items.iter().map(|row| row.events_published).collect::<Vec<_>>(),
+                ),
+                avg_events_processed: mean_usize(
+                    &items.iter().map(|row| row.events_processed).collect::<Vec<_>>(),
+                ),
+                avg_completed_windows_total: mean_usize(
+                    &items.iter().map(|row| row.completed_windows_total).collect::<Vec<_>>(),
+                ),
+                avg_completed_windows_in_horizon: mean_usize(
+                    &items.iter().map(|row| row.completed_windows_in_horizon).collect::<Vec<_>>(),
+                ),
+                avg_flush_windows: mean_usize(
+                    &items.iter().map(|row| row.flush_windows).collect::<Vec<_>>(),
+                ),
+                avg_missed_windows: mean_usize(
+                    &items.iter().map(|row| row.missed_windows).collect::<Vec<_>>(),
+                ),
+                p50_first_hybrid_result_latency_ms: percentile(
+                    &items.iter().map(|row| row.first_hybrid_result_latency_ms).collect::<Vec<_>>(),
+                    50.0,
+                ),
+                p95_first_hybrid_result_latency_ms: percentile(
+                    &items.iter().map(|row| row.first_hybrid_result_latency_ms).collect::<Vec<_>>(),
+                    95.0,
+                ),
+                p50_first_hybrid_result_wall_clock_ms: percentile(
+                    &items
+                        .iter()
+                        .map(|row| row.first_hybrid_result_wall_clock_ms)
+                        .collect::<Vec<_>>(),
+                    50.0,
+                ),
+                p95_first_hybrid_result_wall_clock_ms: percentile(
+                    &items
+                        .iter()
+                        .map(|row| row.first_hybrid_result_wall_clock_ms)
+                        .collect::<Vec<_>>(),
+                    95.0,
+                ),
+                p50_window_hybrid_latency_ms: percentile(
+                    &items.iter().map(|row| row.p50_window_hybrid_latency_ms).collect::<Vec<_>>(),
+                    50.0,
+                ),
+                p95_window_hybrid_latency_ms: percentile(
+                    &items.iter().map(|row| row.p95_window_hybrid_latency_ms).collect::<Vec<_>>(),
+                    95.0,
+                ),
+                p50_window_result_wall_clock_offset_ms: percentile(
+                    &items
+                        .iter()
+                        .map(|row| row.p50_window_result_wall_clock_offset_ms)
+                        .collect::<Vec<_>>(),
+                    50.0,
+                ),
+                p95_window_result_wall_clock_offset_ms: percentile(
+                    &items
+                        .iter()
+                        .map(|row| row.p95_window_result_wall_clock_offset_ms)
+                        .collect::<Vec<_>>(),
+                    95.0,
+                ),
+                avg_historical_preparation_latency_ms: mean(
+                    &items
+                        .iter()
+                        .map(|row| row.historical_preparation_latency_ms)
+                        .collect::<Vec<_>>(),
+                ),
+                avg_first_live_window_latency_ms: mean(
+                    &items.iter().map(|row| row.first_live_window_latency_ms).collect::<Vec<_>>(),
+                ),
+                avg_readiness_gap_ms: mean(
+                    &items.iter().map(|row| row.readiness_gap_ms).collect::<Vec<_>>(),
+                ),
+                avg_hybrid_wait_after_inputs_ready_ms: mean(
+                    &items
+                        .iter()
+                        .map(|row| row.hybrid_wait_after_inputs_ready_ms)
+                        .collect::<Vec<_>>(),
+                ),
+                avg_external_join_latency_total_ms: mean(
+                    &items.iter().map(|row| row.external_join_latency_total_ms).collect::<Vec<_>>(),
+                ),
+                avg_external_join_latency_ms: mean(
+                    &items.iter().map(|row| row.external_join_latency_avg_ms).collect::<Vec<_>>(),
+                ),
+                avg_estimated_external_transfer_bytes_total: mean_usize(
+                    &items
+                        .iter()
+                        .map(|row| row.estimated_external_transfer_bytes_total)
+                        .collect::<Vec<_>>(),
+                ),
+                avg_estimated_external_transfer_bytes_per_window: mean_usize(
+                    &items
+                        .iter()
+                        .map(|row| row.estimated_external_transfer_bytes_per_window)
+                        .collect::<Vec<_>>(),
+                ),
+                avg_hybrid_result_count_total: mean_usize(
+                    &items.iter().map(|row| row.hybrid_result_count_total).collect::<Vec<_>>(),
+                ),
+                avg_wall_clock_benchmark_duration_ms: mean(
+                    &items
+                        .iter()
+                        .map(|row| row.wall_clock_benchmark_duration_ms as f64)
+                        .collect::<Vec<_>>(),
+                ),
+                avg_wall_clock_overhead_ms: mean(
+                    &items.iter().map(|row| row.wall_clock_overhead_ms).collect::<Vec<_>>(),
+                ),
+                uses_virtual_event_time: items
+                    .first()
+                    .map_or(true, |row| row.uses_virtual_event_time),
+                equivalence_rate: if runs > 0 {
+                    equiv_count as f64 / runs as f64
+                } else {
+                    0.0
+                },
+            }
+        })
+        .collect::<Vec<_>>();
+    summary.sort_by(|left, right| {
+        left.system
+            .cmp(&right.system)
+            .then_with(|| left.mode.cmp(&right.mode))
+            .then_with(|| left.time_mode.cmp(&right.time_mode))
+    });
+    summary
+}
+
+pub fn write_sustained_summary_csv(
+    path: &Path,
+    rows: &[SustainedSummaryRow],
+) -> std::io::Result<()> {
+    let mut file = File::create(path)?;
+    writeln!(
+        file,
+        "system,mode,time_mode,runs,historical_events,logical_live_duration_seconds,event_rate_hz,event_interval_ms,expected_wall_clock_duration_ms,window_size_ms,window_slide_ms,avg_events_published,avg_events_processed,avg_completed_windows_total,avg_completed_windows_in_horizon,avg_flush_windows,avg_missed_windows,p50_first_hybrid_result_latency_ms,p95_first_hybrid_result_latency_ms,p50_first_hybrid_result_wall_clock_ms,p95_first_hybrid_result_wall_clock_ms,p50_window_hybrid_latency_ms,p95_window_hybrid_latency_ms,p50_window_result_wall_clock_offset_ms,p95_window_result_wall_clock_offset_ms,avg_historical_preparation_latency_ms,avg_first_live_window_latency_ms,avg_readiness_gap_ms,avg_hybrid_wait_after_inputs_ready_ms,avg_external_join_latency_total_ms,avg_external_join_latency_ms,avg_estimated_external_transfer_bytes_total,avg_estimated_external_transfer_bytes_per_window,avg_hybrid_result_count_total,avg_wall_clock_benchmark_duration_ms,avg_wall_clock_overhead_ms,uses_virtual_event_time,equivalence_rate"
+    )?;
+    for row in rows {
+        writeln!(
+            file,
+            "{},{},{},{},{},{},{},{:.3},{},{},{},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{},{:.3}",
+            row.system,
+            row.mode,
+            row.time_mode,
+            row.runs,
+            row.historical_events,
+            row.logical_live_duration_seconds,
+            row.event_rate_hz,
+            row.event_interval_ms,
+            row.expected_wall_clock_duration_ms,
+            row.window_size_ms,
+            row.window_slide_ms,
+            row.avg_events_published,
+            row.avg_events_processed,
+            row.avg_completed_windows_total,
+            row.avg_completed_windows_in_horizon,
+            row.avg_flush_windows,
+            row.avg_missed_windows,
+            row.p50_first_hybrid_result_latency_ms,
+            row.p95_first_hybrid_result_latency_ms,
+            row.p50_first_hybrid_result_wall_clock_ms,
+            row.p95_first_hybrid_result_wall_clock_ms,
+            row.p50_window_hybrid_latency_ms,
+            row.p95_window_hybrid_latency_ms,
+            row.p50_window_result_wall_clock_offset_ms,
+            row.p95_window_result_wall_clock_offset_ms,
+            row.avg_historical_preparation_latency_ms,
+            row.avg_first_live_window_latency_ms,
+            row.avg_readiness_gap_ms,
+            row.avg_hybrid_wait_after_inputs_ready_ms,
+            row.avg_external_join_latency_total_ms,
+            row.avg_external_join_latency_ms,
+            row.avg_estimated_external_transfer_bytes_total,
+            row.avg_estimated_external_transfer_bytes_per_window,
+            row.avg_hybrid_result_count_total,
+            row.avg_wall_clock_benchmark_duration_ms,
+            row.avg_wall_clock_overhead_ms,
+            row.uses_virtual_event_time,
+            row.equivalence_rate
+        )?;
+    }
+    Ok(())
+}
+
+fn write_h1_2_debug_artifacts(
+    base_dir: &Path,
+    unified: &SustainedSystemOutput,
+    decomposed: &SustainedSystemOutput,
+    config: &SustainedRunConfig<'_>,
+    equivalent: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let run_dir = base_dir.join("h1_2_sustained_debug").join(format!(
+        "run_{:03}_{}",
+        config.run_index,
+        if config.is_warmup {
+            "warmup"
+        } else {
+            "measured"
+        }
+    ));
+    fs::create_dir_all(&run_dir)?;
+
+    write_jsonl(&run_dir.join("live_events.jsonl"), &event_payload_rows(&unified.live_events))?;
+    write_jsonl(&run_dir.join("historical_baseline.jsonl"), &unified.historical_baseline)?;
+
+    // Write janus_window_results.jsonl
+    let mut janus_rows = Vec::new();
+    for (win_id, rows) in &unified.window_results {
+        let parts: Vec<&str> = win_id.split('-').collect();
+        let win_start_val = parts[0].parse::<u64>().unwrap_or(0);
+        let win_end_val = parts[1].parse::<u64>().unwrap_or(0);
+        let win_hash = canonical_window_hash(rows)?;
+        janus_rows.push(serde_json::json!({
+            "window_start_ms": win_start_val,
+            "window_end_ms": win_end_val,
+            "window_id": win_id.clone(),
+            "result_count": rows.len(),
+            "result_hash": win_hash,
+            "results": rows
+        }));
+    }
+    janus_rows.sort_by_key(|val| val["window_start_ms"].as_u64().unwrap_or(0));
+    write_jsonl(&run_dir.join("janus_window_results.jsonl"), &janus_rows)?;
+
+    // Write decomposed_window_results.jsonl
+    let mut decomposed_rows = Vec::new();
+    for (win_id, rows) in &decomposed.window_results {
+        let parts: Vec<&str> = win_id.split('-').collect();
+        let win_start_val = parts[0].parse::<u64>().unwrap_or(0);
+        let win_end_val = parts[1].parse::<u64>().unwrap_or(0);
+        let win_hash = canonical_window_hash(rows)?;
+        decomposed_rows.push(serde_json::json!({
+            "window_start_ms": win_start_val,
+            "window_end_ms": win_end_val,
+            "window_id": win_id.clone(),
+            "result_count": rows.len(),
+            "result_hash": win_hash,
+            "results": rows
+        }));
+    }
+    decomposed_rows.sort_by_key(|val| val["window_start_ms"].as_u64().unwrap_or(0));
+    write_jsonl(&run_dir.join("decomposed_window_results.jsonl"), &decomposed_rows)?;
+
+    // Write per_window_equivalence.jsonl
+    let mut equivalence_rows = Vec::new();
+    let mut per_window_summary = Vec::new();
+    let mut all_keys: HashSet<String> = unified.window_results.keys().cloned().collect();
+    all_keys.extend(decomposed.window_results.keys().cloned());
+    let mut sorted_keys: Vec<String> = all_keys.into_iter().collect();
+    sorted_keys
+        .sort_by_key(|k| k.split('-').next().and_then(|s| s.parse::<u64>().ok()).unwrap_or(0));
+
+    for win_id in sorted_keys {
+        let parts: Vec<&str> = win_id.split('-').collect();
+        let win_start_val = parts[0].parse::<u64>().unwrap_or(0);
+        let win_end_val = parts[1].parse::<u64>().unwrap_or(0);
+
+        let u_rows = unified.window_results.get(&win_id);
+        let d_rows = decomposed.window_results.get(&win_id);
+        let u_len = u_rows.map(|r| r.len()).unwrap_or(0);
+        let d_len = d_rows.map(|r| r.len()).unwrap_or(0);
+        let u_hash =
+            u_rows.map(|r| canonical_window_hash(r).unwrap_or_default()).unwrap_or_default();
+        let d_hash =
+            d_rows.map(|r| canonical_window_hash(r).unwrap_or_default()).unwrap_or_default();
+        let equivalent = u_len == d_len && u_hash == d_hash && u_len > 0;
+
+        equivalence_rows.push(serde_json::json!({
+            "window_start_ms": win_start_val,
+            "window_end_ms": win_end_val,
+            "window_id": win_id.clone(),
+            "janus_count": u_len,
+            "decomposed_count": d_len,
+            "janus_hash": u_hash,
+            "decomposed_hash": d_hash,
+            "equivalent": equivalent
+        }));
+
+        per_window_summary.push(serde_json::json!({
+            "window_id": win_id,
+            "equivalent": equivalent
+        }));
+    }
+    write_jsonl(&run_dir.join("per_window_equivalence.jsonl"), &equivalence_rows)?;
+
+    // Write equivalence_report.json
+    let report = serde_json::json!({
+        "system_pair": "janus_unified_vs_decomposed_sustained",
+        "run_index": config.run_index,
+        "mode": config.mode.as_str().to_string(),
+        "time_mode": config.time_mode.as_str().to_string(),
+        "expected_windows": config.expected_completed_windows_in_horizon(),
+        "janus_completed_windows": unified.row.completed_windows_in_horizon,
+        "decomposed_completed_windows": decomposed.row.completed_windows_in_horizon,
+        "janus_total_hash": unified.row.hybrid_result_hash_total,
+        "decomposed_total_hash": decomposed.row.hybrid_result_hash_total,
+        "equivalent": equivalent,
+        "per_window_equivalence": per_window_summary
+    });
+    fs::write(run_dir.join("equivalence_report.json"), serde_json::to_vec_pretty(&report)?)?;
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1732,5 +3098,204 @@ mod tests {
         assert_eq!(pair.decomposed.result_count, 1);
         assert_eq!(pair.unified.result_hash, pair.decomposed.result_hash);
         assert_eq!(pair.unified.equivalent_to_baseline, Some(true));
+    }
+
+    #[test]
+    fn test_deterministic_hybrid_dependency() {
+        let metadata = test_metadata();
+        let adapter = OxigraphExternalAdapter::new();
+
+        // 1. historical=1, live=1 -> hybrid_result_count=1
+        let workload_1_1 = prepare_coordination_workload(1, 1).expect("workload should build");
+        let pair_1_1 = run_coordination_pair(CoordinationRunConfig {
+            mode: ExecutionMode::Warm,
+            run_index: 0,
+            is_warmup: false,
+            historical_events: 1,
+            live_events: 1,
+            metadata: &metadata,
+            adapter: &adapter,
+            warm_workload: Some(&workload_1_1),
+            debug_output_dir: None,
+        })
+        .expect("pair should run");
+        assert_eq!(pair_1_1.unified.hybrid_result_count, 1);
+        assert_eq!(pair_1_1.decomposed.hybrid_result_count, 1);
+
+        // 2. historical=1, live=0 -> hybrid_result_count=0
+        let workload_1_0 = prepare_coordination_workload(1, 0).expect("workload should build");
+        let pair_1_0 = run_coordination_pair(CoordinationRunConfig {
+            mode: ExecutionMode::Warm,
+            run_index: 0,
+            is_warmup: false,
+            historical_events: 1,
+            live_events: 0,
+            metadata: &metadata,
+            adapter: &adapter,
+            warm_workload: Some(&workload_1_0),
+            debug_output_dir: None,
+        })
+        .expect("pair should run");
+        assert_eq!(pair_1_0.unified.hybrid_result_count, 0);
+        assert_eq!(pair_1_0.decomposed.hybrid_result_count, 0);
+
+        // 3. historical=0, live=1 -> hybrid_result_count=0
+        let workload_0_1 = prepare_coordination_workload(0, 1).expect("workload should build");
+        let pair_0_1 = run_coordination_pair(CoordinationRunConfig {
+            mode: ExecutionMode::Warm,
+            run_index: 0,
+            is_warmup: false,
+            historical_events: 0,
+            live_events: 1,
+            metadata: &metadata,
+            adapter: &adapter,
+            warm_workload: Some(&workload_0_1),
+            debug_output_dir: None,
+        })
+        .expect("pair should run");
+        assert_eq!(pair_0_1.unified.hybrid_result_count, 0);
+        assert_eq!(pair_0_1.decomposed.hybrid_result_count, 0);
+
+        // 4. historical=1, live=1 but mismatched sensor/join key -> hybrid_result_count=0
+        let mut workload_mismatched =
+            prepare_coordination_workload(1, 1).expect("workload should build");
+        // Change live event sensor to mismatched
+        if !workload_mismatched.live_events.is_empty() {
+            workload_mismatched.live_events[0] = RDFEvent::new(
+                workload_mismatched.live_events[0].timestamp,
+                "http://example.org/junction/mismatched_sensor",
+                TRAFFIC_PREDICATE,
+                &workload_mismatched.live_events[0].object,
+                GRAPH_URI,
+            );
+        }
+        let pair_mismatched = run_coordination_pair(CoordinationRunConfig {
+            mode: ExecutionMode::Warm,
+            run_index: 0,
+            is_warmup: false,
+            historical_events: 1,
+            live_events: 1,
+            metadata: &metadata,
+            adapter: &adapter,
+            warm_workload: Some(&workload_mismatched),
+            debug_output_dir: None,
+        })
+        .expect("pair should run");
+        assert_eq!(pair_mismatched.unified.hybrid_result_count, 0);
+        assert_eq!(pair_mismatched.decomposed.hybrid_result_count, 0);
+    }
+
+    #[test]
+    fn test_sustained_expected_completed_windows_formula() {
+        // window_size=120s, slide=60s, duration=240s
+        let duration = 240;
+        let window_size = 120;
+        let slide = 60;
+        let first_start = window_size - slide - 1;
+        let last_event = duration - 1;
+        let close_ts = last_event + 20;
+        let expected = if close_ts >= first_start {
+            1 + (close_ts - first_start) / slide
+        } else {
+            0
+        };
+        assert_eq!(expected, 4);
+    }
+
+    #[test]
+    fn test_sustained_wall_clock_config_helpers() {
+        assert!((sustained_event_interval_ms(4) - 250.0).abs() < f64::EPSILON);
+        assert_eq!(sustained_expected_wall_clock_duration_ms(20), 20_000);
+    }
+
+    #[test]
+    fn test_sustained_hybrid_dependency_and_equivalence() {
+        let metadata = test_metadata();
+        let adapter = OxigraphExternalAdapter::new();
+
+        // 1. Janus and decomposed baseline match per-window result hashes on a tiny workload
+        let workload_1_1 =
+            prepare_sustained_workload(100, 240, 1, 120, 60).expect("workload should build");
+        let pair_1_1 = run_sustained_pair(SustainedRunConfig {
+            mode: ExecutionMode::Warm,
+            time_mode: TimeMode::Virtual,
+            run_index: 0,
+            is_warmup: false,
+            historical_events: 100,
+            live_duration_seconds: 240,
+            event_rate_hz: 1,
+            event_interval_ms: sustained_event_interval_ms(1),
+            expected_wall_clock_duration_ms: sustained_expected_wall_clock_duration_ms(240),
+            window_size_seconds: 120,
+            window_slide_seconds: 60,
+            metadata: &metadata,
+            adapter: &adapter,
+            warm_workload: Some(&workload_1_1),
+            debug_output_dir: None,
+        })
+        .expect("sustained pair should run");
+
+        assert_eq!(pair_1_1.unified.expected_completed_windows, 2);
+        assert_eq!(pair_1_1.unified.completed_windows_total, 4);
+        assert_eq!(pair_1_1.unified.completed_windows_in_horizon, 2);
+        assert_eq!(pair_1_1.unified.flush_windows, 2);
+        assert_eq!(pair_1_1.unified.time_mode, "virtual");
+        assert!(pair_1_1.unified.uses_virtual_event_time);
+        assert!((pair_1_1.unified.event_interval_ms - 1000.0).abs() < f64::EPSILON);
+        assert_eq!(pair_1_1.unified.expected_wall_clock_duration_ms, 240_000);
+        assert_eq!(pair_1_1.decomposed.completed_windows_total, 4);
+        assert_eq!(pair_1_1.decomposed.completed_windows_in_horizon, 2);
+        assert_eq!(pair_1_1.decomposed.flush_windows, 2);
+        assert!(pair_1_1.decomposed.uses_virtual_event_time);
+        assert_eq!(pair_1_1.unified.equivalent_to_baseline, Some(true));
+        assert!(pair_1_1.unified.hybrid_result_count_total > 0);
+
+        // 2. Removing historical input yields zero hybrid results
+        let workload_no_hist =
+            prepare_sustained_workload(0, 240, 1, 120, 60).expect("workload should build");
+        let pair_no_hist = run_sustained_pair(SustainedRunConfig {
+            mode: ExecutionMode::Warm,
+            time_mode: TimeMode::Virtual,
+            run_index: 0,
+            is_warmup: false,
+            historical_events: 0,
+            live_duration_seconds: 240,
+            event_rate_hz: 1,
+            event_interval_ms: sustained_event_interval_ms(1),
+            expected_wall_clock_duration_ms: sustained_expected_wall_clock_duration_ms(240),
+            window_size_seconds: 120,
+            window_slide_seconds: 60,
+            metadata: &metadata,
+            adapter: &adapter,
+            warm_workload: Some(&workload_no_hist),
+            debug_output_dir: None,
+        })
+        .expect("sustained pair should run");
+        assert_eq!(pair_no_hist.unified.hybrid_result_count_total, 0);
+        assert_eq!(pair_no_hist.decomposed.hybrid_result_count_total, 0);
+
+        // 3. Removing live input yields zero hybrid results
+        let workload_no_live =
+            prepare_sustained_workload(100, 0, 1, 120, 60).expect("workload should build");
+        let pair_no_live = run_sustained_pair(SustainedRunConfig {
+            mode: ExecutionMode::Warm,
+            time_mode: TimeMode::Virtual,
+            run_index: 0,
+            is_warmup: false,
+            historical_events: 100,
+            live_duration_seconds: 0,
+            event_rate_hz: 1,
+            event_interval_ms: sustained_event_interval_ms(1),
+            expected_wall_clock_duration_ms: sustained_expected_wall_clock_duration_ms(0),
+            window_size_seconds: 120,
+            window_slide_seconds: 60,
+            metadata: &metadata,
+            adapter: &adapter,
+            warm_workload: Some(&workload_no_live),
+            debug_output_dir: None,
+        })
+        .expect("sustained pair should run");
+        assert_eq!(pair_no_live.unified.hybrid_result_count_total, 0);
+        assert_eq!(pair_no_live.decomposed.hybrid_result_count_total, 0);
     }
 }

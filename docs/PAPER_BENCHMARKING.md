@@ -146,6 +146,27 @@ Result correctness:
 
 - `result_hash`
 
+## H1.1 Hybrid Query Semantics
+
+The H1.1 benchmark validates unified versus decomposed hybrid execution. The query model integrates three distinct elements:
+- Historical component: Executes a query over historical events stored in a segmented storage backend (using a SPARQL engine to retrieve baseline bindings).
+- Live stream/window component: Processes real-time events through a sliding window stream operator ([RANGE 10000 STEP 1000]).
+- Hybrid result: Merges the live stream window output with the materialized historical baseline statements matching on the join key (sensor).
+
+### Execution Architectures
+
+#### Janus-QL Unified Execution
+Janus-QL compiles the historical and live stream elements into a single execution graph. The historical sub-query is executed once, and its results are materialized as internal static bindings. As live events stream into the engine, they are joined inline with the static bindings within the same process. No serialization or IPC boundaries are crossed to merge live stream and historical data.
+
+#### Decomposed Baseline
+The decomposed baseline, labeled "Oxigraph historical + Janus live window processor + external join", coordinates execution across separate stages:
+1. Oxigraph historical query: An external Oxigraph engine queries the historical dataset to retrieve the baseline bindings. These are returned and materialized into memory in the client coordinate space.
+2. Janus live window processor: A separate instance of the Janus live processing engine executes a live-only RSP-QL query over the live events stream.
+3. External join/materialization: The client coordinate space collects the intermediate live window results and performs an external hash join against the materialized historical bindings on the matching sensor variable.
+
+### Equivalence Target
+The primary target for correctness equivalence checking is the final hybrid result (hybrid_result_hash and hybrid_result_count). Historical equivalence is monitored as diagnostic evidence, whereas live-only intermediate equivalence is not directly applicable during benchmark execution because Janus Unified does not produce a separate intermediate live result.
+
 ## Result Equivalence Checking
 
 Each run emits `result_hash`, computed as a deterministic SHA-256 hash over canonicalized result rows:
@@ -179,6 +200,97 @@ Outputs:
 
 - `paper_hybrid_coordination.raw.jsonl`
 - `paper_hybrid_coordination.summary.csv`
+
+## H1.2 Sustained Hybrid Window Execution
+
+The H1.2 benchmark evaluates sustained hybrid query execution performance over repeated sliding windows. It supports both deterministic virtual event-time replay and slower wall-clock replay.
+
+While H1.1 focuses on the latency of registering and obtaining the very first hybrid query result (coordination overhead check), H1.2 models a continuous stream processor running over a logical stream duration (by default 180 or 240 logical seconds).
+
+### Execution Semantics
+
+- Virtual Event-Time Ingestion (`--time-mode virtual`, default): Events are published back-to-back in virtual time rather than sleeping in wall-clock time. The live stream engine's sliding window boundaries are advanced entirely by the event timestamps. This is the deterministic, high-repeat mode and is the correct default for engine-overhead measurement.
+- Wall-Clock Replay (`--time-mode wall-clock`): Events are published according to real elapsed time. `event_rate_hz` determines the target spacing between events, so `event_rate_hz=4` means one event every 250 ms. Event timestamps still follow the logical schedule; only the publication timing changes. This mode is intended as a realism and sanity check for user-observed result timing, not as the main repeated performance matrix.
+- Watermark/Flush Behavior: To reliably finalize and evaluate the final window, a watermark sentinel event is published at the end of the stream (offset by +20 seconds past the logical duration bounds), forcing all remaining active windows to close and emit their results.
+- Wall-Clock Sentinel Timing: In wall-clock mode, the harness schedules normal events against a monotonic `Instant` and sends the sentinel only after the logical live duration has elapsed. This keeps replay duration approximately aligned with `logical_live_duration_seconds * 1000`, plus processing and synchronization overhead.
+- Decomposed Baseline coordination: For each completed window, the decomposed baseline performs:
+  1. Oxigraph historical retrieval (once).
+  2. Janus live window processor execution (returns a live stream result for each slide).
+  3. Client coordinate join (combining the window's live result and the materialized historical bindings).
+  These stages are measured slide-by-slide to determine the per-window hybrid latency.
+
+### Latency Interpretation
+
+- Processing latency: CPU/runtime cost after data and window readiness. In H1.2 this remains `first_hybrid_result_latency_ms` and the per-window hybrid latency fields.
+- Wall-clock result offset: When a user would actually observe a result since replay start. In wall-clock mode this is reported via `first_hybrid_result_wall_clock_ms` and per-window `window_result_wall_clock_offsets_ms`, with paper-facing summaries using the in-horizon p50/p95 offset fields.
+
+Virtual mode is still the recommended mode for final repeated measurements because it is fast, deterministic, and isolates engine/runtime overhead. Wall-clock mode is slower and more sensitive to OS scheduling jitter, so use it as a realism/sanity benchmark.
+
+### Window Horizon Filtering and Sentinel Flushes
+
+For logical_live_duration_seconds=240, window_size_seconds=120, and window_slide_seconds=60:
+- The virtual event-time stream starts at 1900000000000 ms (relative 0 seconds) and ends at 1900000239000 ms (relative 239 seconds).
+- The first completed window triggers at 59 seconds offset (ending at 179 seconds), and the second triggers at 119 seconds offset (ending at 239 seconds). Both end before or at the 240 seconds horizon, meaning they contain only normal stream events.
+- The third window (ending at 299 seconds) and fourth window (ending at 359 seconds) extend past the 240 seconds logical duration. These are only completed and emitted because the close_stream call publishes a sentinel watermark at 259 seconds, forcing a flush of all active windows.
+- To prevent sentinel-finalized flush windows or other out-of-horizon windows from skewing summary statistics, the harness separates completed windows:
+  - completed_windows_total: The total count of all windows emitted (4).
+  - completed_windows_in_horizon: The count of windows ending within the logical duration (2).
+  - flush_windows: The count of windows finalized only by the sentinel flush (2).
+- Latency, equivalence, result count, and transfer byte statistics are computed exclusively over completed_windows_in_horizon.
+
+## H1.2 Command
+
+```bash
+cargo run --release --bin paper_sustained_hybrid -- \
+  --warmup-runs 1 \
+  --runs 5 \
+  --historical-events 10000 \
+  --live-duration-seconds 240 \
+  --event-rate-hz 1 \
+  --window-size-seconds 120 \
+  --window-slide-seconds 60 \
+  --mode warm \
+  --time-mode virtual
+```
+
+Outputs:
+
+- `paper_sustained_hybrid.raw.jsonl`
+- `paper_sustained_hybrid.summary.csv`
+
+Recommended wall-clock sanity check:
+
+```bash
+cargo run --release --bin paper_sustained_hybrid -- \
+  --warmup-runs 0 \
+  --runs 1 \
+  --historical-events 1000 \
+  --live-duration-seconds 20 \
+  --event-rate-hz 4 \
+  --window-size-seconds 10 \
+  --window-slide-seconds 5 \
+  --mode warm \
+  --time-mode wall-clock \
+  --debug-equivalence \
+  --output-dir target/paper_benchmarks/pre_final_h1_2_wall_clock_short
+```
+
+Optional longer paper sanity check:
+
+```bash
+cargo run --release --bin paper_sustained_hybrid -- \
+  --warmup-runs 0 \
+  --runs 1 \
+  --historical-events 10000 \
+  --live-duration-seconds 180 \
+  --event-rate-hz 4 \
+  --window-size-seconds 120 \
+  --window-slide-seconds 60 \
+  --mode warm \
+  --time-mode wall-clock \
+  --debug-equivalence \
+  --output-dir target/paper_benchmarks/h1_2_wall_clock_180s_4hz
+```
 
 ## H2 Command
 
