@@ -2354,7 +2354,6 @@ fn run_sustained_system(
 
     let live_start_at;
     let mut external_join_latencies = Vec::<(i64, f64)>::new();
-    let mut live_rows_count = 0;
     let historical_baseline;
 
     let estimated_external_transfer_bytes_total;
@@ -2496,8 +2495,6 @@ fn run_sustained_system(
                         if win_end <= horizon_end_ms {
                             all_live_rows.push(rows.clone());
                         }
-                        live_rows_count += 1;
-
                         let start_join = Instant::now();
                         let joined = join_live_with_baseline(&[rows], &materialized_baseline_rows);
                         let join_duration = start_join.elapsed().as_secs_f64() * 1000.0;
@@ -2545,9 +2542,7 @@ fn run_sustained_system(
                     if win_end <= horizon_end_ms {
                         all_live_rows.push(rows.clone());
                     }
-                    live_rows_count += 1;
-
-                    let start_join = Instant::now();
+                        let start_join = Instant::now();
                     let joined = join_live_with_baseline(&[rows], &materialized_baseline_rows);
                     let join_duration = start_join.elapsed().as_secs_f64() * 1000.0;
                     if first_hybrid_result_at == 0 {
@@ -2636,7 +2631,9 @@ fn run_sustained_system(
     };
 
     let estimated_external_transfer_bytes_per_window = if completed_windows_in_horizon > 0 {
-        estimated_external_transfer_bytes_total / completed_windows_in_horizon
+        estimated_external_transfer_bytes_total
+            .checked_div(completed_windows_in_horizon)
+            .unwrap_or(0)
     } else {
         0
     };

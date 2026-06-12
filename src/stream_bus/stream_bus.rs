@@ -308,10 +308,14 @@ impl StreamBus {
         F: Fn(RDFEvent, String) -> Fut + Send + Sync,
         Fut: std::future::Future<Output = ()> + Send,
     {
-        let interval = if self.config.rate_of_publishing > 0 {
-            Some(Duration::from_micros(1_000_000 / self.config.rate_of_publishing))
-        } else {
+        let interval = if self.config.rate_of_publishing == 0 {
             None
+        } else {
+            Some(Duration::from_micros(
+                1_000_000u64
+                    .checked_div(self.config.rate_of_publishing)
+                    .expect("rate_of_publishing is positive"),
+            ))
         };
 
         let mut last_report = Instant::now();

@@ -1447,7 +1447,7 @@ fn collect_live_results(
     first_event_started: Instant,
     expected_results: usize,
 ) -> Result<Vec<TimedBinding>, Box<dyn std::error::Error>> {
-    let deadline = Instant::now() + Duration::from_secs(600);
+    let deadline = Instant::now() + Duration::from_secs(10 * 60);
     let mut timed_results = Vec::new();
     let mut last_progress = Instant::now();
 
@@ -1485,8 +1485,8 @@ fn collect_live_results(
 fn expected_live_averages(live_events: &[RDFEvent]) -> HashMap<String, f64> {
     let mut by_sensor: HashMap<String, (f64, usize)> = HashMap::new();
     for event in live_events {
-        let sensor = normalize_binding_term(&event.subject.to_string());
-        let value = event.object.to_string().trim().parse::<f64>().unwrap_or(0.0);
+        let sensor = normalize_binding_term(&event.subject.clone());
+        let value = event.object.clone().trim().parse::<f64>().unwrap_or(0.0);
         let entry = by_sensor.entry(sensor).or_insert((0.0, 0));
         entry.0 += value;
         entry.1 += 1;
