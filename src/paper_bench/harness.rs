@@ -2542,7 +2542,7 @@ fn run_sustained_system(
                     if win_end <= horizon_end_ms {
                         all_live_rows.push(rows.clone());
                     }
-                        let start_join = Instant::now();
+                    let start_join = Instant::now();
                     let joined = join_live_with_baseline(&[rows], &materialized_baseline_rows);
                     let join_duration = start_join.elapsed().as_secs_f64() * 1000.0;
                     if first_hybrid_result_at == 0 {

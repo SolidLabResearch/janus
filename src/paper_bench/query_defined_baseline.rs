@@ -19,10 +19,10 @@ use std::sync::{
 };
 use std::{
     collections::HashMap,
+    convert::TryFrom,
     fs::File,
     io::Write,
     path::{Path, PathBuf},
-    convert::TryFrom,
     sync::Arc,
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
@@ -1447,7 +1447,7 @@ fn collect_live_results(
     first_event_started: Instant,
     expected_results: usize,
 ) -> Result<Vec<TimedBinding>, Box<dyn std::error::Error>> {
-    let deadline = Instant::now() + Duration::from_secs(10 * 60);
+    let deadline = Instant::now() + Duration::from_secs_f64(600.0);
     let mut timed_results = Vec::new();
     let mut last_progress = Instant::now();
 
