@@ -341,14 +341,14 @@ impl JanusApi {
             {
                 let mut processor = live_processor.lock().unwrap();
                 if !parsed.ast.baseline_uses.is_empty() {
-                    let (_query_defined_baselines, baseline_quads) =
+                    let (query_defined_baselines_map, baseline_quads) =
                         evaluate_and_materialize_query_defined_baselines(
                             &self.storage,
                             parsed,
                             &mpsc::channel::<()>().1,
                         )?;
                     if let Ok(mut stored) = query_defined_baselines.write() {
-                        *stored = _query_defined_baselines;
+                        *stored = query_defined_baselines_map;
                     }
                     materialize_static_quads(&mut processor, &baseline_quads)?;
                 }
@@ -1193,9 +1193,7 @@ fn parse_literal_term(raw: &str) -> Result<Literal, String> {
     let lexical = unescape_literal_lexical(lexical);
 
     if let Some(language) = suffix.strip_prefix('@') {
-        return Ok(
-            Literal::new_language_tagged_literal(lexical, language).map_err(|e| e.to_string())?
-        );
+        return Literal::new_language_tagged_literal(lexical, language).map_err(|e| e.to_string());
     }
 
     if let Some(datatype_iri) = suffix.strip_prefix("^^") {

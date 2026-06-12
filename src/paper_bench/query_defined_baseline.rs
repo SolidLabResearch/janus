@@ -22,6 +22,7 @@ use std::{
     fs::File,
     io::Write,
     path::{Path, PathBuf},
+    convert::TryFrom,
     sync::Arc,
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
@@ -628,7 +629,7 @@ fn write_historical_events(
 
         let event_started = Instant::now();
         let sensor_idx = event_idx % baseline_entities_count;
-        let value = 10 + sensor_idx as i64;
+        let value = 10 + i64::try_from(sensor_idx).expect("sensor index fits in i64");
         let event = RDFEvent::new(
             timestamp,
             &sensor_iri(sensor_idx),
@@ -669,7 +670,7 @@ fn generate_accelerated_live_events(baseline_entities_count: usize) -> Vec<RDFEv
     let mut events = Vec::with_capacity(baseline_entities_count);
     for sensor_idx in 0..baseline_entities_count {
         let timestamp = 1000 + (sensor_idx as u64 * 10);
-        let value = 20 + sensor_idx as i64 * 10;
+        let value = 20 + i64::try_from(sensor_idx).expect("sensor index fits in i64") * 10;
         events.push(RDFEvent::new(
             timestamp,
             &sensor_iri(sensor_idx),
@@ -691,7 +692,7 @@ fn generate_realtime_live_events(
     for event_idx in 0..live_event_count {
         let sensor_idx = event_idx % baseline_entities_count;
         let timestamp = start_timestamp + ((event_idx as f64) * event_interval_ms).round() as u64;
-        let value = 20 + sensor_idx as i64 * 10;
+        let value = 20 + i64::try_from(sensor_idx).expect("sensor index fits in i64") * 10;
         events.push(RDFEvent::new(
             timestamp,
             &sensor_iri(sensor_idx),
@@ -832,6 +833,7 @@ GROUP BY ?sensor
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_single_comparison(
     parser: &JanusQLParser,
     prepared: &PreparedStorage,
@@ -902,6 +904,7 @@ fn run_single_comparison(
     Ok(comparison)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_baseline_variant(
     parser: &JanusQLParser,
     prepared: &PreparedStorage,
@@ -997,9 +1000,10 @@ fn run_baseline_variant(
     let observed_rows = parse_live_rows(&collected)?;
     log_stage(verbose, "baseline", "done");
     let mut window_semantics_note = if live_replay.mode == LiveReplayMode::Realtime {
-        Some(format!(
+        Some(
             "Realtime replay reports emitted windows separately from full windows; the first emission is the initial warm-up window and full windows follow at the logical duration horizon."
-        ))
+                .to_string(),
+        )
     } else {
         None
     };
@@ -1120,6 +1124,7 @@ fn run_baseline_variant(
     Ok(VariantRunData { metrics })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_live_only_variant(
     prepared: &PreparedStorage,
     live_replay: &ResolvedLiveReplayConfig,
@@ -1181,9 +1186,10 @@ fn run_live_only_variant(
     let observed_rows = parse_live_rows(&collected)?;
     log_stage(verbose, "live_only", "done");
     let mut window_semantics_note = if live_replay.mode == LiveReplayMode::Realtime {
-        Some(format!(
+        Some(
             "Realtime replay reports emitted windows separately from full windows; the first emission is the initial warm-up window and full windows follow at the logical duration horizon."
-        ))
+                .to_string(),
+        )
     } else {
         None
     };
@@ -1538,6 +1544,7 @@ fn build_correctness_diagnostics(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn validate_baseline_rows(
     rows: &[QueryDefinedBaselineObservedRow],
     expected_live_averages: &HashMap<String, f64>,
