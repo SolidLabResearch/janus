@@ -1,50 +1,24 @@
+mod support;
+
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use janus::{
     execution::historical_executor::HistoricalExecutor,
     parsing::janusql_parser::{SourceKind, WindowDefinition, WindowType},
     querying::oxigraph_adapter::OxigraphAdapter,
-    storage::{segmented_storage::StreamingSegmentedStorage, util::StreamingConfig},
+    storage::segmented_storage::StreamingSegmentedStorage,
 };
-use std::sync::{
-    atomic::{AtomicU64, Ordering},
-    Arc,
-};
-use std::time::{SystemTime, UNIX_EPOCH};
-
-static COUNTER: AtomicU64 = AtomicU64::new(0);
-
-fn unique_config() -> StreamingConfig {
-    let id = COUNTER.fetch_add(1, Ordering::Relaxed);
-    let ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-    StreamingConfig {
-        segment_base_path: format!("/tmp/janus_bench_fixed_{}_{}", ts, id),
-        max_batch_events: 1_000_000,
-        max_batch_age_seconds: 3600,
-        max_batch_bytes: 1_000_000_000,
-        sparse_interval: 64,
-        entries_per_index_block: 256,
-    }
-}
+use std::sync::Arc;
+use support::{populate_storage, unique_config, GRAPH_URI};
 
 /// Write N events at timestamps [1000, 1000+N) into a fresh storage.
 /// These land in the in-memory batch buffer — no flush needed before querying.
 fn setup(n: usize) -> (Arc<StreamingSegmentedStorage>, WindowDefinition) {
-    let storage = StreamingSegmentedStorage::new(unique_config()).unwrap();
-    for i in 0..n as u64 {
-        storage
-            .write_rdf(
-                1_000 + i,
-                &format!("http://example.org/sensor{}", i % 5),
-                "http://saref.etsi.org/core/hasValue",
-                &format!("{}", 20 + (i % 10)),
-                "http://example.org/graph",
-            )
-            .unwrap();
-    }
+    let storage = StreamingSegmentedStorage::new(unique_config("historical_fixed")).unwrap();
+    populate_storage(&storage, n, 1_000, 1, GRAPH_URI);
     let window = WindowDefinition {
         window_name: "w".to_string(),
         source_kind: SourceKind::Stream,
-        stream_name: "http://example.org/stream".to_string(),
+        stream_name: GRAPH_URI.to_string(),
         width: n as u64,
         slide: n as u64,
         offset: None,
@@ -55,7 +29,15 @@ fn setup(n: usize) -> (Arc<StreamingSegmentedStorage>, WindowDefinition) {
     (Arc::new(storage), window)
 }
 
-const SPARQL: &str = "SELECT ?s ?p ?o WHERE { ?s ?p ?o }";
+const SPARQL: &str = r#"
+    PREFIX ex: <http://example.org/>
+    SELECT ?sensor ?temp
+    WHERE {
+        GRAPH ex:graph1 {
+            ?sensor ex:temperature ?temp .
+        }
+    }
+"#;
 
 fn historical_fixed(c: &mut Criterion) {
     let mut group = c.benchmark_group("historical/fixed_window");

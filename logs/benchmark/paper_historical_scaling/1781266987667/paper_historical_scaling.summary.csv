@@ -1,0 +1,2 @@
+dataset_size_quads,query_type,mode,runs,logical_quads_scanned,selectivity,result_count,p50_latency_ms,p95_latency_ms,avg_latency_ms,avg_throughput_quads_per_sec,max_peak_rss_mb
+10,point_lookup,cold,1,0,0.000000,0,0.518,0.518,0.518,0.000,10.156

@@ -272,9 +272,14 @@ impl LiveStreamProcessing {
     /// * `event` - RDFEvent representing static knowledge
     pub fn add_static_data(&mut self, event: RDFEvent) -> Result<(), LiveStreamProcessingError> {
         let quad = self.rdf_event_to_quad(&event)?;
+        self.add_static_quad(quad);
+        Ok(())
+    }
+
+    /// Adds a pre-built static quad to the RSP engine.
+    pub fn add_static_quad(&mut self, quad: Quad) {
         self.engine.add_static_data(quad.clone());
         self.static_data.lock().unwrap().insert(quad);
-        Ok(())
     }
 
     /// Receives the next query result from the processing engine
@@ -529,7 +534,11 @@ impl LiveStreamProcessing {
         }
 
         let parsed_query = build_evaluator().parse_query(query).map_err(|e| {
-            LiveStreamProcessingError(format!("Failed to parse live SPARQL: {}", e))
+            LiveStreamProcessingError(format!(
+                "Failed to parse live SPARQL: {}\nLowered live query with line numbers:\n{}",
+                e,
+                Self::format_query_with_line_numbers(query)
+            ))
         })?;
         let results = parsed_query.on_store(&store).execute().map_err(|e| {
             LiveStreamProcessingError(format!("Failed to execute live SPARQL: {}", e))
@@ -559,6 +568,20 @@ impl LiveStreamProcessing {
     /// Checks if processing has been started
     pub fn is_processing(&self) -> bool {
         self.processing_started
+    }
+
+    #[cfg(test)]
+    pub fn static_quads(&self) -> HashSet<Quad> {
+        self.static_data.lock().unwrap().clone()
+    }
+
+    fn format_query_with_line_numbers(query: &str) -> String {
+        query
+            .lines()
+            .enumerate()
+            .map(|(index, line)| format!("{:>4} | {}", index + 1, line))
+            .collect::<Vec<_>>()
+            .join("\n")
     }
 }
 

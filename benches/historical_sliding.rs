@@ -1,30 +1,14 @@
+mod support;
+
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use janus::{
     execution::historical_executor::HistoricalExecutor,
     parsing::janusql_parser::{SourceKind, WindowDefinition, WindowType},
     querying::oxigraph_adapter::OxigraphAdapter,
-    storage::{segmented_storage::StreamingSegmentedStorage, util::StreamingConfig},
+    storage::segmented_storage::StreamingSegmentedStorage,
 };
-use std::sync::{
-    atomic::{AtomicU64, Ordering},
-    Arc,
-};
-use std::time::{SystemTime, UNIX_EPOCH};
-
-static COUNTER: AtomicU64 = AtomicU64::new(0);
-
-fn unique_config() -> StreamingConfig {
-    let id = COUNTER.fetch_add(1, Ordering::Relaxed);
-    let ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-    StreamingConfig {
-        segment_base_path: format!("/tmp/janus_bench_sliding_{}_{}", ts, id),
-        max_batch_events: 1_000_000,
-        max_batch_age_seconds: 3600,
-        max_batch_bytes: 1_000_000_000,
-        sparse_interval: 64,
-        entries_per_index_block: 256,
-    }
-}
+use std::sync::Arc;
+use support::{populate_storage, recent_base_timestamp, unique_config, GRAPH_URI};
 
 // Window config: OFFSET=10_000ms, RANGE=2_000ms, SLIDE=1_000ms
 // SlidingWindowIterator scans [now-10000, now] with 8 overlapping windows.
@@ -36,25 +20,14 @@ const DATA_START_BEFORE_NOW_MS: u64 = 8_000;
 const DATA_SPAN_MS: u64 = 6_000;
 
 fn setup(n: usize) -> (Arc<StreamingSegmentedStorage>, WindowDefinition) {
-    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
-    let storage = StreamingSegmentedStorage::new(unique_config()).unwrap();
-    let n64 = n as u64;
-    for i in 0..n64 {
-        let ts = now - DATA_START_BEFORE_NOW_MS + i * DATA_SPAN_MS / n64.max(1);
-        storage
-            .write_rdf(
-                ts,
-                &format!("http://example.org/sensor{}", i % 5),
-                "http://saref.etsi.org/core/hasValue",
-                &format!("{}", 20 + (i % 10)),
-                "http://example.org/graph",
-            )
-            .unwrap();
-    }
+    let start_ts = recent_base_timestamp(DATA_START_BEFORE_NOW_MS);
+    let storage = StreamingSegmentedStorage::new(unique_config("historical_sliding")).unwrap();
+    let step_ms = (DATA_SPAN_MS / n.max(1) as u64).max(1);
+    populate_storage(&storage, n, start_ts, step_ms, GRAPH_URI);
     let window = WindowDefinition {
         window_name: "w".to_string(),
         source_kind: SourceKind::Stream,
-        stream_name: "http://example.org/stream".to_string(),
+        stream_name: GRAPH_URI.to_string(),
         width: RANGE_MS,
         slide: SLIDE_MS,
         offset: Some(OFFSET_MS),
@@ -65,7 +38,15 @@ fn setup(n: usize) -> (Arc<StreamingSegmentedStorage>, WindowDefinition) {
     (Arc::new(storage), window)
 }
 
-const SPARQL: &str = "SELECT ?s ?p ?o WHERE { ?s ?p ?o }";
+const SPARQL: &str = r#"
+    PREFIX ex: <http://example.org/>
+    SELECT ?sensor ?temp
+    WHERE {
+        GRAPH ex:graph1 {
+            ?sensor ex:temperature ?temp .
+        }
+    }
+"#;
 
 fn historical_sliding(c: &mut Criterion) {
     let mut group = c.benchmark_group("historical/sliding_window");

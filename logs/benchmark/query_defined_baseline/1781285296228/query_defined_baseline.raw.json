@@ -1,0 +1,971 @@
+{
+  "metadata": {
+    "git_commit_sha": "b9da83e012fb88997265b533077f218fa5453236",
+    "branch": "benchmark-paper-hybrid-scaling",
+    "rustc_version": "rustc 1.90.0 (1159e78c4 2025-09-14)",
+    "os": "macos 25.5.0",
+    "cpu_model": "Apple M4",
+    "ram_bytes": 17179869184,
+    "benchmark_command": "target/release/paper_query_defined_baseline --warmup-runs 0 --runs 1 --historical-events 1M,5M,10M --baseline-entities 10",
+    "timestamp_unix_ms": 1781285296297
+  },
+  "profile": "smoke",
+  "live_replay_mode": "accelerated",
+  "live_rate_hz": 4.0,
+  "live_duration_seconds": null,
+  "live_window_size_seconds": null,
+  "live_window_slide_seconds": null,
+  "runs": 1,
+  "warmup_runs": 0,
+  "historical_events": [
+    1000000,
+    5000000,
+    10000000
+  ],
+  "baseline_entities": [
+    10
+  ],
+  "correctness_passed": false,
+  "output_dir": "logs/benchmark/query_defined_baseline/1781285296228",
+  "comparisons": [
+    {
+      "historical_events": 1000000,
+      "baseline_entities": 10,
+      "is_warmup": false,
+      "run_index": 0,
+      "observed_baseline_rows": 10,
+      "observed_live_only_rows": 10,
+      "baseline": {
+        "variant": "baseline",
+        "run_index": 0,
+        "historical_events": 1000000,
+        "baseline_entities": 10,
+        "live_replay_mode": "accelerated",
+        "live_rate_hz": 4.0,
+        "live_duration_seconds": null,
+        "live_window_size_seconds": null,
+        "live_window_slide_seconds": null,
+        "live_event_count": 10,
+        "expected_emitted_windows": 0,
+        "expected_full_windows": 0,
+        "warmup_window_count": null,
+        "observed_emitted_windows": 1,
+        "window_semantics_note": null,
+        "historical_generation_ms": 251.07944499644856,
+        "storage_write_ms": 90.50320999992455,
+        "baseline_eval_ms": 666.449042,
+        "materialization_ms": 0.07125,
+        "static_injection_ms": 0.009292,
+        "historical_query_ms": 666.449042,
+        "baseline_materialization_ms": 0.07125,
+        "static_graph_injection_ms": 0.009292,
+        "live_startup_ms": 0.002791,
+        "first_result_latency_ms": 30.044207999999998,
+        "peak_rss_mb": null,
+        "mean_rss_mb": null,
+        "peak_cpu_percent": null,
+        "mean_cpu_percent": null,
+        "sample_count": 0,
+        "result_count": 10,
+        "correctness_ok": true,
+        "materialized_quad_count": 10,
+        "baseline_binding_count": 10,
+        "window_result_latencies_ms": [
+          30.044207999999998,
+          30.046125,
+          30.047541,
+          30.045916,
+          30.046333,
+          30.046541,
+          30.047958,
+          30.047291,
+          30.048499999999997,
+          30.04775
+        ],
+        "completed_window_latencies_ms": [
+          30.044207999999998
+        ],
+        "completed_window_result_counts": [
+          10
+        ],
+        "observed_rows": [
+          {
+            "sensor": "http://example.org/sensor0",
+            "minute_avg_value": 20.0,
+            "day_avg_value": 10.0,
+            "difference": 10.0,
+            "received_after_first_event_ms": 30.044207999999998,
+            "timestamp_from": 1090,
+            "timestamp_to": 61090
+          },
+          {
+            "sensor": "http://example.org/sensor1",
+            "minute_avg_value": 30.0,
+            "day_avg_value": 11.0,
+            "difference": 19.0,
+            "received_after_first_event_ms": 30.046125,
+            "timestamp_from": 1090,
+            "timestamp_to": 61090
+          },
+          {
+            "sensor": "http://example.org/sensor2",
+            "minute_avg_value": 40.0,
+            "day_avg_value": 12.0,
+            "difference": 28.0,
+            "received_after_first_event_ms": 30.047541,
+            "timestamp_from": 1090,
+            "timestamp_to": 61090
+          },
+          {
+            "sensor": "http://example.org/sensor3",
+            "minute_avg_value": 50.0,
+            "day_avg_value": 13.0,
+            "difference": 37.0,
+            "received_after_first_event_ms": 30.045916,
+            "timestamp_from": 1090,
+            "timestamp_to": 61090
+          },
+          {
+            "sensor": "http://example.org/sensor4",
+            "minute_avg_value": 60.0,
+            "day_avg_value": 14.0,
+            "difference": 46.0,
+            "received_after_first_event_ms": 30.046333,
+            "timestamp_from": 1090,
+            "timestamp_to": 61090
+          },
+          {
+            "sensor": "http://example.org/sensor5",
+            "minute_avg_value": 70.0,
+            "day_avg_value": 15.0,
+            "difference": 55.0,
+            "received_after_first_event_ms": 30.046541,
+            "timestamp_from": 1090,
+            "timestamp_to": 61090
+          },
+          {
+            "sensor": "http://example.org/sensor6",
+            "minute_avg_value": 80.0,
+            "day_avg_value": 16.0,
+            "difference": 64.0,
+            "received_after_first_event_ms": 30.047958,
+            "timestamp_from": 1090,
+            "timestamp_to": 61090
+          },
+          {
+            "sensor": "http://example.org/sensor7",
+            "minute_avg_value": 90.0,
+            "day_avg_value": 17.0,
+            "difference": 73.0,
+            "received_after_first_event_ms": 30.047291,
+            "timestamp_from": 1090,
+            "timestamp_to": 61090
+          },
+          {
+            "sensor": "http://example.org/sensor8",
+            "minute_avg_value": 100.0,
+            "day_avg_value": 18.0,
+            "difference": 82.0,
+            "received_after_first_event_ms": 30.048499999999997,
+            "timestamp_from": 1090,
+            "timestamp_to": 61090
+          },
+          {
+            "sensor": "http://example.org/sensor9",
+            "minute_avg_value": 110.0,
+            "day_avg_value": 19.0,
+            "difference": 91.0,
+            "received_after_first_event_ms": 30.04775,
+            "timestamp_from": 1090,
+            "timestamp_to": 61090
+          }
+        ]
+      },
+      "live_only": {
+        "variant": "live_only",
+        "run_index": 0,
+        "historical_events": 1000000,
+        "baseline_entities": 10,
+        "live_replay_mode": "accelerated",
+        "live_rate_hz": 4.0,
+        "live_duration_seconds": null,
+        "live_window_size_seconds": null,
+        "live_window_slide_seconds": null,
+        "live_event_count": 10,
+        "expected_emitted_windows": 0,
+        "expected_full_windows": 0,
+        "warmup_window_count": null,
+        "observed_emitted_windows": 4,
+        "window_semantics_note": null,
+        "historical_generation_ms": 251.07944499644856,
+        "storage_write_ms": 90.50320999992455,
+        "baseline_eval_ms": null,
+        "materialization_ms": null,
+        "static_injection_ms": null,
+        "historical_query_ms": null,
+        "baseline_materialization_ms": null,
+        "static_graph_injection_ms": null,
+        "live_startup_ms": 0.000959,
+        "first_result_latency_ms": 30.024834,
+        "peak_rss_mb": null,
+        "mean_rss_mb": null,
+        "peak_cpu_percent": null,
+        "mean_cpu_percent": null,
+        "sample_count": 0,
+        "result_count": 10,
+        "correctness_ok": false,
+        "materialized_quad_count": null,
+        "baseline_binding_count": null,
+        "window_result_latencies_ms": [
+          30.024834,
+          30.026958999999998,
+          30.026792,
+          30.029459000000003,
+          30.02725,
+          30.027167000000002,
+          30.030874999999998,
+          30.029875,
+          30.029584,
+          30.029667
+        ],
+        "completed_window_latencies_ms": [
+          30.024834,
+          30.026792,
+          30.027167000000002,
+          30.029584
+        ],
+        "completed_window_result_counts": [
+          1,
+          2,
+          3,
+          4
+        ],
+        "observed_rows": [
+          {
+            "sensor": "http://example.org/sensor0",
+            "minute_avg_value": 20.0,
+            "day_avg_value": null,
+            "difference": null,
+            "received_after_first_event_ms": 30.024834,
+            "timestamp_from": 1000,
+            "timestamp_to": 1060
+          },
+          {
+            "sensor": "http://example.org/sensor0",
+            "minute_avg_value": 20.0,
+            "day_avg_value": null,
+            "difference": null,
+            "received_after_first_event_ms": 30.026958999999998,
+            "timestamp_from": 1010,
+            "timestamp_to": 1070
+          },
+          {
+            "sensor": "http://example.org/sensor1",
+            "minute_avg_value": 30.0,
+            "day_avg_value": null,
+            "difference": null,
+            "received_after_first_event_ms": 30.026792,
+            "timestamp_from": 1010,
+            "timestamp_to": 1070
+          },
+          {
+            "sensor": "http://example.org/sensor0",
+            "minute_avg_value": 20.0,
+            "day_avg_value": null,
+            "difference": null,
+            "received_after_first_event_ms": 30.029459000000003,
+            "timestamp_from": 1020,
+            "timestamp_to": 1080
+          },
+          {
+            "sensor": "http://example.org/sensor1",
+            "minute_avg_value": 30.0,
+            "day_avg_value": null,
+            "difference": null,
+            "received_after_first_event_ms": 30.02725,
+            "timestamp_from": 1020,
+            "timestamp_to": 1080
+          },
+          {
+            "sensor": "http://example.org/sensor2",
+            "minute_avg_value": 40.0,
+            "day_avg_value": null,
+            "difference": null,
+            "received_after_first_event_ms": 30.027167000000002,
+            "timestamp_from": 1020,
+            "timestamp_to": 1080
+          },
+          {
+            "sensor": "http://example.org/sensor0",
+            "minute_avg_value": 20.0,
+            "day_avg_value": null,
+            "difference": null,
+            "received_after_first_event_ms": 30.030874999999998,
+            "timestamp_from": 1030,
+            "timestamp_to": 1090
+          },
+          {
+            "sensor": "http://example.org/sensor1",
+            "minute_avg_value": 30.0,
+            "day_avg_value": null,
+            "difference": null,
+            "received_after_first_event_ms": 30.029875,
+            "timestamp_from": 1030,
+            "timestamp_to": 1090
+          },
+          {
+            "sensor": "http://example.org/sensor2",
+            "minute_avg_value": 40.0,
+            "day_avg_value": null,
+            "difference": null,
+            "received_after_first_event_ms": 30.029584,
+            "timestamp_from": 1030,
+            "timestamp_to": 1090
+          },
+          {
+            "sensor": "http://example.org/sensor3",
+            "minute_avg_value": 50.0,
+            "day_avg_value": null,
+            "difference": null,
+            "received_after_first_event_ms": 30.029667,
+            "timestamp_from": 1030,
+            "timestamp_to": 1090
+          }
+        ]
+      },
+      "live_startup_overhead_ms": 0.001832,
+      "first_result_overhead_ms": 0.019373999999999114,
+      "peak_rss_mb": 605.25,
+      "mean_rss_mb": 485.375,
+      "peak_cpu_percent": 100.76897430419922,
+      "mean_cpu_percent": 100.14065551757812,
+      "sample_count": 2
+    },
+    {
+      "historical_events": 5000000,
+      "baseline_entities": 10,
+      "is_warmup": false,
+      "run_index": 0,
+      "observed_baseline_rows": 10,
+      "observed_live_only_rows": 10,
+      "baseline": {
+        "variant": "baseline",
+        "run_index": 0,
+        "historical_events": 5000000,
+        "baseline_entities": 10,
+        "live_replay_mode": "accelerated",
+        "live_rate_hz": 4.0,
+        "live_duration_seconds": null,
+        "live_window_size_seconds": null,
+        "live_window_slide_seconds": null,
+        "live_event_count": 10,
+        "expected_emitted_windows": 0,
+        "expected_full_windows": 0,
+        "warmup_window_count": null,
+        "observed_emitted_windows": 1,
+        "window_semantics_note": null,
+        "historical_generation_ms": 1227.530940107124,
+        "storage_write_ms": 413.00721001810336,
+        "baseline_eval_ms": 3981.266125,
+        "materialization_ms": 0.230291,
+        "static_injection_ms": 0.010625,
+        "historical_query_ms": 3981.266125,
+        "baseline_materialization_ms": 0.230291,
+        "static_graph_injection_ms": 0.010625,
+        "live_startup_ms": 0.001625,
+        "first_result_latency_ms": 30.032125,
+        "peak_rss_mb": null,
+        "mean_rss_mb": null,
+        "peak_cpu_percent": null,
+        "mean_cpu_percent": null,
+        "sample_count": 0,
+        "result_count": 10,
+        "correctness_ok": true,
+        "materialized_quad_count": 10,
+        "baseline_binding_count": 10,
+        "window_result_latencies_ms": [
+          30.032125,
+          30.03225,
+          30.033375,
+          30.03425,
+          30.032291,
+          30.032375000000002,
+          30.033541,
+          30.033416,
+          30.030583,
+          30.0335
+        ],
+        "completed_window_latencies_ms": [
+          30.030583
+        ],
+        "completed_window_result_counts": [
+          10
+        ],
+        "observed_rows": [
+          {
+            "sensor": "http://example.org/sensor0",
+            "minute_avg_value": 20.0,
+            "day_avg_value": 10.0,
+            "difference": 10.0,
+            "received_after_first_event_ms": 30.032125,
+            "timestamp_from": 1090,
+            "timestamp_to": 61090
+          },
+          {
+            "sensor": "http://example.org/sensor1",
+            "minute_avg_value": 30.0,
+            "day_avg_value": 11.0,
+            "difference": 19.0,
+            "received_after_first_event_ms": 30.03225,
+            "timestamp_from": 1090,
+            "timestamp_to": 61090
+          },
+          {
+            "sensor": "http://example.org/sensor2",
+            "minute_avg_value": 40.0,
+            "day_avg_value": 12.0,
+            "difference": 28.0,
+            "received_after_first_event_ms": 30.033375,
+            "timestamp_from": 1090,
+            "timestamp_to": 61090
+          },
+          {
+            "sensor": "http://example.org/sensor3",
+            "minute_avg_value": 50.0,
+            "day_avg_value": 13.0,
+            "difference": 37.0,
+            "received_after_first_event_ms": 30.03425,
+            "timestamp_from": 1090,
+            "timestamp_to": 61090
+          },
+          {
+            "sensor": "http://example.org/sensor4",
+            "minute_avg_value": 60.0,
+            "day_avg_value": 14.0,
+            "difference": 46.0,
+            "received_after_first_event_ms": 30.032291,
+            "timestamp_from": 1090,
+            "timestamp_to": 61090
+          },
+          {
+            "sensor": "http://example.org/sensor5",
+            "minute_avg_value": 70.0,
+            "day_avg_value": 15.0,
+            "difference": 55.0,
+            "received_after_first_event_ms": 30.032375000000002,
+            "timestamp_from": 1090,
+            "timestamp_to": 61090
+          },
+          {
+            "sensor": "http://example.org/sensor6",
+            "minute_avg_value": 80.0,
+            "day_avg_value": 16.0,
+            "difference": 64.0,
+            "received_after_first_event_ms": 30.033541,
+            "timestamp_from": 1090,
+            "timestamp_to": 61090
+          },
+          {
+            "sensor": "http://example.org/sensor7",
+            "minute_avg_value": 90.0,
+            "day_avg_value": 17.0,
+            "difference": 73.0,
+            "received_after_first_event_ms": 30.033416,
+            "timestamp_from": 1090,
+            "timestamp_to": 61090
+          },
+          {
+            "sensor": "http://example.org/sensor8",
+            "minute_avg_value": 100.0,
+            "day_avg_value": 18.0,
+            "difference": 82.0,
+            "received_after_first_event_ms": 30.030583,
+            "timestamp_from": 1090,
+            "timestamp_to": 61090
+          },
+          {
+            "sensor": "http://example.org/sensor9",
+            "minute_avg_value": 110.0,
+            "day_avg_value": 19.0,
+            "difference": 91.0,
+            "received_after_first_event_ms": 30.0335,
+            "timestamp_from": 1090,
+            "timestamp_to": 61090
+          }
+        ]
+      },
+      "live_only": {
+        "variant": "live_only",
+        "run_index": 0,
+        "historical_events": 5000000,
+        "baseline_entities": 10,
+        "live_replay_mode": "accelerated",
+        "live_rate_hz": 4.0,
+        "live_duration_seconds": null,
+        "live_window_size_seconds": null,
+        "live_window_slide_seconds": null,
+        "live_event_count": 10,
+        "expected_emitted_windows": 0,
+        "expected_full_windows": 0,
+        "warmup_window_count": null,
+        "observed_emitted_windows": 4,
+        "window_semantics_note": null,
+        "historical_generation_ms": 1227.530940107124,
+        "storage_write_ms": 413.00721001810336,
+        "baseline_eval_ms": null,
+        "materialization_ms": null,
+        "static_injection_ms": null,
+        "historical_query_ms": null,
+        "baseline_materialization_ms": null,
+        "static_graph_injection_ms": null,
+        "live_startup_ms": 0.001542,
+        "first_result_latency_ms": 30.020125,
+        "peak_rss_mb": null,
+        "mean_rss_mb": null,
+        "peak_cpu_percent": null,
+        "mean_cpu_percent": null,
+        "sample_count": 0,
+        "result_count": 10,
+        "correctness_ok": false,
+        "materialized_quad_count": null,
+        "baseline_binding_count": null,
+        "window_result_latencies_ms": [
+          30.020125,
+          30.021875,
+          30.021791999999998,
+          30.021917,
+          30.021958,
+          30.023042,
+          30.02375,
+          30.023083,
+          30.023125,
+          30.023167
+        ],
+        "completed_window_latencies_ms": [
+          30.020125,
+          30.021791999999998,
+          30.021917,
+          30.023083
+        ],
+        "completed_window_result_counts": [
+          1,
+          2,
+          3,
+          4
+        ],
+        "observed_rows": [
+          {
+            "sensor": "http://example.org/sensor0",
+            "minute_avg_value": 20.0,
+            "day_avg_value": null,
+            "difference": null,
+            "received_after_first_event_ms": 30.020125,
+            "timestamp_from": 1000,
+            "timestamp_to": 1060
+          },
+          {
+            "sensor": "http://example.org/sensor0",
+            "minute_avg_value": 20.0,
+            "day_avg_value": null,
+            "difference": null,
+            "received_after_first_event_ms": 30.021875,
+            "timestamp_from": 1010,
+            "timestamp_to": 1070
+          },
+          {
+            "sensor": "http://example.org/sensor1",
+            "minute_avg_value": 30.0,
+            "day_avg_value": null,
+            "difference": null,
+            "received_after_first_event_ms": 30.021791999999998,
+            "timestamp_from": 1010,
+            "timestamp_to": 1070
+          },
+          {
+            "sensor": "http://example.org/sensor0",
+            "minute_avg_value": 20.0,
+            "day_avg_value": null,
+            "difference": null,
+            "received_after_first_event_ms": 30.021917,
+            "timestamp_from": 1020,
+            "timestamp_to": 1080
+          },
+          {
+            "sensor": "http://example.org/sensor1",
+            "minute_avg_value": 30.0,
+            "day_avg_value": null,
+            "difference": null,
+            "received_after_first_event_ms": 30.021958,
+            "timestamp_from": 1020,
+            "timestamp_to": 1080
+          },
+          {
+            "sensor": "http://example.org/sensor2",
+            "minute_avg_value": 40.0,
+            "day_avg_value": null,
+            "difference": null,
+            "received_after_first_event_ms": 30.023042,
+            "timestamp_from": 1020,
+            "timestamp_to": 1080
+          },
+          {
+            "sensor": "http://example.org/sensor0",
+            "minute_avg_value": 20.0,
+            "day_avg_value": null,
+            "difference": null,
+            "received_after_first_event_ms": 30.02375,
+            "timestamp_from": 1030,
+            "timestamp_to": 1090
+          },
+          {
+            "sensor": "http://example.org/sensor1",
+            "minute_avg_value": 30.0,
+            "day_avg_value": null,
+            "difference": null,
+            "received_after_first_event_ms": 30.023083,
+            "timestamp_from": 1030,
+            "timestamp_to": 1090
+          },
+          {
+            "sensor": "http://example.org/sensor2",
+            "minute_avg_value": 40.0,
+            "day_avg_value": null,
+            "difference": null,
+            "received_after_first_event_ms": 30.023125,
+            "timestamp_from": 1030,
+            "timestamp_to": 1090
+          },
+          {
+            "sensor": "http://example.org/sensor3",
+            "minute_avg_value": 50.0,
+            "day_avg_value": null,
+            "difference": null,
+            "received_after_first_event_ms": 30.023167,
+            "timestamp_from": 1030,
+            "timestamp_to": 1090
+          }
+        ]
+      },
+      "live_startup_overhead_ms": 0.00008299999999999996,
+      "first_result_overhead_ms": 0.012000000000000455,
+      "peak_rss_mb": 2656.359375,
+      "mean_rss_mb": 2022.955078125,
+      "peak_cpu_percent": 101.70673370361328,
+      "mean_cpu_percent": 92.05566835403442,
+      "sample_count": 16
+    },
+    {
+      "historical_events": 10000000,
+      "baseline_entities": 10,
+      "is_warmup": false,
+      "run_index": 0,
+      "observed_baseline_rows": 10,
+      "observed_live_only_rows": 10,
+      "baseline": {
+        "variant": "baseline",
+        "run_index": 0,
+        "historical_events": 10000000,
+        "baseline_entities": 10,
+        "live_replay_mode": "accelerated",
+        "live_rate_hz": 4.0,
+        "live_duration_seconds": null,
+        "live_window_size_seconds": null,
+        "live_window_slide_seconds": null,
+        "live_event_count": 10,
+        "expected_emitted_windows": 0,
+        "expected_full_windows": 0,
+        "warmup_window_count": null,
+        "observed_emitted_windows": 1,
+        "window_semantics_note": null,
+        "historical_generation_ms": 2532.608043285927,
+        "storage_write_ms": 843.8229821025088,
+        "baseline_eval_ms": 9329.223625,
+        "materialization_ms": 0.41645899999999997,
+        "static_injection_ms": 0.010667,
+        "historical_query_ms": 9329.223625,
+        "baseline_materialization_ms": 0.41645899999999997,
+        "static_graph_injection_ms": 0.010667,
+        "live_startup_ms": 0.0052499999999999995,
+        "first_result_latency_ms": 30.039292,
+        "peak_rss_mb": null,
+        "mean_rss_mb": null,
+        "peak_cpu_percent": null,
+        "mean_cpu_percent": null,
+        "sample_count": 0,
+        "result_count": 10,
+        "correctness_ok": true,
+        "materialized_quad_count": 10,
+        "baseline_binding_count": 10,
+        "window_result_latencies_ms": [
+          30.039292,
+          30.040792,
+          30.042084,
+          30.043042,
+          30.041,
+          30.041209,
+          30.042666999999998,
+          30.042292000000003,
+          30.040584,
+          30.042459
+        ],
+        "completed_window_latencies_ms": [
+          30.039292
+        ],
+        "completed_window_result_counts": [
+          10
+        ],
+        "observed_rows": [
+          {
+            "sensor": "http://example.org/sensor0",
+            "minute_avg_value": 20.0,
+            "day_avg_value": 10.0,
+            "difference": 10.0,
+            "received_after_first_event_ms": 30.039292,
+            "timestamp_from": 1090,
+            "timestamp_to": 61090
+          },
+          {
+            "sensor": "http://example.org/sensor1",
+            "minute_avg_value": 30.0,
+            "day_avg_value": 11.0,
+            "difference": 19.0,
+            "received_after_first_event_ms": 30.040792,
+            "timestamp_from": 1090,
+            "timestamp_to": 61090
+          },
+          {
+            "sensor": "http://example.org/sensor2",
+            "minute_avg_value": 40.0,
+            "day_avg_value": 12.0,
+            "difference": 28.0,
+            "received_after_first_event_ms": 30.042084,
+            "timestamp_from": 1090,
+            "timestamp_to": 61090
+          },
+          {
+            "sensor": "http://example.org/sensor3",
+            "minute_avg_value": 50.0,
+            "day_avg_value": 13.0,
+            "difference": 37.0,
+            "received_after_first_event_ms": 30.043042,
+            "timestamp_from": 1090,
+            "timestamp_to": 61090
+          },
+          {
+            "sensor": "http://example.org/sensor4",
+            "minute_avg_value": 60.0,
+            "day_avg_value": 14.0,
+            "difference": 46.0,
+            "received_after_first_event_ms": 30.041,
+            "timestamp_from": 1090,
+            "timestamp_to": 61090
+          },
+          {
+            "sensor": "http://example.org/sensor5",
+            "minute_avg_value": 70.0,
+            "day_avg_value": 15.0,
+            "difference": 55.0,
+            "received_after_first_event_ms": 30.041209,
+            "timestamp_from": 1090,
+            "timestamp_to": 61090
+          },
+          {
+            "sensor": "http://example.org/sensor6",
+            "minute_avg_value": 80.0,
+            "day_avg_value": 16.0,
+            "difference": 64.0,
+            "received_after_first_event_ms": 30.042666999999998,
+            "timestamp_from": 1090,
+            "timestamp_to": 61090
+          },
+          {
+            "sensor": "http://example.org/sensor7",
+            "minute_avg_value": 90.0,
+            "day_avg_value": 17.0,
+            "difference": 73.0,
+            "received_after_first_event_ms": 30.042292000000003,
+            "timestamp_from": 1090,
+            "timestamp_to": 61090
+          },
+          {
+            "sensor": "http://example.org/sensor8",
+            "minute_avg_value": 100.0,
+            "day_avg_value": 18.0,
+            "difference": 82.0,
+            "received_after_first_event_ms": 30.040584,
+            "timestamp_from": 1090,
+            "timestamp_to": 61090
+          },
+          {
+            "sensor": "http://example.org/sensor9",
+            "minute_avg_value": 110.0,
+            "day_avg_value": 19.0,
+            "difference": 91.0,
+            "received_after_first_event_ms": 30.042459,
+            "timestamp_from": 1090,
+            "timestamp_to": 61090
+          }
+        ]
+      },
+      "live_only": {
+        "variant": "live_only",
+        "run_index": 0,
+        "historical_events": 10000000,
+        "baseline_entities": 10,
+        "live_replay_mode": "accelerated",
+        "live_rate_hz": 4.0,
+        "live_duration_seconds": null,
+        "live_window_size_seconds": null,
+        "live_window_slide_seconds": null,
+        "live_event_count": 10,
+        "expected_emitted_windows": 0,
+        "expected_full_windows": 0,
+        "warmup_window_count": null,
+        "observed_emitted_windows": 4,
+        "window_semantics_note": null,
+        "historical_generation_ms": 2532.608043285927,
+        "storage_write_ms": 843.8229821025088,
+        "baseline_eval_ms": null,
+        "materialization_ms": null,
+        "static_injection_ms": null,
+        "historical_query_ms": null,
+        "baseline_materialization_ms": null,
+        "static_graph_injection_ms": null,
+        "live_startup_ms": 0.00125,
+        "first_result_latency_ms": 30.02225,
+        "peak_rss_mb": null,
+        "mean_rss_mb": null,
+        "peak_cpu_percent": null,
+        "mean_cpu_percent": null,
+        "sample_count": 0,
+        "result_count": 10,
+        "correctness_ok": false,
+        "materialized_quad_count": null,
+        "baseline_binding_count": null,
+        "window_result_latencies_ms": [
+          30.02225,
+          30.023292,
+          30.023083,
+          30.023500000000002,
+          30.023708,
+          30.024458,
+          30.024625,
+          30.024833,
+          30.025458,
+          30.025042
+        ],
+        "completed_window_latencies_ms": [
+          30.02225,
+          30.023083,
+          30.023500000000002,
+          30.024625
+        ],
+        "completed_window_result_counts": [
+          1,
+          2,
+          3,
+          4
+        ],
+        "observed_rows": [
+          {
+            "sensor": "http://example.org/sensor0",
+            "minute_avg_value": 20.0,
+            "day_avg_value": null,
+            "difference": null,
+            "received_after_first_event_ms": 30.02225,
+            "timestamp_from": 1000,
+            "timestamp_to": 1060
+          },
+          {
+            "sensor": "http://example.org/sensor0",
+            "minute_avg_value": 20.0,
+            "day_avg_value": null,
+            "difference": null,
+            "received_after_first_event_ms": 30.023292,
+            "timestamp_from": 1010,
+            "timestamp_to": 1070
+          },
+          {
+            "sensor": "http://example.org/sensor1",
+            "minute_avg_value": 30.0,
+            "day_avg_value": null,
+            "difference": null,
+            "received_after_first_event_ms": 30.023083,
+            "timestamp_from": 1010,
+            "timestamp_to": 1070
+          },
+          {
+            "sensor": "http://example.org/sensor0",
+            "minute_avg_value": 20.0,
+            "day_avg_value": null,
+            "difference": null,
+            "received_after_first_event_ms": 30.023500000000002,
+            "timestamp_from": 1020,
+            "timestamp_to": 1080
+          },
+          {
+            "sensor": "http://example.org/sensor1",
+            "minute_avg_value": 30.0,
+            "day_avg_value": null,
+            "difference": null,
+            "received_after_first_event_ms": 30.023708,
+            "timestamp_from": 1020,
+            "timestamp_to": 1080
+          },
+          {
+            "sensor": "http://example.org/sensor2",
+            "minute_avg_value": 40.0,
+            "day_avg_value": null,
+            "difference": null,
+            "received_after_first_event_ms": 30.024458,
+            "timestamp_from": 1020,
+            "timestamp_to": 1080
+          },
+          {
+            "sensor": "http://example.org/sensor0",
+            "minute_avg_value": 20.0,
+            "day_avg_value": null,
+            "difference": null,
+            "received_after_first_event_ms": 30.024625,
+            "timestamp_from": 1030,
+            "timestamp_to": 1090
+          },
+          {
+            "sensor": "http://example.org/sensor1",
+            "minute_avg_value": 30.0,
+            "day_avg_value": null,
+            "difference": null,
+            "received_after_first_event_ms": 30.024833,
+            "timestamp_from": 1030,
+            "timestamp_to": 1090
+          },
+          {
+            "sensor": "http://example.org/sensor2",
+            "minute_avg_value": 40.0,
+            "day_avg_value": null,
+            "difference": null,
+            "received_after_first_event_ms": 30.025458,
+            "timestamp_from": 1030,
+            "timestamp_to": 1090
+          },
+          {
+            "sensor": "http://example.org/sensor3",
+            "minute_avg_value": 50.0,
+            "day_avg_value": null,
+            "difference": null,
+            "received_after_first_event_ms": 30.025042,
+            "timestamp_from": 1030,
+            "timestamp_to": 1090
+          }
+        ]
+      },
+      "live_startup_overhead_ms": 0.003999999999999999,
+      "first_result_overhead_ms": 0.017042,
+      "peak_rss_mb": 4143.890625,
+      "mean_rss_mb": 3433.150760135135,
+      "peak_cpu_percent": 101.12734985351562,
+      "mean_cpu_percent": 83.00561100727803,
+      "sample_count": 37
+    }
+  ]
+}

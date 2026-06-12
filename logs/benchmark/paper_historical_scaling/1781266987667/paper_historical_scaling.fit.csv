@@ -1,0 +1,2 @@
+query_type,mode,slope_ms_per_100k_quads,intercept_ms,r_squared,number_of_points
+point_lookup,cold,0.000000,0.517750,1.000000,1

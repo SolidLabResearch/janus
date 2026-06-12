@@ -18,6 +18,7 @@ The name comes from the Roman deity Janus, associated with transitions and with 
 - Hybrid queries that mix historical and live windows
 - Extension functions for anomaly-style predicates such as thresholds, relative change, z-score, outlier checks, and trend divergence
 - Optional baseline bootstrapping for hybrid anomaly queries with `USING BASELINE <window> LAST|AGGREGATE`
+- Query-defined baselines with `DEFINE BASELINE ... ON WINDOW ... AS SELECT ...`, `USING BASELINE :name`, and `GRAPH :name { ... }` materialization templates
 - HTTP endpoints for registering, starting, stopping, listing, and deleting queries
 - WebSocket result streaming for running queries
 
@@ -28,30 +29,45 @@ Janus uses Janus-QL, a hybrid query language for querying historical and live RD
 Example:
 
 ```sparql
-PREFIX ex: <http://example.org/>
-PREFIX janus: <https://janus.rs/fn#>
-PREFIX baseline: <https://janus.rs/baseline#>
+PREFIX : <http://example.org/>
 
-REGISTER RStream ex:out AS
-SELECT ?sensor ?reading
-FROM NAMED WINDOW ex:hist ON LOG ex:store [START 1700000000000 END 1700003600000]
-FROM NAMED WINDOW ex:live ON STREAM ex:stream1 [RANGE 5000 STEP 1000]
-USING BASELINE ex:hist AGGREGATE
+FROM NAMED WINDOW :liveMinute ON STREAM :stream [RANGE 60000 STEP 1000]
+FROM NAMED WINDOW :historyDay ON LOG :stream [START 0 END 86400000]
+
+DEFINE BASELINE :dayBaseline ON WINDOW :historyDay AS
+SELECT ?sensor
+       (AVG(?value) AS ?dayAvgValue)
 WHERE {
-  WINDOW ex:hist {
-    ?sensor ex:mean ?mean .
-    ?sensor ex:sigma ?sigma .
-  }
-  WINDOW ex:live {
-    ?sensor ex:hasReading ?reading .
-  }
-  ?sensor baseline:mean ?mean .
-  ?sensor baseline:sigma ?sigma .
-  FILTER(janus:is_outlier(?reading, ?mean, ?sigma, 3))
+  ?sensor :hasValue ?value .
 }
+GROUP BY ?sensor
+
+REGISTER RStream :output AS
+USING BASELINE :dayBaseline
+SELECT ?sensor
+       (AVG(?value) AS ?minuteAvgValue)
+       ?dayAvgValue
+       ((AVG(?value) - ?dayAvgValue) AS ?difference)
+WHERE {
+  WINDOW :liveMinute {
+    ?sensor :hasValue ?value .
+  }
+  GRAPH :dayBaseline {
+    ?sensor :dayAvgValue ?dayAvgValue .
+  }
+}
+GROUP BY ?sensor ?dayAvgValue
+HAVING(AVG(?value) > ?dayAvgValue)
 ```
 
-`USING BASELINE` is optional. If present, Janus bootstraps baseline values from the named historical window before or during live execution:
+For query-defined baselines:
+
+- `DEFINE BASELINE` evaluates the historical baseline query before live startup over the source `LOG` window
+- `USING BASELINE :dayBaseline` tells Janus to prepare that baseline and inject the resulting quads into the live engine
+- `GRAPH :dayBaseline { ... }` is the materialization template; its concrete predicates and projected variables define the quads that are inserted
+- the live query can then use baseline variables in `SELECT`, `GROUP BY`, `HAVING`, and arithmetic expressions
+
+Legacy `USING BASELINE <window> LAST|AGGREGATE` remains available:
 
 - `LAST`: use the final historical window snapshot as baseline
 - `AGGREGATE`: merge the historical window outputs into one compact baseline
@@ -80,6 +96,7 @@ Janus uses dictionary encoding and segmented storage for high-throughput ingesti
 - Space efficiency: about 40% smaller encoded events
 
 Detailed benchmark data is in [docs/BENCHMARK_RESULTS.md](./docs/BENCHMARK_RESULTS.md).
+Current benchmark commands and scope are in [docs/BENCHMARKING.md](./docs/BENCHMARKING.md).
 
 ## Quick Start
 

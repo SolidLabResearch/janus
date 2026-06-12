@@ -4,7 +4,7 @@
 //! R2S operators, and query generation.
 
 use janus::parsing::janusql_parser::{
-    BaselineBootstrapMode, JanusQLParser, SourceKind, WindowSpec,
+    BaselineBootstrapMode, GraphTermTemplate, JanusQLParser, SourceKind, WindowSpec,
 };
 
 #[test]
@@ -287,4 +287,295 @@ fn test_using_baseline_requires_known_historical_window() {
 
     let result = parser.parse(query);
     assert!(result.is_err());
+}
+
+#[test]
+fn parse_define_baseline_with_avg_count() {
+    let parser = JanusQLParser::new().unwrap();
+    let query = r#"
+        PREFIX ex: <http://example.org/>
+        FROM NAMED WINDOW ex:liveMinute ON STREAM ex:stream [RANGE 60 STEP 5]
+        FROM NAMED WINDOW ex:historyDay ON LOG ex:stream [OFFSET 0 RANGE 86400 STEP 5]
+        DEFINE BASELINE ex:dayBaseline ON WINDOW ex:historyDay AS
+        SELECT ?sensor
+               (AVG(?value) AS ?dayAvgValue)
+               (COUNT(?value) AS ?dayCount)
+        WHERE {
+          ?sensor ex:hasValue ?value .
+        }
+        GROUP BY ?sensor
+        REGISTER RStream ex:output AS
+        USING BASELINE ex:dayBaseline
+        SELECT ?sensor ?dayAvgValue
+        WHERE {
+          WINDOW ex:liveMinute {
+            ?sensor ex:hasValue ?value .
+          }
+        }
+        GROUP BY ?sensor ?dayAvgValue
+    "#;
+
+    let parsed = parser.parse(query).unwrap();
+    assert_eq!(parsed.ast.baseline_definitions.len(), 1);
+    let definition = &parsed.ast.baseline_definitions[0];
+    assert_eq!(definition.name, "http://example.org/dayBaseline");
+    assert_eq!(definition.source_window, "http://example.org/historyDay");
+    assert_eq!(definition.output_variables, vec!["?sensor", "?dayAvgValue", "?dayCount"]);
+    assert_eq!(parsed.baseline_graph_templates.len(), 0);
+    assert_eq!(parsed.generated_baseline_queries.len(), 1);
+}
+
+#[test]
+fn baseline_select_does_not_override_main_select() {
+    let parser = JanusQLParser::new().unwrap();
+    let query = r#"
+        PREFIX ex: <http://example.org/>
+        FROM NAMED WINDOW ex:liveMinute ON STREAM ex:stream [RANGE 60 STEP 5]
+        FROM NAMED WINDOW ex:historyDay ON LOG ex:stream [OFFSET 0 RANGE 86400 STEP 5]
+        DEFINE BASELINE ex:dayBaseline ON WINDOW ex:historyDay AS
+        SELECT ?sensor (AVG(?value) AS ?dayAvgValue)
+        WHERE {
+          ?sensor ex:hasValue ?value .
+        }
+        GROUP BY ?sensor
+        REGISTER RStream ex:output AS
+        USING BASELINE ex:dayBaseline
+        SELECT ?sensor (AVG(?value) AS ?minuteAvgValue) ?dayAvgValue
+        WHERE {
+          WINDOW ex:liveMinute {
+            ?sensor ex:hasValue ?value .
+          }
+        }
+        GROUP BY ?sensor ?dayAvgValue
+    "#;
+
+    let parsed = parser.parse(query).unwrap();
+    assert!(parsed.select_clause.contains("?minuteAvgValue"));
+    assert!(!parsed.select_clause.contains("?dayCount"));
+    assert_eq!(
+        parsed.ast.baseline_definitions[0].select_clause,
+        "SELECT ?sensor (AVG(?value) AS ?dayAvgValue)"
+    );
+}
+
+#[test]
+fn using_baseline_is_parsed_after_register() {
+    let parser = JanusQLParser::new().unwrap();
+    let query = r#"
+        PREFIX ex: <http://example.org/>
+        FROM NAMED WINDOW ex:liveMinute ON STREAM ex:stream [RANGE 60 STEP 5]
+        FROM NAMED WINDOW ex:historyDay ON LOG ex:stream [OFFSET 0 RANGE 86400 STEP 5]
+        DEFINE BASELINE ex:dayBaseline ON WINDOW ex:historyDay AS
+        SELECT ?sensor
+        WHERE {
+          ?sensor ex:hasValue ?value .
+        }
+        GROUP BY ?sensor
+        REGISTER RStream ex:output AS
+        USING BASELINE ex:dayBaseline
+        USING BASELINE ex:weekBaseline
+        SELECT ?sensor
+        WHERE {
+          WINDOW ex:liveMinute {
+            ?sensor ex:hasValue ?value .
+          }
+        }
+    "#;
+
+    let result = parser.parse(query);
+    assert!(result.is_err());
+
+    let query = query.replace(
+        "DEFINE BASELINE ex:dayBaseline ON WINDOW ex:historyDay AS\n        SELECT ?sensor\n        WHERE {\n          ?sensor ex:hasValue ?value .\n        }\n        GROUP BY ?sensor",
+        "DEFINE BASELINE ex:dayBaseline ON WINDOW ex:historyDay AS\n        SELECT ?sensor\n        WHERE {\n          ?sensor ex:hasValue ?value .\n        }\n        GROUP BY ?sensor\n        DEFINE BASELINE ex:weekBaseline ON WINDOW ex:historyDay AS\n        SELECT ?sensor\n        WHERE {\n          ?sensor ex:hasValue ?value .\n        }\n        GROUP BY ?sensor",
+    );
+    let parsed = parser.parse(&query).unwrap();
+    assert_eq!(parsed.ast.baseline_uses.len(), 2);
+    assert_eq!(parsed.ast.baseline_uses[0].name, "http://example.org/dayBaseline");
+    assert_eq!(parsed.ast.baseline_uses[1].name, "http://example.org/weekBaseline");
+}
+
+#[test]
+fn generated_baseline_query_wraps_where_body_in_log_graph() {
+    let parser = JanusQLParser::new().unwrap();
+    let query = r#"
+        PREFIX ex: <http://example.org/>
+        FROM NAMED WINDOW ex:historyDay ON LOG ex:stream [OFFSET 0 RANGE 86400 STEP 5]
+        DEFINE BASELINE ex:dayBaseline ON WINDOW ex:historyDay AS
+        SELECT ?sensor (AVG(?value) AS ?dayAvgValue) (COUNT(?value) AS ?dayCount)
+        WHERE {
+          ?sensor ex:hasValue ?value .
+        }
+        GROUP BY ?sensor
+        REGISTER RStream ex:output AS
+        SELECT ?sensor
+        WHERE { }
+    "#;
+
+    let parsed = parser.parse(query).unwrap();
+    let generated = &parsed.generated_baseline_queries[0];
+    assert!(generated.sparql_query.contains("GRAPH ?__janus_log_graph"));
+    assert!(generated.sparql_query.contains("?sensor ex:hasValue ?value ."));
+    assert!(generated.sparql_query.contains("GROUP BY ?sensor"));
+}
+
+#[test]
+fn baseline_source_window_must_exist() {
+    let parser = JanusQLParser::new().unwrap();
+    let query = r#"
+        PREFIX ex: <http://example.org/>
+        FROM NAMED WINDOW ex:liveMinute ON STREAM ex:stream [RANGE 60 STEP 5]
+        DEFINE BASELINE ex:dayBaseline ON WINDOW ex:missing AS
+        SELECT ?sensor
+        WHERE {
+          ?sensor ex:hasValue ?value .
+        }
+        REGISTER RStream ex:output AS
+        SELECT ?sensor
+        WHERE {
+          WINDOW ex:liveMinute { ?sensor ex:hasValue ?value . }
+        }
+    "#;
+
+    assert!(parser.parse(query).is_err());
+}
+
+#[test]
+fn baseline_source_window_must_be_historical_log() {
+    let parser = JanusQLParser::new().unwrap();
+    let query = r#"
+        PREFIX ex: <http://example.org/>
+        FROM NAMED WINDOW ex:liveMinute ON STREAM ex:stream [RANGE 60 STEP 5]
+        DEFINE BASELINE ex:dayBaseline ON WINDOW ex:liveMinute AS
+        SELECT ?sensor
+        WHERE {
+          ?sensor ex:hasValue ?value .
+        }
+        REGISTER RStream ex:output AS
+        SELECT ?sensor
+        WHERE {
+          WINDOW ex:liveMinute { ?sensor ex:hasValue ?value . }
+        }
+    "#;
+
+    assert!(parser.parse(query).is_err());
+}
+
+#[test]
+fn using_baseline_must_reference_defined_baseline() {
+    let parser = JanusQLParser::new().unwrap();
+    let query = r#"
+        PREFIX ex: <http://example.org/>
+        FROM NAMED WINDOW ex:liveMinute ON STREAM ex:stream [RANGE 60 STEP 5]
+        FROM NAMED WINDOW ex:historyDay ON LOG ex:stream [OFFSET 0 RANGE 86400 STEP 5]
+        REGISTER RStream ex:output AS
+        USING BASELINE ex:dayBaseline
+        SELECT ?sensor
+        WHERE {
+          WINDOW ex:liveMinute { ?sensor ex:hasValue ?value . }
+        }
+    "#;
+
+    assert!(parser.parse(query).is_err());
+}
+
+#[test]
+fn old_using_baseline_aggregate_syntax_still_passes() {
+    let parser = JanusQLParser::new().unwrap();
+    let query = r#"
+        PREFIX ex: <http://example.org/>
+        REGISTER RStream ex:out AS
+        SELECT ?sensor ?reading
+        FROM NAMED WINDOW ex:hist ON LOG ex:store [START 1000 END 2000]
+        FROM NAMED WINDOW ex:live ON STREAM ex:stream [RANGE 500 STEP 100]
+        USING BASELINE ex:hist AGGREGATE
+        WHERE {
+            WINDOW ex:hist { ?sensor ex:mean ?mean }
+            WINDOW ex:live { ?sensor ex:reading ?reading }
+        }
+    "#;
+
+    let parsed = parser.parse(query).unwrap();
+    assert_eq!(parsed.baseline.unwrap().mode, BaselineBootstrapMode::Aggregate);
+}
+
+#[test]
+fn main_select_can_compute_difference_between_live_avg_and_baseline_avg() {
+    let parser = JanusQLParser::new().unwrap();
+    let query = r#"
+        PREFIX ex: <http://example.org/>
+        FROM NAMED WINDOW ex:liveMinute ON STREAM ex:stream [RANGE 60000 STEP 1000]
+        FROM NAMED WINDOW ex:historyDay ON LOG ex:stream [OFFSET 0 RANGE 86400000 STEP 1000]
+        DEFINE BASELINE ex:dayBaseline ON WINDOW ex:historyDay AS
+        SELECT ?sensor
+               (AVG(?value) AS ?dayAvgValue)
+        WHERE {
+          ?sensor ex:hasValue ?value .
+        }
+        GROUP BY ?sensor
+        REGISTER RStream ex:output AS
+        USING BASELINE ex:dayBaseline
+        SELECT ?sensor
+               (AVG(?value) AS ?minuteAvgValue)
+               ?dayAvgValue
+               ((AVG(?value) - ?dayAvgValue) AS ?difference)
+        WHERE {
+          WINDOW ex:liveMinute {
+            ?sensor ex:hasValue ?value .
+          }
+          GRAPH ex:dayBaseline {
+            ?sensor ex:dayAvgValue ?dayAvgValue .
+          }
+        }
+        GROUP BY ?sensor ?dayAvgValue
+        HAVING(AVG(?value) > ?dayAvgValue)
+    "#;
+
+    let parsed = parser.parse(query).unwrap();
+    assert!(parsed.select_clause.contains("?difference"));
+    assert_eq!(parsed.ast.baseline_uses.len(), 1);
+    assert!(parsed.where_clause.contains("GROUP BY ?sensor ?dayAvgValue"));
+    assert!(parsed.where_clause.contains("HAVING(AVG(?value) > ?dayAvgValue)"));
+}
+
+#[test]
+fn query_defined_baseline_graph_template_is_extracted_structurally() {
+    let parser = JanusQLParser::new().unwrap();
+    let query = r#"
+        PREFIX ex: <http://example.org/>
+        FROM NAMED WINDOW ex:liveMinute ON STREAM ex:stream [RANGE 60 STEP 5]
+        FROM NAMED WINDOW ex:historyDay ON LOG ex:stream [OFFSET 0 RANGE 86400 STEP 5]
+        DEFINE BASELINE ex:dayBaseline ON WINDOW ex:historyDay AS
+        SELECT ?sensor (AVG(?value) AS ?dayAvgValue) (COUNT(?value) AS ?dayCount)
+        WHERE {
+          ?sensor ex:hasValue ?value .
+        }
+        GROUP BY ?sensor
+        REGISTER RStream ex:output AS
+        USING BASELINE ex:dayBaseline
+        SELECT ?sensor ?dayAvgValue ?dayCount
+        WHERE {
+          WINDOW ex:liveMinute {
+            ?sensor ex:hasValue ?value .
+          }
+          GRAPH ex:dayBaseline {
+            ?sensor ex:dayAvgValue ?dayAvgValue .
+            ?sensor ex:dayCount ?dayCount .
+          }
+        }
+    "#;
+
+    let parsed = parser.parse(query).unwrap();
+    assert_eq!(parsed.baseline_graph_templates.len(), 1);
+    let template = &parsed.baseline_graph_templates[0];
+    assert_eq!(template.baseline_name, "http://example.org/dayBaseline");
+    assert_eq!(template.triples.len(), 2);
+    assert_eq!(
+        template.triples[0].predicate,
+        GraphTermTemplate::Iri("http://example.org/dayAvgValue".to_string())
+    );
+    assert_eq!(
+        template.triples[1].predicate,
+        GraphTermTemplate::Iri("http://example.org/dayCount".to_string())
+    );
 }

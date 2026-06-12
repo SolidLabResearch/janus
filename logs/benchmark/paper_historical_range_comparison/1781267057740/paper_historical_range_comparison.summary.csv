@@ -1,0 +1,2 @@
+dataset_size_quads,query_case,range_width_ms,result_count,janus_p50_ms,oxigraph_p50_ms,janus_p95_ms,oxigraph_p95_ms,janus_avg_ms,oxigraph_avg_ms,ratio_oxigraph_over_janus,equivalent
+10,fixed_60s_range,60000,10,0.194,1.077,0.194,1.077,0.194,1.077,5.545,true

@@ -95,10 +95,56 @@ pub struct BaselineClause {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct BaselineDefinition {
+    pub name: String,
+    pub source_window: String,
+    pub raw_query: String,
+    pub select_clause: String,
+    pub where_clause: String,
+    pub group_by_clause: Option<String>,
+    pub output_variables: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct BaselineUse {
+    pub name: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct GeneratedBaselineQuery {
+    pub name: String,
+    pub source_window: String,
+    pub sparql_query: String,
+    pub output_variables: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 /// One parsed `WINDOW foo { ... }` block from the WHERE clause.
 pub struct WhereWindowClause {
     pub identifier: String,
     pub body: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum GraphTermTemplate {
+    Variable(String),
+    Iri(String),
+    Literal(String),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TripleTemplate {
+    pub subject: GraphTermTemplate,
+    pub predicate: GraphTermTemplate,
+    pub object: GraphTermTemplate,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+/// Explicit `GRAPH :baselineName { ... }` template extracted from the live query.
+pub struct BaselineGraphTemplate {
+    /// Named graph IRI for the baseline materialization target.
+    pub baseline_name: String,
+    pub triples: Vec<TripleTemplate>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -107,10 +153,15 @@ pub struct JanusQueryAst {
     pub prefixes: Vec<PrefixDeclaration>,
     pub register: Option<RegisterClause>,
     pub baseline: Option<BaselineClause>,
+    pub baseline_definitions: Vec<BaselineDefinition>,
+    pub baseline_uses: Vec<BaselineUse>,
     pub select_clause: String,
     pub windows: Vec<WindowClause>,
     pub where_clause: String,
     pub where_windows: Vec<WhereWindowClause>,
+    pub baseline_graph_templates: Vec<BaselineGraphTemplate>,
+    pub group_by_clause: Option<String>,
+    pub having_clause: Option<String>,
 }
 
 /// Parsed JanusQL query structure containing all components extracted from the query.
@@ -130,6 +181,14 @@ pub struct ParsedJanusQuery {
     pub rspql_query: String,
     /// SPARQL queries
     pub sparql_queries: Vec<String>,
+    /// Query-defined baseline SPARQL queries
+    pub generated_baseline_queries: Vec<GeneratedBaselineQuery>,
+    /// Explicit materialization templates extracted from `GRAPH :baselineName { ... }` blocks.
+    pub baseline_graph_templates: Vec<BaselineGraphTemplate>,
+    /// Top-level `GROUP BY` clause captured from the live query, if present.
+    pub group_by_clause: Option<String>,
+    /// Top-level `HAVING` clause captured from the live query, if present.
+    pub having_clause: Option<String>,
     /// Prefix mappings
     pub prefixes: HashMap<String, String>,
     /// WHERE clause
@@ -153,12 +212,19 @@ impl JanusQLParser {
         let mut prefix_mapper = HashMap::new();
         let mut register = None;
         let mut baseline = None;
+        let mut baseline_definitions = Vec::new();
+        let mut baseline_uses = Vec::new();
         let mut select_clause = String::new();
+        let mut main_group_by_clause = None;
+        let mut main_having_clause = None;
+        let mut in_main_select = false;
         let mut windows = Vec::new();
         let mut in_where_clause = false;
         let mut where_lines: Vec<&str> = Vec::new();
         let lines = query.lines().collect::<Vec<_>>();
         let mut index = 0;
+        let mut current_baseline_header: Option<(String, String)> = None;
+        let mut current_baseline_lines: Vec<String> = Vec::new();
 
         while index < lines.len() {
             let line = lines[index];
@@ -176,17 +242,49 @@ impl JanusQLParser {
                 continue;
             }
 
+            if current_baseline_header.is_some()
+                && (trimmed_line.starts_with("REGISTER")
+                    || trimmed_line.starts_with("DEFINE BASELINE"))
+            {
+                let (name, source_window) =
+                    current_baseline_header.take().expect("baseline header");
+                baseline_definitions.push(self.build_baseline_definition(
+                    name,
+                    source_window,
+                    &current_baseline_lines,
+                )?);
+                current_baseline_lines.clear();
+            }
+
             if trimmed_line.starts_with("REGISTER") {
+                in_where_clause = false;
+                in_main_select = false;
                 register = Some(self.parse_register_clause(trimmed_line, &prefix_mapper)?);
+            } else if trimmed_line.starts_with("DEFINE BASELINE") {
+                in_where_clause = false;
+                in_main_select = false;
+                current_baseline_header =
+                    Some(self.parse_baseline_definition_header(trimmed_line, &prefix_mapper)?);
             } else if trimmed_line.starts_with("USING BASELINE") {
-                baseline = Some(self.parse_baseline_clause(trimmed_line, &prefix_mapper)?);
+                in_where_clause = false;
+                in_main_select = false;
+                if self.is_legacy_baseline_clause(trimmed_line) {
+                    baseline = Some(self.parse_baseline_clause(trimmed_line, &prefix_mapper)?);
+                } else {
+                    baseline_uses
+                        .push(self.parse_baseline_use_clause(trimmed_line, &prefix_mapper)?);
+                }
             } else if trimmed_line.starts_with("PREFIX") {
                 let prefix = self.parse_prefix_declaration(trimmed_line)?;
                 prefix_mapper.insert(prefix.prefix.clone(), prefix.namespace.clone());
                 prefixes.push(prefix);
+            } else if current_baseline_header.is_some() {
+                current_baseline_lines.push(line.to_string());
             } else if trimmed_line.starts_with("SELECT") {
                 select_clause = trimmed_line.to_string();
+                in_main_select = true;
             } else if trimmed_line.starts_with("FROM NAMED WINDOW") {
+                in_main_select = false;
                 let mut clause = trimmed_line.to_string();
                 while !clause.contains(']') && index + 1 < lines.len() {
                     index += 1;
@@ -196,7 +294,21 @@ impl JanusQLParser {
                 windows.push(self.parse_window_clause(&clause, &prefix_mapper)?);
             } else if trimmed_line.starts_with("WHERE") {
                 in_where_clause = true;
+                in_main_select = false;
                 where_lines.push(line);
+            } else if trimmed_line.starts_with("GROUP BY") {
+                in_main_select = false;
+                if register.is_some() {
+                    main_group_by_clause = Some(trimmed_line.to_string());
+                }
+            } else if trimmed_line.starts_with("HAVING") {
+                in_main_select = false;
+                if register.is_some() {
+                    main_having_clause = Some(trimmed_line.to_string());
+                }
+            } else if in_main_select {
+                select_clause.push(' ');
+                select_clause.push_str(trimmed_line);
             } else if in_where_clause {
                 where_lines.push(line);
             }
@@ -204,17 +316,44 @@ impl JanusQLParser {
             index += 1;
         }
 
-        let where_clause = where_lines.join("\n");
+        if let Some((name, source_window)) = current_baseline_header.take() {
+            baseline_definitions.push(self.build_baseline_definition(
+                name,
+                source_window,
+                &current_baseline_lines,
+            )?);
+        }
+
+        let mut where_clause = where_lines.join("\n");
+        if let Some(group_by_clause) = &main_group_by_clause {
+            if !where_clause.is_empty() {
+                where_clause.push('\n');
+            }
+            where_clause.push_str(group_by_clause);
+        }
+        if let Some(having_clause) = &main_having_clause {
+            if !where_clause.is_empty() {
+                where_clause.push('\n');
+            }
+            where_clause.push_str(having_clause);
+        }
         let where_windows = self.extract_where_windows(&where_clause);
+        let baseline_graph_templates =
+            self.extract_baseline_graph_templates(&where_clause, &prefix_mapper)?;
 
         Ok(JanusQueryAst {
             prefixes,
             register,
             baseline,
+            baseline_definitions,
+            baseline_uses,
             select_clause,
             windows,
             where_clause,
             where_windows,
+            baseline_graph_templates,
+            group_by_clause: main_group_by_clause,
+            having_clause: main_having_clause,
         })
     }
 
@@ -262,6 +401,44 @@ impl JanusQLParser {
             }
         }
 
+        let window_map = ast
+            .windows
+            .iter()
+            .map(|window| (window.window_name.clone(), window))
+            .collect::<HashMap<_, _>>();
+
+        for definition in &ast.baseline_definitions {
+            let Some(source_window) = window_map.get(&definition.source_window) else {
+                return Err(self.parse_error(format!(
+                    "DEFINE BASELINE references unknown source window '{}'",
+                    definition.source_window
+                )));
+            };
+
+            let lowered = self.lower_window_clause(source_window);
+            if source_window.source_kind != SourceKind::Log
+                || lowered.window_type == WindowType::Live
+            {
+                return Err(self.parse_error(format!(
+                    "DEFINE BASELINE source window '{}' must be a historical LOG window",
+                    definition.source_window
+                )));
+            }
+        }
+
+        for baseline_use in &ast.baseline_uses {
+            let exists = ast
+                .baseline_definitions
+                .iter()
+                .any(|definition| definition.name == baseline_use.name);
+            if !exists {
+                return Err(self.parse_error(format!(
+                    "USING BASELINE references undefined baseline '{}'",
+                    baseline_use.name
+                )));
+            }
+        }
+
         let mut parsed = ParsedJanusQuery {
             ast: ast.clone(),
             baseline: ast.baseline.clone(),
@@ -270,6 +447,10 @@ impl JanusQLParser {
             historical_windows,
             rspql_query: String::new(),
             sparql_queries: Vec::new(),
+            generated_baseline_queries: Vec::new(),
+            baseline_graph_templates: ast.baseline_graph_templates.clone(),
+            group_by_clause: ast.group_by_clause.clone(),
+            having_clause: ast.having_clause.clone(),
             prefixes,
             where_clause: ast.where_clause.clone(),
             select_clause: ast.select_clause.clone(),
@@ -279,8 +460,15 @@ impl JanusQLParser {
             parsed.rspql_query = self.generate_rspql_query(&parsed, &prefix_lines);
         }
         parsed.sparql_queries = self.generate_sparql_queries(&parsed, &prefix_lines);
+        parsed.generated_baseline_queries =
+            self.generate_baseline_queries(&parsed.ast.baseline_definitions, &prefix_lines);
 
         Ok(parsed)
+    }
+
+    fn is_legacy_baseline_clause(&self, line: &str) -> bool {
+        let parts = line.split_whitespace().collect::<Vec<_>>();
+        parts.len() == 4 && parts[0] == "USING" && parts[1] == "BASELINE"
     }
 
     fn parse_baseline_clause(
@@ -304,6 +492,98 @@ impl JanusQLParser {
         };
 
         Ok(BaselineClause { window_name: self.unwrap_iri(parts[2], prefix_mapper), mode })
+    }
+
+    fn parse_baseline_use_clause(
+        &self,
+        line: &str,
+        prefix_mapper: &HashMap<String, String>,
+    ) -> Result<BaselineUse, Box<dyn std::error::Error>> {
+        let parts = line.split_whitespace().collect::<Vec<_>>();
+        if parts.len() != 3 || parts[0] != "USING" || parts[1] != "BASELINE" {
+            return Err(self.parse_error(format!("Invalid USING BASELINE clause: {line}")));
+        }
+
+        Ok(BaselineUse { name: self.unwrap_iri(parts[2], prefix_mapper) })
+    }
+
+    fn parse_baseline_definition_header(
+        &self,
+        line: &str,
+        prefix_mapper: &HashMap<String, String>,
+    ) -> Result<(String, String), Box<dyn std::error::Error>> {
+        let parts = line.split_whitespace().collect::<Vec<_>>();
+        if parts.len() != 7
+            || parts[0] != "DEFINE"
+            || parts[1] != "BASELINE"
+            || parts[3] != "ON"
+            || parts[4] != "WINDOW"
+            || parts[6] != "AS"
+        {
+            return Err(self.parse_error(format!("Invalid DEFINE BASELINE clause: {line}")));
+        }
+
+        Ok((
+            self.unwrap_iri(parts[2], prefix_mapper),
+            self.unwrap_iri(parts[5], prefix_mapper),
+        ))
+    }
+
+    fn build_baseline_definition(
+        &self,
+        name: String,
+        source_window: String,
+        raw_lines: &[String],
+    ) -> Result<BaselineDefinition, Box<dyn std::error::Error>> {
+        let raw_query = raw_lines.join("\n").trim().to_string();
+        if raw_query.is_empty() {
+            return Err(
+                self.parse_error(format!("DEFINE BASELINE '{}' must include a SELECT query", name))
+            );
+        }
+
+        let mut select_clause = String::new();
+        let mut where_lines = Vec::new();
+        let mut group_by_clause = None;
+        let mut in_where = false;
+
+        for line in raw_query.lines().map(str::to_string).collect::<Vec<_>>() {
+            let trimmed = line.trim();
+            if trimmed.starts_with("SELECT") {
+                select_clause = trimmed.to_string();
+                in_where = false;
+            } else if trimmed.starts_with("WHERE") {
+                in_where = true;
+                where_lines.push(line);
+            } else if trimmed.starts_with("GROUP BY") {
+                group_by_clause = Some(trimmed.to_string());
+                in_where = false;
+            } else if in_where {
+                where_lines.push(line);
+            } else if !select_clause.is_empty() {
+                select_clause.push(' ');
+                select_clause.push_str(trimmed);
+            }
+        }
+
+        if select_clause.is_empty() || where_lines.is_empty() {
+            return Err(self.parse_error(format!(
+                "DEFINE BASELINE '{}' must include SELECT and WHERE clauses",
+                name
+            )));
+        }
+
+        let output_variables = self.extract_output_variables(&select_clause);
+
+        Ok(BaselineDefinition {
+            name,
+            source_window,
+            raw_query,
+            select_clause,
+            where_clause: where_lines.join("\n"),
+            group_by_clause,
+            output_variables,
+        })
     }
 
     fn parse_register_clause(
@@ -490,6 +770,14 @@ impl JanusQLParser {
             lines.push(adapted_where);
         }
 
+        if let Some(group_by_clause) = &parsed.group_by_clause {
+            lines.push(group_by_clause.clone());
+        }
+
+        if let Some(having_clause) = &parsed.having_clause {
+            lines.push(having_clause.clone());
+        }
+
         lines.join("\n")
     }
 
@@ -509,6 +797,13 @@ impl JanusQLParser {
 
             lines.push(String::new());
 
+            if self
+                .find_window_body(&parsed.ast.where_windows, window, &parsed.prefixes)
+                .is_none()
+            {
+                continue;
+            }
+
             let (where_clause, bound_vars) = self.generate_where_and_extract_vars(
                 &parsed.ast.where_windows,
                 &parsed.where_clause,
@@ -527,6 +822,38 @@ impl JanusQLParser {
         }
 
         queries
+    }
+
+    fn generate_baseline_queries(
+        &self,
+        baseline_definitions: &[BaselineDefinition],
+        prefix_lines: &[String],
+    ) -> Vec<GeneratedBaselineQuery> {
+        baseline_definitions
+            .iter()
+            .map(|definition| {
+                let mut lines = prefix_lines.to_vec();
+                lines.push(String::new());
+                lines.push(definition.select_clause.clone());
+                lines.push(String::new());
+                lines.push(self.wrap_baseline_where_clause(&definition.where_clause));
+                if let Some(group_by_clause) = &definition.group_by_clause {
+                    lines.push(group_by_clause.clone());
+                }
+
+                GeneratedBaselineQuery {
+                    name: definition.name.clone(),
+                    source_window: definition.source_window.clone(),
+                    sparql_query: lines.join("\n"),
+                    output_variables: definition.output_variables.clone(),
+                }
+            })
+            .collect()
+    }
+
+    fn wrap_baseline_where_clause(&self, where_clause: &str) -> String {
+        let inner = self.extract_where_inner(where_clause);
+        format!("WHERE {{\n  GRAPH ?__janus_log_graph {{\n    {}\n  }}\n}}", inner)
     }
 
     fn generate_where_and_extract_vars(
@@ -696,9 +1023,7 @@ impl JanusQLParser {
 
         if without_where.starts_with('{') {
             if let Some(end) = self.find_matching_brace(without_where, 0) {
-                if end == without_where.len() - 1 {
-                    return without_where[1..end].trim().to_string();
-                }
+                return without_where[1..end].trim().to_string();
             }
         }
 
@@ -778,6 +1103,232 @@ impl JanusQLParser {
         }
 
         clauses
+    }
+
+    fn extract_baseline_graph_templates(
+        &self,
+        where_clause: &str,
+        prefix_mapper: &HashMap<String, String>,
+    ) -> Result<Vec<BaselineGraphTemplate>, Box<dyn std::error::Error>> {
+        let inner = self.extract_where_inner(where_clause);
+        if inner.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut templates = Vec::new();
+        let mut offset = 0usize;
+
+        while let Some(found) = inner[offset..].find("GRAPH") {
+            let start = offset + found;
+            let after_keyword = start + "GRAPH".len();
+            let mut cursor = after_keyword;
+
+            while let Some(ch) = inner[cursor..].chars().next() {
+                if ch.is_whitespace() {
+                    cursor += ch.len_utf8();
+                } else {
+                    break;
+                }
+            }
+
+            let identifier_start = cursor;
+            while let Some(ch) = inner[cursor..].chars().next() {
+                if ch.is_whitespace() || ch == '{' {
+                    break;
+                }
+                cursor += ch.len_utf8();
+            }
+
+            let identifier = inner[identifier_start..cursor].trim();
+            while let Some(ch) = inner[cursor..].chars().next() {
+                if ch.is_whitespace() {
+                    cursor += ch.len_utf8();
+                } else {
+                    break;
+                }
+            }
+
+            if !inner[cursor..].starts_with('{') {
+                offset = cursor;
+                continue;
+            }
+
+            let body_start = cursor + 1;
+            let Some(body_end) = self.find_matching_brace(&inner, cursor) else {
+                return Err(self.parse_error("Unclosed GRAPH block in WHERE clause"));
+            };
+
+            let baseline_name = self.unwrap_iri(identifier, prefix_mapper);
+            let triples =
+                self.parse_graph_template_body(inner[body_start..body_end].trim(), prefix_mapper)?;
+            templates.push(BaselineGraphTemplate { baseline_name, triples });
+            offset = body_end + 1;
+        }
+
+        Ok(templates)
+    }
+
+    fn parse_graph_template_body(
+        &self,
+        body: &str,
+        prefix_mapper: &HashMap<String, String>,
+    ) -> Result<Vec<TripleTemplate>, Box<dyn std::error::Error>> {
+        let statements = self.split_graph_template_statements(body);
+        let mut triples = Vec::new();
+
+        for statement in statements {
+            let tokens = self.tokenize_graph_template_statement(&statement);
+            if tokens.is_empty() {
+                continue;
+            }
+            if tokens.len() != 3 {
+                return Err(self.parse_error(format!(
+                    "GRAPH template triple pattern must contain exactly 3 terms: {statement}"
+                )));
+            }
+
+            triples.push(TripleTemplate {
+                subject: self.parse_graph_term_template(&tokens[0], prefix_mapper),
+                predicate: self.parse_graph_term_template(&tokens[1], prefix_mapper),
+                object: self.parse_graph_term_template(&tokens[2], prefix_mapper),
+            });
+        }
+
+        Ok(triples)
+    }
+
+    fn split_graph_template_statements(&self, body: &str) -> Vec<String> {
+        let mut statements = Vec::new();
+        let chars = body.chars().collect::<Vec<_>>();
+        let mut current = String::new();
+        let mut in_string = false;
+        let mut in_iri = false;
+        let mut escaped = false;
+
+        for ch in chars {
+            if in_string {
+                current.push(ch);
+                if escaped {
+                    escaped = false;
+                } else if ch == '\\' {
+                    escaped = true;
+                } else if ch == '"' {
+                    in_string = false;
+                }
+                continue;
+            }
+
+            if in_iri {
+                current.push(ch);
+                if ch == '>' {
+                    in_iri = false;
+                }
+                continue;
+            }
+
+            match ch {
+                '"' => {
+                    in_string = true;
+                    current.push(ch);
+                }
+                '<' => {
+                    in_iri = true;
+                    current.push(ch);
+                }
+                '.' => {
+                    let trimmed = current.trim();
+                    if !trimmed.is_empty() {
+                        statements.push(trimmed.to_string());
+                    }
+                    current.clear();
+                }
+                _ => current.push(ch),
+            }
+        }
+
+        let trimmed = current.trim();
+        if !trimmed.is_empty() {
+            statements.push(trimmed.to_string());
+        }
+
+        statements
+    }
+
+    fn tokenize_graph_template_statement(&self, statement: &str) -> Vec<String> {
+        let chars = statement.chars().collect::<Vec<_>>();
+        let mut tokens = Vec::new();
+        let mut current = String::new();
+        let mut index = 0usize;
+        let mut in_string = false;
+        let mut in_iri = false;
+        let mut escaped = false;
+
+        while index < chars.len() {
+            let ch = chars[index];
+
+            if in_string {
+                current.push(ch);
+                if escaped {
+                    escaped = false;
+                } else if ch == '\\' {
+                    escaped = true;
+                } else if ch == '"' {
+                    in_string = false;
+                }
+                index += 1;
+                continue;
+            }
+
+            if in_iri {
+                current.push(ch);
+                if ch == '>' {
+                    in_iri = false;
+                }
+                index += 1;
+                continue;
+            }
+
+            match ch {
+                '"' => {
+                    in_string = true;
+                    current.push(ch);
+                }
+                '<' => {
+                    in_iri = true;
+                    current.push(ch);
+                }
+                c if c.is_whitespace() => {
+                    if !current.is_empty() {
+                        tokens.push(current.clone());
+                        current.clear();
+                    }
+                }
+                _ => current.push(ch),
+            }
+
+            index += 1;
+        }
+
+        if !current.is_empty() {
+            tokens.push(current);
+        }
+
+        tokens
+    }
+
+    fn parse_graph_term_template(
+        &self,
+        token: &str,
+        prefix_mapper: &HashMap<String, String>,
+    ) -> GraphTermTemplate {
+        let trimmed = token.trim();
+        if trimmed.starts_with('?') {
+            return GraphTermTemplate::Variable(trimmed.trim_start_matches('?').to_string());
+        }
+        if trimmed.starts_with('"') {
+            return GraphTermTemplate::Literal(trimmed.to_string());
+        }
+        GraphTermTemplate::Iri(self.unwrap_iri(trimmed, prefix_mapper))
     }
 
     fn find_matching_brace(&self, input: &str, open_brace_index: usize) -> Option<usize> {
@@ -864,6 +1415,33 @@ impl JanusQLParser {
         }
 
         items
+    }
+
+    fn extract_output_variables(&self, select_clause: &str) -> Vec<String> {
+        let trimmed = select_clause.trim();
+        let content = trimmed
+            .strip_prefix("SELECT")
+            .or_else(|| trimmed.strip_prefix("select"))
+            .map_or(trimmed, str::trim);
+
+        self.extract_projection_items(content)
+            .into_iter()
+            .filter_map(|item| {
+                let trimmed_item = item.trim();
+                if trimmed_item.starts_with('?') {
+                    Some(trimmed_item.to_string())
+                } else if let Some(as_pos) = trimmed_item.rfind(" AS ") {
+                    let alias = trimmed_item[as_pos + 4..].trim().trim_end_matches(')').trim();
+                    if alias.starts_with('?') {
+                        Some(alias.to_string())
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            })
+            .collect()
     }
 
     fn local_name<'a>(&self, iri: &'a str) -> Option<&'a str> {

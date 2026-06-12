@@ -37,19 +37,14 @@ impl StreamingSegmentedStorage {
         // Load or create dictionary
         let dict_path = std::path::Path::new(&config.segment_base_path).join("dictionary.bin");
         let dictionary = if dict_path.exists() {
-            println!("Loading existing dictionary from {:?}", dict_path);
             match Dictionary::load_from_file(&dict_path) {
-                Ok(dict) => {
-                    println!("✓ Dictionary loaded with {} entries", dict.size());
-                    dict
-                }
+                Ok(dict) => dict,
                 Err(e) => {
                     eprintln!("Warning: Failed to load dictionary: {}, creating new one", e);
                     Dictionary::new()
                 }
             }
         } else {
-            println!("Creating new dictionary");
             Dictionary::new()
         };
 

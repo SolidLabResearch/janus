@@ -1,0 +1,934 @@
+{
+  "metadata": {
+    "git_commit_sha": "b9da83e012fb88997265b533077f218fa5453236",
+    "branch": "benchmark-paper-hybrid-scaling",
+    "rustc_version": "rustc 1.90.0 (1159e78c4 2025-09-14)",
+    "os": "macos 25.5.0",
+    "cpu_model": "Apple M4",
+    "ram_bytes": 17179869184,
+    "benchmark_command": "target/release/paper_query_defined_baseline --warmup-runs 0 --runs 1 --historical-events 10000 --baseline-entities 10 --live-replay-mode realtime --live-rate-hz 4 --live-duration-seconds 240 --live-window-size-seconds 120 --live-window-slide-seconds 60",
+    "timestamp_unix_ms": 1781276063711
+  },
+  "profile": "smoke",
+  "live_replay_mode": "realtime",
+  "live_rate_hz": 4.0,
+  "live_duration_seconds": 240,
+  "live_window_size_seconds": 120,
+  "live_window_slide_seconds": 60,
+  "runs": 1,
+  "warmup_runs": 0,
+  "historical_events": [
+    10000
+  ],
+  "baseline_entities": [
+    10
+  ],
+  "correctness_passed": true,
+  "output_dir": "logs/benchmark/query_defined_baseline/1781276063633",
+  "comparisons": [
+    {
+      "historical_events": 10000,
+      "baseline_entities": 10,
+      "is_warmup": false,
+      "run_index": 0,
+      "observed_baseline_rows": 40,
+      "observed_live_only_rows": 40,
+      "baseline": {
+        "variant": "baseline",
+        "run_index": 0,
+        "historical_events": 10000,
+        "baseline_entities": 10,
+        "live_replay_mode": "realtime",
+        "live_rate_hz": 4.0,
+        "live_duration_seconds": 240,
+        "live_window_size_seconds": 120,
+        "live_window_slide_seconds": 60,
+        "live_event_count": 960,
+        "expected_emitted_windows": 4,
+        "expected_full_windows": 3,
+        "warmup_window_count": 1,
+        "observed_emitted_windows": 4,
+        "window_semantics_note": "Realtime replay reports emitted windows separately from full windows; the first emission is the initial warm-up window and full windows follow at the logical duration horizon.",
+        "historical_generation_ms": 2.581153999999929,
+        "storage_write_ms": 1.0196140000001324,
+        "baseline_eval_ms": 6.997458,
+        "materialization_ms": 0.035250000000000004,
+        "static_injection_ms": 0.017959,
+        "historical_query_ms": 6.997458,
+        "baseline_materialization_ms": 0.035250000000000004,
+        "static_graph_injection_ms": 0.017959,
+        "live_startup_ms": 0.001791,
+        "first_result_latency_ms": 60500.271042,
+        "result_count": 40,
+        "correctness_ok": true,
+        "materialized_quad_count": 10,
+        "baseline_binding_count": 10,
+        "window_result_latencies_ms": [
+          60500.271042,
+          60500.271125,
+          60500.273375,
+          60500.269625,
+          60500.271375,
+          60500.271417,
+          60500.273542,
+          60500.273417000004,
+          60500.274417,
+          60500.273499999996,
+          120505.069458,
+          120505.069542,
+          120505.06995800001,
+          120505.068792,
+          120505.069792,
+          120505.069875,
+          120505.073917,
+          120505.070042,
+          120505.074,
+          120505.073833,
+          180505.085542,
+          180505.086,
+          180505.086667,
+          180505.084375,
+          180505.08625,
+          180505.086458,
+          180505.08720799998,
+          180505.086833,
+          180505.087417,
+          180505.08704200003,
+          239760.138917,
+          239760.139042,
+          239760.158667,
+          239760.13833299998,
+          239760.15858299998,
+          239760.158625,
+          239760.158792,
+          239760.158708,
+          239760.158958,
+          239760.15875
+        ],
+        "completed_window_latencies_ms": [
+          60500.269625,
+          120505.068792,
+          180505.084375,
+          239760.13833299998
+        ],
+        "completed_window_result_counts": [
+          10,
+          10,
+          10,
+          10
+        ],
+        "observed_rows": [
+          {
+            "sensor": "http://example.org/sensor0",
+            "minute_avg_value": 20.0,
+            "day_avg_value": 10.0,
+            "difference": 10.0,
+            "received_after_first_event_ms": 60500.271042,
+            "timestamp_from": 1900000059750,
+            "timestamp_to": 1900000179750
+          },
+          {
+            "sensor": "http://example.org/sensor1",
+            "minute_avg_value": 30.0,
+            "day_avg_value": 11.0,
+            "difference": 19.0,
+            "received_after_first_event_ms": 60500.271125,
+            "timestamp_from": 1900000059750,
+            "timestamp_to": 1900000179750
+          },
+          {
+            "sensor": "http://example.org/sensor2",
+            "minute_avg_value": 40.0,
+            "day_avg_value": 12.0,
+            "difference": 28.0,
+            "received_after_first_event_ms": 60500.273375,
+            "timestamp_from": 1900000059750,
+            "timestamp_to": 1900000179750
+          },
+          {
+            "sensor": "http://example.org/sensor3",
+            "minute_avg_value": 50.0,
+            "day_avg_value": 13.0,
+            "difference": 37.0,
+            "received_after_first_event_ms": 60500.269625,
+            "timestamp_from": 1900000059750,
+            "timestamp_to": 1900000179750
+          },
+          {
+            "sensor": "http://example.org/sensor4",
+            "minute_avg_value": 60.0,
+            "day_avg_value": 14.0,
+            "difference": 46.0,
+            "received_after_first_event_ms": 60500.271375,
+            "timestamp_from": 1900000059750,
+            "timestamp_to": 1900000179750
+          },
+          {
+            "sensor": "http://example.org/sensor5",
+            "minute_avg_value": 70.0,
+            "day_avg_value": 15.0,
+            "difference": 55.0,
+            "received_after_first_event_ms": 60500.271417,
+            "timestamp_from": 1900000059750,
+            "timestamp_to": 1900000179750
+          },
+          {
+            "sensor": "http://example.org/sensor6",
+            "minute_avg_value": 80.0,
+            "day_avg_value": 16.0,
+            "difference": 64.0,
+            "received_after_first_event_ms": 60500.273542,
+            "timestamp_from": 1900000059750,
+            "timestamp_to": 1900000179750
+          },
+          {
+            "sensor": "http://example.org/sensor7",
+            "minute_avg_value": 90.0,
+            "day_avg_value": 17.0,
+            "difference": 73.0,
+            "received_after_first_event_ms": 60500.273417000004,
+            "timestamp_from": 1900000059750,
+            "timestamp_to": 1900000179750
+          },
+          {
+            "sensor": "http://example.org/sensor8",
+            "minute_avg_value": 100.0,
+            "day_avg_value": 18.0,
+            "difference": 82.0,
+            "received_after_first_event_ms": 60500.274417,
+            "timestamp_from": 1900000059750,
+            "timestamp_to": 1900000179750
+          },
+          {
+            "sensor": "http://example.org/sensor9",
+            "minute_avg_value": 110.0,
+            "day_avg_value": 19.0,
+            "difference": 91.0,
+            "received_after_first_event_ms": 60500.273499999996,
+            "timestamp_from": 1900000059750,
+            "timestamp_to": 1900000179750
+          },
+          {
+            "sensor": "http://example.org/sensor0",
+            "minute_avg_value": 20.0,
+            "day_avg_value": 10.0,
+            "difference": 10.0,
+            "received_after_first_event_ms": 120505.069458,
+            "timestamp_from": 1900000119750,
+            "timestamp_to": 1900000239750
+          },
+          {
+            "sensor": "http://example.org/sensor1",
+            "minute_avg_value": 30.0,
+            "day_avg_value": 11.0,
+            "difference": 19.0,
+            "received_after_first_event_ms": 120505.069542,
+            "timestamp_from": 1900000119750,
+            "timestamp_to": 1900000239750
+          },
+          {
+            "sensor": "http://example.org/sensor2",
+            "minute_avg_value": 40.0,
+            "day_avg_value": 12.0,
+            "difference": 28.0,
+            "received_after_first_event_ms": 120505.06995800001,
+            "timestamp_from": 1900000119750,
+            "timestamp_to": 1900000239750
+          },
+          {
+            "sensor": "http://example.org/sensor3",
+            "minute_avg_value": 50.0,
+            "day_avg_value": 13.0,
+            "difference": 37.0,
+            "received_after_first_event_ms": 120505.068792,
+            "timestamp_from": 1900000119750,
+            "timestamp_to": 1900000239750
+          },
+          {
+            "sensor": "http://example.org/sensor4",
+            "minute_avg_value": 60.0,
+            "day_avg_value": 14.0,
+            "difference": 46.0,
+            "received_after_first_event_ms": 120505.069792,
+            "timestamp_from": 1900000119750,
+            "timestamp_to": 1900000239750
+          },
+          {
+            "sensor": "http://example.org/sensor5",
+            "minute_avg_value": 70.0,
+            "day_avg_value": 15.0,
+            "difference": 55.0,
+            "received_after_first_event_ms": 120505.069875,
+            "timestamp_from": 1900000119750,
+            "timestamp_to": 1900000239750
+          },
+          {
+            "sensor": "http://example.org/sensor6",
+            "minute_avg_value": 80.0,
+            "day_avg_value": 16.0,
+            "difference": 64.0,
+            "received_after_first_event_ms": 120505.073917,
+            "timestamp_from": 1900000119750,
+            "timestamp_to": 1900000239750
+          },
+          {
+            "sensor": "http://example.org/sensor7",
+            "minute_avg_value": 90.0,
+            "day_avg_value": 17.0,
+            "difference": 73.0,
+            "received_after_first_event_ms": 120505.070042,
+            "timestamp_from": 1900000119750,
+            "timestamp_to": 1900000239750
+          },
+          {
+            "sensor": "http://example.org/sensor8",
+            "minute_avg_value": 100.0,
+            "day_avg_value": 18.0,
+            "difference": 82.0,
+            "received_after_first_event_ms": 120505.074,
+            "timestamp_from": 1900000119750,
+            "timestamp_to": 1900000239750
+          },
+          {
+            "sensor": "http://example.org/sensor9",
+            "minute_avg_value": 110.0,
+            "day_avg_value": 19.0,
+            "difference": 91.0,
+            "received_after_first_event_ms": 120505.073833,
+            "timestamp_from": 1900000119750,
+            "timestamp_to": 1900000239750
+          },
+          {
+            "sensor": "http://example.org/sensor0",
+            "minute_avg_value": 20.0,
+            "day_avg_value": 10.0,
+            "difference": 10.0,
+            "received_after_first_event_ms": 180505.085542,
+            "timestamp_from": 1900000179750,
+            "timestamp_to": 1900000299750
+          },
+          {
+            "sensor": "http://example.org/sensor1",
+            "minute_avg_value": 30.0,
+            "day_avg_value": 11.0,
+            "difference": 19.0,
+            "received_after_first_event_ms": 180505.086,
+            "timestamp_from": 1900000179750,
+            "timestamp_to": 1900000299750
+          },
+          {
+            "sensor": "http://example.org/sensor2",
+            "minute_avg_value": 40.0,
+            "day_avg_value": 12.0,
+            "difference": 28.0,
+            "received_after_first_event_ms": 180505.086667,
+            "timestamp_from": 1900000179750,
+            "timestamp_to": 1900000299750
+          },
+          {
+            "sensor": "http://example.org/sensor3",
+            "minute_avg_value": 50.0,
+            "day_avg_value": 13.0,
+            "difference": 37.0,
+            "received_after_first_event_ms": 180505.084375,
+            "timestamp_from": 1900000179750,
+            "timestamp_to": 1900000299750
+          },
+          {
+            "sensor": "http://example.org/sensor4",
+            "minute_avg_value": 60.0,
+            "day_avg_value": 14.0,
+            "difference": 46.0,
+            "received_after_first_event_ms": 180505.08625,
+            "timestamp_from": 1900000179750,
+            "timestamp_to": 1900000299750
+          },
+          {
+            "sensor": "http://example.org/sensor5",
+            "minute_avg_value": 70.0,
+            "day_avg_value": 15.0,
+            "difference": 55.0,
+            "received_after_first_event_ms": 180505.086458,
+            "timestamp_from": 1900000179750,
+            "timestamp_to": 1900000299750
+          },
+          {
+            "sensor": "http://example.org/sensor6",
+            "minute_avg_value": 80.0,
+            "day_avg_value": 16.0,
+            "difference": 64.0,
+            "received_after_first_event_ms": 180505.08720799998,
+            "timestamp_from": 1900000179750,
+            "timestamp_to": 1900000299750
+          },
+          {
+            "sensor": "http://example.org/sensor7",
+            "minute_avg_value": 90.0,
+            "day_avg_value": 17.0,
+            "difference": 73.0,
+            "received_after_first_event_ms": 180505.086833,
+            "timestamp_from": 1900000179750,
+            "timestamp_to": 1900000299750
+          },
+          {
+            "sensor": "http://example.org/sensor8",
+            "minute_avg_value": 100.0,
+            "day_avg_value": 18.0,
+            "difference": 82.0,
+            "received_after_first_event_ms": 180505.087417,
+            "timestamp_from": 1900000179750,
+            "timestamp_to": 1900000299750
+          },
+          {
+            "sensor": "http://example.org/sensor9",
+            "minute_avg_value": 110.0,
+            "day_avg_value": 19.0,
+            "difference": 91.0,
+            "received_after_first_event_ms": 180505.08704200003,
+            "timestamp_from": 1900000179750,
+            "timestamp_to": 1900000299750
+          },
+          {
+            "sensor": "http://example.org/sensor0",
+            "minute_avg_value": 20.0,
+            "day_avg_value": 10.0,
+            "difference": 10.0,
+            "received_after_first_event_ms": 239760.138917,
+            "timestamp_from": 1900000239750,
+            "timestamp_to": 1900000359750
+          },
+          {
+            "sensor": "http://example.org/sensor1",
+            "minute_avg_value": 30.0,
+            "day_avg_value": 11.0,
+            "difference": 19.0,
+            "received_after_first_event_ms": 239760.139042,
+            "timestamp_from": 1900000239750,
+            "timestamp_to": 1900000359750
+          },
+          {
+            "sensor": "http://example.org/sensor2",
+            "minute_avg_value": 40.0,
+            "day_avg_value": 12.0,
+            "difference": 28.0,
+            "received_after_first_event_ms": 239760.158667,
+            "timestamp_from": 1900000239750,
+            "timestamp_to": 1900000359750
+          },
+          {
+            "sensor": "http://example.org/sensor3",
+            "minute_avg_value": 50.0,
+            "day_avg_value": 13.0,
+            "difference": 37.0,
+            "received_after_first_event_ms": 239760.13833299998,
+            "timestamp_from": 1900000239750,
+            "timestamp_to": 1900000359750
+          },
+          {
+            "sensor": "http://example.org/sensor4",
+            "minute_avg_value": 60.0,
+            "day_avg_value": 14.0,
+            "difference": 46.0,
+            "received_after_first_event_ms": 239760.15858299998,
+            "timestamp_from": 1900000239750,
+            "timestamp_to": 1900000359750
+          },
+          {
+            "sensor": "http://example.org/sensor5",
+            "minute_avg_value": 70.0,
+            "day_avg_value": 15.0,
+            "difference": 55.0,
+            "received_after_first_event_ms": 239760.158625,
+            "timestamp_from": 1900000239750,
+            "timestamp_to": 1900000359750
+          },
+          {
+            "sensor": "http://example.org/sensor6",
+            "minute_avg_value": 80.0,
+            "day_avg_value": 16.0,
+            "difference": 64.0,
+            "received_after_first_event_ms": 239760.158792,
+            "timestamp_from": 1900000239750,
+            "timestamp_to": 1900000359750
+          },
+          {
+            "sensor": "http://example.org/sensor7",
+            "minute_avg_value": 90.0,
+            "day_avg_value": 17.0,
+            "difference": 73.0,
+            "received_after_first_event_ms": 239760.158708,
+            "timestamp_from": 1900000239750,
+            "timestamp_to": 1900000359750
+          },
+          {
+            "sensor": "http://example.org/sensor8",
+            "minute_avg_value": 100.0,
+            "day_avg_value": 18.0,
+            "difference": 82.0,
+            "received_after_first_event_ms": 239760.158958,
+            "timestamp_from": 1900000239750,
+            "timestamp_to": 1900000359750
+          },
+          {
+            "sensor": "http://example.org/sensor9",
+            "minute_avg_value": 110.0,
+            "day_avg_value": 19.0,
+            "difference": 91.0,
+            "received_after_first_event_ms": 239760.15875,
+            "timestamp_from": 1900000239750,
+            "timestamp_to": 1900000359750
+          }
+        ]
+      },
+      "live_only": {
+        "variant": "live_only",
+        "run_index": 0,
+        "historical_events": 10000,
+        "baseline_entities": 10,
+        "live_replay_mode": "realtime",
+        "live_rate_hz": 4.0,
+        "live_duration_seconds": 240,
+        "live_window_size_seconds": 120,
+        "live_window_slide_seconds": 60,
+        "live_event_count": 960,
+        "expected_emitted_windows": 4,
+        "expected_full_windows": 3,
+        "warmup_window_count": 1,
+        "observed_emitted_windows": 4,
+        "window_semantics_note": "Realtime replay reports emitted windows separately from full windows; the first emission is the initial warm-up window and full windows follow at the logical duration horizon.",
+        "historical_generation_ms": 2.581153999999929,
+        "storage_write_ms": 1.0196140000001324,
+        "baseline_eval_ms": null,
+        "materialization_ms": null,
+        "static_injection_ms": null,
+        "historical_query_ms": null,
+        "baseline_materialization_ms": null,
+        "static_graph_injection_ms": null,
+        "live_startup_ms": 0.007333999999999999,
+        "first_result_latency_ms": 60501.982040999996,
+        "result_count": 40,
+        "correctness_ok": true,
+        "materialized_quad_count": null,
+        "baseline_binding_count": null,
+        "window_result_latencies_ms": [
+          60501.982040999996,
+          60501.981916,
+          60501.983583,
+          60501.979083,
+          60501.982165999994,
+          60501.978958,
+          60501.9785,
+          60501.978833,
+          60501.976749999994,
+          60501.982291,
+          120505.105083,
+          120505.10520800001,
+          120505.108541,
+          120505.10495800001,
+          120505.108291,
+          120505.104833,
+          120505.104625,
+          120505.1045,
+          120505.10370800001,
+          120505.108416,
+          180502.274375,
+          180502.274833,
+          180502.2745,
+          180502.27425,
+          180502.274583,
+          180502.27412500003,
+          180502.27362499997,
+          180502.274,
+          180502.27254099998,
+          180502.27470799998,
+          239757.134583,
+          239757.134458,
+          239757.134708,
+          239757.134916,
+          239757.134791,
+          239757.13433300002,
+          239757.13150000002,
+          239757.131625,
+          239757.131208,
+          239757.135041
+        ],
+        "completed_window_latencies_ms": [
+          60501.976749999994,
+          120505.10370800001,
+          180502.27254099998,
+          239757.131208
+        ],
+        "completed_window_result_counts": [
+          10,
+          10,
+          10,
+          10
+        ],
+        "observed_rows": [
+          {
+            "sensor": "http://example.org/sensor0",
+            "minute_avg_value": 20.0,
+            "day_avg_value": null,
+            "difference": null,
+            "received_after_first_event_ms": 60501.982040999996,
+            "timestamp_from": 1900000059750,
+            "timestamp_to": 1900000179750
+          },
+          {
+            "sensor": "http://example.org/sensor1",
+            "minute_avg_value": 30.0,
+            "day_avg_value": null,
+            "difference": null,
+            "received_after_first_event_ms": 60501.981916,
+            "timestamp_from": 1900000059750,
+            "timestamp_to": 1900000179750
+          },
+          {
+            "sensor": "http://example.org/sensor2",
+            "minute_avg_value": 40.0,
+            "day_avg_value": null,
+            "difference": null,
+            "received_after_first_event_ms": 60501.983583,
+            "timestamp_from": 1900000059750,
+            "timestamp_to": 1900000179750
+          },
+          {
+            "sensor": "http://example.org/sensor3",
+            "minute_avg_value": 50.0,
+            "day_avg_value": null,
+            "difference": null,
+            "received_after_first_event_ms": 60501.979083,
+            "timestamp_from": 1900000059750,
+            "timestamp_to": 1900000179750
+          },
+          {
+            "sensor": "http://example.org/sensor4",
+            "minute_avg_value": 60.0,
+            "day_avg_value": null,
+            "difference": null,
+            "received_after_first_event_ms": 60501.982165999994,
+            "timestamp_from": 1900000059750,
+            "timestamp_to": 1900000179750
+          },
+          {
+            "sensor": "http://example.org/sensor5",
+            "minute_avg_value": 70.0,
+            "day_avg_value": null,
+            "difference": null,
+            "received_after_first_event_ms": 60501.978958,
+            "timestamp_from": 1900000059750,
+            "timestamp_to": 1900000179750
+          },
+          {
+            "sensor": "http://example.org/sensor6",
+            "minute_avg_value": 80.0,
+            "day_avg_value": null,
+            "difference": null,
+            "received_after_first_event_ms": 60501.9785,
+            "timestamp_from": 1900000059750,
+            "timestamp_to": 1900000179750
+          },
+          {
+            "sensor": "http://example.org/sensor7",
+            "minute_avg_value": 90.0,
+            "day_avg_value": null,
+            "difference": null,
+            "received_after_first_event_ms": 60501.978833,
+            "timestamp_from": 1900000059750,
+            "timestamp_to": 1900000179750
+          },
+          {
+            "sensor": "http://example.org/sensor8",
+            "minute_avg_value": 100.0,
+            "day_avg_value": null,
+            "difference": null,
+            "received_after_first_event_ms": 60501.976749999994,
+            "timestamp_from": 1900000059750,
+            "timestamp_to": 1900000179750
+          },
+          {
+            "sensor": "http://example.org/sensor9",
+            "minute_avg_value": 110.0,
+            "day_avg_value": null,
+            "difference": null,
+            "received_after_first_event_ms": 60501.982291,
+            "timestamp_from": 1900000059750,
+            "timestamp_to": 1900000179750
+          },
+          {
+            "sensor": "http://example.org/sensor0",
+            "minute_avg_value": 20.0,
+            "day_avg_value": null,
+            "difference": null,
+            "received_after_first_event_ms": 120505.105083,
+            "timestamp_from": 1900000119750,
+            "timestamp_to": 1900000239750
+          },
+          {
+            "sensor": "http://example.org/sensor1",
+            "minute_avg_value": 30.0,
+            "day_avg_value": null,
+            "difference": null,
+            "received_after_first_event_ms": 120505.10520800001,
+            "timestamp_from": 1900000119750,
+            "timestamp_to": 1900000239750
+          },
+          {
+            "sensor": "http://example.org/sensor2",
+            "minute_avg_value": 40.0,
+            "day_avg_value": null,
+            "difference": null,
+            "received_after_first_event_ms": 120505.108541,
+            "timestamp_from": 1900000119750,
+            "timestamp_to": 1900000239750
+          },
+          {
+            "sensor": "http://example.org/sensor3",
+            "minute_avg_value": 50.0,
+            "day_avg_value": null,
+            "difference": null,
+            "received_after_first_event_ms": 120505.10495800001,
+            "timestamp_from": 1900000119750,
+            "timestamp_to": 1900000239750
+          },
+          {
+            "sensor": "http://example.org/sensor4",
+            "minute_avg_value": 60.0,
+            "day_avg_value": null,
+            "difference": null,
+            "received_after_first_event_ms": 120505.108291,
+            "timestamp_from": 1900000119750,
+            "timestamp_to": 1900000239750
+          },
+          {
+            "sensor": "http://example.org/sensor5",
+            "minute_avg_value": 70.0,
+            "day_avg_value": null,
+            "difference": null,
+            "received_after_first_event_ms": 120505.104833,
+            "timestamp_from": 1900000119750,
+            "timestamp_to": 1900000239750
+          },
+          {
+            "sensor": "http://example.org/sensor6",
+            "minute_avg_value": 80.0,
+            "day_avg_value": null,
+            "difference": null,
+            "received_after_first_event_ms": 120505.104625,
+            "timestamp_from": 1900000119750,
+            "timestamp_to": 1900000239750
+          },
+          {
+            "sensor": "http://example.org/sensor7",
+            "minute_avg_value": 90.0,
+            "day_avg_value": null,
+            "difference": null,
+            "received_after_first_event_ms": 120505.1045,
+            "timestamp_from": 1900000119750,
+            "timestamp_to": 1900000239750
+          },
+          {
+            "sensor": "http://example.org/sensor8",
+            "minute_avg_value": 100.0,
+            "day_avg_value": null,
+            "difference": null,
+            "received_after_first_event_ms": 120505.10370800001,
+            "timestamp_from": 1900000119750,
+            "timestamp_to": 1900000239750
+          },
+          {
+            "sensor": "http://example.org/sensor9",
+            "minute_avg_value": 110.0,
+            "day_avg_value": null,
+            "difference": null,
+            "received_after_first_event_ms": 120505.108416,
+            "timestamp_from": 1900000119750,
+            "timestamp_to": 1900000239750
+          },
+          {
+            "sensor": "http://example.org/sensor0",
+            "minute_avg_value": 20.0,
+            "day_avg_value": null,
+            "difference": null,
+            "received_after_first_event_ms": 180502.274375,
+            "timestamp_from": 1900000179750,
+            "timestamp_to": 1900000299750
+          },
+          {
+            "sensor": "http://example.org/sensor1",
+            "minute_avg_value": 30.0,
+            "day_avg_value": null,
+            "difference": null,
+            "received_after_first_event_ms": 180502.274833,
+            "timestamp_from": 1900000179750,
+            "timestamp_to": 1900000299750
+          },
+          {
+            "sensor": "http://example.org/sensor2",
+            "minute_avg_value": 40.0,
+            "day_avg_value": null,
+            "difference": null,
+            "received_after_first_event_ms": 180502.2745,
+            "timestamp_from": 1900000179750,
+            "timestamp_to": 1900000299750
+          },
+          {
+            "sensor": "http://example.org/sensor3",
+            "minute_avg_value": 50.0,
+            "day_avg_value": null,
+            "difference": null,
+            "received_after_first_event_ms": 180502.27425,
+            "timestamp_from": 1900000179750,
+            "timestamp_to": 1900000299750
+          },
+          {
+            "sensor": "http://example.org/sensor4",
+            "minute_avg_value": 60.0,
+            "day_avg_value": null,
+            "difference": null,
+            "received_after_first_event_ms": 180502.274583,
+            "timestamp_from": 1900000179750,
+            "timestamp_to": 1900000299750
+          },
+          {
+            "sensor": "http://example.org/sensor5",
+            "minute_avg_value": 70.0,
+            "day_avg_value": null,
+            "difference": null,
+            "received_after_first_event_ms": 180502.27412500003,
+            "timestamp_from": 1900000179750,
+            "timestamp_to": 1900000299750
+          },
+          {
+            "sensor": "http://example.org/sensor6",
+            "minute_avg_value": 80.0,
+            "day_avg_value": null,
+            "difference": null,
+            "received_after_first_event_ms": 180502.27362499997,
+            "timestamp_from": 1900000179750,
+            "timestamp_to": 1900000299750
+          },
+          {
+            "sensor": "http://example.org/sensor7",
+            "minute_avg_value": 90.0,
+            "day_avg_value": null,
+            "difference": null,
+            "received_after_first_event_ms": 180502.274,
+            "timestamp_from": 1900000179750,
+            "timestamp_to": 1900000299750
+          },
+          {
+            "sensor": "http://example.org/sensor8",
+            "minute_avg_value": 100.0,
+            "day_avg_value": null,
+            "difference": null,
+            "received_after_first_event_ms": 180502.27254099998,
+            "timestamp_from": 1900000179750,
+            "timestamp_to": 1900000299750
+          },
+          {
+            "sensor": "http://example.org/sensor9",
+            "minute_avg_value": 110.0,
+            "day_avg_value": null,
+            "difference": null,
+            "received_after_first_event_ms": 180502.27470799998,
+            "timestamp_from": 1900000179750,
+            "timestamp_to": 1900000299750
+          },
+          {
+            "sensor": "http://example.org/sensor0",
+            "minute_avg_value": 20.0,
+            "day_avg_value": null,
+            "difference": null,
+            "received_after_first_event_ms": 239757.134583,
+            "timestamp_from": 1900000239750,
+            "timestamp_to": 1900000359750
+          },
+          {
+            "sensor": "http://example.org/sensor1",
+            "minute_avg_value": 30.0,
+            "day_avg_value": null,
+            "difference": null,
+            "received_after_first_event_ms": 239757.134458,
+            "timestamp_from": 1900000239750,
+            "timestamp_to": 1900000359750
+          },
+          {
+            "sensor": "http://example.org/sensor2",
+            "minute_avg_value": 40.0,
+            "day_avg_value": null,
+            "difference": null,
+            "received_after_first_event_ms": 239757.134708,
+            "timestamp_from": 1900000239750,
+            "timestamp_to": 1900000359750
+          },
+          {
+            "sensor": "http://example.org/sensor3",
+            "minute_avg_value": 50.0,
+            "day_avg_value": null,
+            "difference": null,
+            "received_after_first_event_ms": 239757.134916,
+            "timestamp_from": 1900000239750,
+            "timestamp_to": 1900000359750
+          },
+          {
+            "sensor": "http://example.org/sensor4",
+            "minute_avg_value": 60.0,
+            "day_avg_value": null,
+            "difference": null,
+            "received_after_first_event_ms": 239757.134791,
+            "timestamp_from": 1900000239750,
+            "timestamp_to": 1900000359750
+          },
+          {
+            "sensor": "http://example.org/sensor5",
+            "minute_avg_value": 70.0,
+            "day_avg_value": null,
+            "difference": null,
+            "received_after_first_event_ms": 239757.13433300002,
+            "timestamp_from": 1900000239750,
+            "timestamp_to": 1900000359750
+          },
+          {
+            "sensor": "http://example.org/sensor6",
+            "minute_avg_value": 80.0,
+            "day_avg_value": null,
+            "difference": null,
+            "received_after_first_event_ms": 239757.13150000002,
+            "timestamp_from": 1900000239750,
+            "timestamp_to": 1900000359750
+          },
+          {
+            "sensor": "http://example.org/sensor7",
+            "minute_avg_value": 90.0,
+            "day_avg_value": null,
+            "difference": null,
+            "received_after_first_event_ms": 239757.131625,
+            "timestamp_from": 1900000239750,
+            "timestamp_to": 1900000359750
+          },
+          {
+            "sensor": "http://example.org/sensor8",
+            "minute_avg_value": 100.0,
+            "day_avg_value": null,
+            "difference": null,
+            "received_after_first_event_ms": 239757.131208,
+            "timestamp_from": 1900000239750,
+            "timestamp_to": 1900000359750
+          },
+          {
+            "sensor": "http://example.org/sensor9",
+            "minute_avg_value": 110.0,
+            "day_avg_value": null,
+            "difference": null,
+            "received_after_first_event_ms": 239757.135041,
+            "timestamp_from": 1900000239750,
+            "timestamp_to": 1900000359750
+          }
+        ]
+      },
+      "live_startup_overhead_ms": 0.0,
+      "first_result_overhead_ms": 0.0
+    }
+  ]
+}
