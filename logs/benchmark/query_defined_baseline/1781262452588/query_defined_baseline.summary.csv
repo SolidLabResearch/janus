@@ -1,0 +1,4 @@
+row_type,profile,variant,runs,correctness_rate,historical_query_ms_p50,baseline_materialization_ms_p50,static_graph_injection_ms_p50,live_startup_ms_p50,first_result_latency_ms_p50,first_result_latency_ms_p95,avg_window_result_latency_ms,p50_window_result_latency_ms,p95_window_result_latency_ms,avg_result_count,avg_materialized_quad_count,avg_baseline_binding_count,live_startup_overhead_ms_p50,first_result_overhead_ms_p50
+variant,smoke,baseline,6,1.000,0.339,0.012,0.006,0.007,252.309,255.033,251.973,252.309,255.033,1.000,1.000,1.000,,
+variant,smoke,live_only,6,1.000,,,,0.006,255.056,255.065,253.938,255.056,255.070,3.000,,,,
+comparison,smoke,comparison,6,,,,,,,,,,,,,0.002,0.000

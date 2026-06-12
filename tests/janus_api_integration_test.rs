@@ -3,7 +3,7 @@
 //! Tests the complete flow of registering and executing JanusQL queries
 //! with both historical and live processing.
 
-use janus::api::janus_api::{JanusApi, ResultSource};
+use janus::api::janus_api::{ExecutionStatus, JanusApi, ResultSource};
 use janus::parsing::janusql_parser::JanusQLParser;
 use janus::registry::query_registry::QueryRegistry;
 use janus::storage::segmented_storage::StreamingSegmentedStorage;
@@ -672,4 +672,167 @@ WHERE {
 
     // At least one type should have results (depending on timing and data)
     // This verifies both threads can execute concurrently
+}
+
+#[test]
+fn test_registered_query_exposes_query_defined_baseline_lowering() {
+    let parser = JanusQLParser::new().expect("Failed to create parser");
+    let registry = Arc::new(QueryRegistry::new());
+    let storage = Arc::new(
+        StreamingSegmentedStorage::new(StreamingConfig::default())
+            .expect("Failed to create storage"),
+    );
+    let api = JanusApi::new(parser, registry, storage).expect("Failed to create API");
+
+    let janusql = r#"
+PREFIX ex: <http://example.org/>
+
+FROM NAMED WINDOW ex:liveMinute ON STREAM ex:stream [RANGE 60000 STEP 1000]
+FROM NAMED WINDOW ex:historyDay ON LOG ex:stream [START 0 END 86400000]
+
+DEFINE BASELINE ex:dayBaseline ON WINDOW ex:historyDay AS
+SELECT ?sensor
+       (AVG(?value) AS ?dayAvgValue)
+       (COUNT(?value) AS ?dayCount)
+WHERE {
+  ?sensor ex:hasValue ?value .
+}
+GROUP BY ?sensor
+
+REGISTER RStream ex:output AS
+USING BASELINE ex:dayBaseline
+SELECT ?sensor
+       (AVG(?value) AS ?minuteAvgValue)
+       ?dayAvgValue
+       ((AVG(?value) - ?dayAvgValue) AS ?difference)
+WHERE {
+  WINDOW ex:liveMinute {
+    ?sensor ex:hasValue ?value .
+  }
+  GRAPH ex:dayBaseline {
+    ?sensor ex:dayAvgValue ?dayAvgValue .
+    ?sensor ex:dayCount ?dayCount .
+  }
+}
+GROUP BY ?sensor ?dayAvgValue
+HAVING(AVG(?value) > ?dayAvgValue)
+    "#;
+
+    let metadata = api
+        .register_query("baseline_lowering".into(), janusql)
+        .expect("Failed to register query");
+
+    assert_eq!(metadata.parsed.generated_baseline_queries.len(), 1);
+    assert_eq!(
+        metadata.parsed.generated_baseline_queries[0].name,
+        "http://example.org/dayBaseline"
+    );
+    assert!(metadata.parsed.generated_baseline_queries[0].sparql_query.contains("AVG"));
+    assert!(metadata.parsed.generated_baseline_queries[0].sparql_query.contains("COUNT"));
+    assert!(metadata.parsed.generated_baseline_queries[0].sparql_query.contains("GROUP BY"));
+    assert!(metadata.parsed.generated_baseline_queries[0]
+        .sparql_query
+        .contains("GRAPH ?__janus_log_graph"));
+    assert_eq!(metadata.parsed.ast.baseline_uses.len(), 1);
+    assert_eq!(metadata.parsed.ast.baseline_uses[0].name, "http://example.org/dayBaseline");
+    assert!(metadata.parsed.select_clause.contains("?difference"));
+    assert!(!metadata.parsed.where_clause.contains("DEFINE BASELINE"));
+    assert!(metadata.parsed.where_clause.contains("GRAPH ex:dayBaseline"));
+    assert_eq!(metadata.parsed.baseline_graph_templates.len(), 1);
+    assert_eq!(metadata.parsed.baseline_graph_templates[0].triples.len(), 2);
+}
+
+#[test]
+fn test_query_defined_baseline_live_query_starts_when_graph_is_present() {
+    let storage = create_test_storage_with_data().expect("Failed to create storage");
+    let parser = JanusQLParser::new().expect("Failed to create parser");
+    let registry = Arc::new(QueryRegistry::new());
+    let api = JanusApi::new(parser, registry, storage).expect("Failed to create API");
+
+    let janusql = r#"
+PREFIX ex: <http://example.org/>
+
+FROM NAMED WINDOW ex:liveMinute ON STREAM ex:stream [RANGE 60000 STEP 1000]
+FROM NAMED WINDOW ex:historyDay ON LOG ex:stream [START 0 END 86400000]
+
+DEFINE BASELINE ex:dayBaseline ON WINDOW ex:historyDay AS
+SELECT ?sensor
+       (AVG(?value) AS ?dayAvgValue)
+WHERE {
+  ?sensor ex:temperature ?value .
+}
+GROUP BY ?sensor
+
+REGISTER RStream ex:output AS
+USING BASELINE ex:dayBaseline
+SELECT ?sensor
+       (AVG(?value) AS ?minuteAvgValue)
+       ?dayAvgValue
+       ((AVG(?value) - ?dayAvgValue) AS ?difference)
+WHERE {
+  WINDOW ex:liveMinute {
+    ?sensor ex:temperature ?value .
+  }
+  GRAPH ex:dayBaseline {
+    ?sensor ex:dayAvgValue ?dayAvgValue .
+  }
+}
+GROUP BY ?sensor ?dayAvgValue
+    "#;
+
+    api.register_query("baseline_e2e".into(), janusql)
+        .expect("Failed to register query");
+
+    let _handle = api
+        .start_query(&"baseline_e2e".into())
+        .expect("query-defined baseline live query should start");
+
+    let bindings = api
+        .get_query_defined_baseline_bindings(&"baseline_e2e".into())
+        .expect("query-defined baseline bindings should be available after start");
+    assert!(bindings.contains_key("http://example.org/dayBaseline"));
+    assert_eq!(api.get_query_status(&"baseline_e2e".into()), Some(ExecutionStatus::Running));
+}
+
+#[test]
+fn test_query_defined_baseline_live_query_rejects_missing_graph_reference() {
+    let storage = create_test_storage_with_data().expect("Failed to create storage");
+    let parser = JanusQLParser::new().expect("Failed to create parser");
+    let registry = Arc::new(QueryRegistry::new());
+    let api = JanusApi::new(parser, registry, storage).expect("Failed to create API");
+
+    let janusql = r#"
+PREFIX ex: <http://example.org/>
+
+FROM NAMED WINDOW ex:liveMinute ON STREAM ex:stream [RANGE 60 STEP 5]
+FROM NAMED WINDOW ex:historyDay ON LOG ex:stream [START 0 END 6000]
+
+DEFINE BASELINE ex:dayBaseline ON WINDOW ex:historyDay AS
+SELECT ?sensor
+       (AVG(?value) AS ?dayAvgValue)
+WHERE {
+  ?sensor ex:temperature ?value .
+}
+GROUP BY ?sensor
+
+REGISTER RStream ex:output AS
+USING BASELINE ex:dayBaseline
+SELECT ?sensor
+       (AVG(?value) AS ?minuteAvgValue)
+WHERE {
+  WINDOW ex:liveMinute {
+    ?sensor ex:temperature ?value .
+  }
+}
+GROUP BY ?sensor
+    "#;
+
+    api.register_query("baseline_missing_graph".into(), janusql)
+        .expect("Failed to register query");
+
+    let err = match api.start_query(&"baseline_missing_graph".into()) {
+        Ok(_) => panic!("query should fail without baseline GRAPH reference"),
+        Err(err) => err,
+    };
+    assert!(err.to_string().contains("requires a matching GRAPH reference"));
 }

@@ -1,7 +1,9 @@
 use crate::{
     core::RDFEvent,
     execution::{HistoricalExecutor, ResultConverter},
-    parsing::janusql_parser::{JanusQLParser, WindowType},
+    parsing::janusql_parser::{
+        BaselineGraphTemplate, GraphTermTemplate, JanusQLParser, TripleTemplate, WindowType,
+    },
     querying::oxigraph_adapter::OxigraphAdapter,
     registry::query_registry::{BaselineBootstrapMode, QueryId, QueryMetadata, QueryRegistry},
     storage::segmented_storage::StreamingSegmentedStorage,
@@ -10,9 +12,10 @@ use crate::{
         mqtt_subscriber::{MqttSubscriber, MqttSubscriberConfig},
     },
 };
+use oxigraph::model::{BlankNode, GraphName, Literal, NamedNode, NamedOrBlankNode, Quad, Term};
 use std::{
     cmp::Ordering,
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     sync::{
         mpsc::{self, Receiver, Sender},
         Arc, Mutex, RwLock,
@@ -91,6 +94,10 @@ impl QueryHandle {
 struct RunningQuery {
     metadata: QueryMetadata,
     status: Arc<RwLock<ExecutionStatus>>,
+    // Query-defined baselines are evaluated at startup and stored here for
+    // inspection/debugging after they have also been materialized into the
+    // live engine static store.
+    query_defined_baselines: Arc<RwLock<HashMap<String, Vec<HashMap<String, String>>>>>,
     // Primary sender used to send the results to the main subscriber
     primary_sender: Sender<QueryResult>,
     // Additional senders for other subscribers (if any)
@@ -222,29 +229,28 @@ impl JanusApi {
             .unwrap_or(metadata.baseline_mode);
         let effective_baseline_window =
             parsed.baseline.as_ref().map(|baseline| baseline.window_name.clone());
+        validate_query_defined_baseline_access(parsed)?;
+        let requires_async_baseline_warmup = !parsed.live_windows.is_empty()
+            && !parsed.historical_windows.is_empty()
+            && (parsed.baseline.is_some() || !parsed.sparql_queries.is_empty());
         let mut historical_handles = Vec::new();
         let mut shutdown_senders = Vec::new();
-        let initial_status =
-            if !parsed.live_windows.is_empty() && !parsed.historical_windows.is_empty() {
-                ExecutionStatus::WarmingBaseline
-            } else {
-                ExecutionStatus::Running
-            };
+        let initial_status = if requires_async_baseline_warmup {
+            ExecutionStatus::WarmingBaseline
+        } else {
+            ExecutionStatus::Running
+        };
         let status = Arc::new(RwLock::new(initial_status.clone()));
 
         // 4. Spawn historical worker threads (one per historical window)
         for (i, window) in parsed.historical_windows.iter().enumerate() {
             // Get corresponding SPARQL query
-            let sparql_query = parsed
-                .sparql_queries
-                .get(i)
-                .ok_or_else(|| {
-                    JanusApiError::ExecutionError(format!(
-                        "Missing SPARQL query for historical window {}",
-                        i
-                    ))
-                })?
-                .clone();
+            let Some(sparql_query) = parsed.sparql_queries.get(i).cloned() else {
+                // Query-defined baselines may reference historical windows that do not appear
+                // in the registered query WHERE clause, so there is no standalone historical
+                // worker query to run for them.
+                continue;
+            };
 
             let tx = result_tx.clone();
             let storage = Arc::clone(&self.storage);
@@ -310,6 +316,7 @@ impl JanusApi {
         let mut mqtt_subscribers = Vec::new();
         let mut mqtt_subscriber_handles = Vec::new();
         let mut baseline_handle = None;
+        let query_defined_baselines = Arc::new(RwLock::new(HashMap::new()));
 
         let live_handle = if !parsed.live_windows.is_empty() && !parsed.rspql_query.is_empty() {
             let tx = result_tx.clone();
@@ -333,6 +340,18 @@ impl JanusApi {
             // Register all live streams
             {
                 let mut processor = live_processor.lock().unwrap();
+                if !parsed.ast.baseline_uses.is_empty() {
+                    let (_query_defined_baselines, baseline_quads) =
+                        evaluate_and_materialize_query_defined_baselines(
+                            &self.storage,
+                            parsed,
+                            &mpsc::channel::<()>().1,
+                        )?;
+                    if let Ok(mut stored) = query_defined_baselines.write() {
+                        *stored = _query_defined_baselines;
+                    }
+                    materialize_static_quads(&mut processor, &baseline_quads)?;
+                }
                 for window in &live_windows {
                     if let Err(e) = processor.register_stream(&window.stream_name) {
                         eprintln!("Failed to register stream '{}': {}", window.stream_name, e);
@@ -349,13 +368,14 @@ impl JanusApi {
                 }
             }
 
-            if !parsed.historical_windows.is_empty() {
+            if requires_async_baseline_warmup {
                 let storage = Arc::clone(&self.storage);
                 let parsed_clone = parsed.clone();
                 let processor_for_baseline = Arc::clone(&live_processor);
                 let status_for_baseline = Arc::clone(&status);
                 let registry_for_baseline = Arc::clone(&self.registry);
                 let query_id_for_baseline = query_id.clone();
+                let query_defined_baselines_for_thread = Arc::clone(&query_defined_baselines);
                 let baseline_mode = effective_baseline_mode;
                 let baseline_window = effective_baseline_window.clone();
                 let (baseline_shutdown_tx, baseline_shutdown_rx) = mpsc::channel::<()>();
@@ -495,6 +515,7 @@ impl JanusApi {
         let running = RunningQuery {
             metadata,
             status,
+            query_defined_baselines,
             primary_sender: result_tx,
             subscribers: vec![],
             historical_handles,
@@ -587,6 +608,15 @@ impl JanusApi {
             .get(query_id)
             .and_then(|running| running.status.read().ok().map(|s| s.clone()))
     }
+
+    pub fn get_query_defined_baseline_bindings(
+        &self,
+        query_id: &QueryId,
+    ) -> Option<HashMap<String, Vec<HashMap<String, String>>>> {
+        let running_map = self.running.lock().unwrap();
+        let running = running_map.get(query_id)?;
+        running.query_defined_baselines.read().ok().map(|bindings| bindings.clone())
+    }
 }
 
 fn collect_query_baseline_statements(
@@ -611,12 +641,11 @@ fn collect_query_baseline_statements(
             continue;
         }
 
-        let sparql_query = parsed.sparql_queries.get(index).ok_or_else(|| {
-            JanusApiError::ExecutionError(format!(
-                "Missing SPARQL query for historical window {}",
-                index
-            ))
-        })?;
+        let Some(sparql_query) = parsed.sparql_queries.get(index) else {
+            // Query-defined baselines may be the only consumer of a historical window.
+            // In that case there is no main historical SPARQL query to materialize here.
+            continue;
+        };
 
         match window.window_type {
             WindowType::HistoricalFixed => {
@@ -637,6 +666,79 @@ fn collect_query_baseline_statements(
     }
 
     Ok(statements)
+}
+
+fn collect_query_defined_baseline_bindings(
+    storage: &Arc<StreamingSegmentedStorage>,
+    parsed: &crate::parsing::janusql_parser::ParsedJanusQuery,
+    shutdown_rx: &Receiver<()>,
+) -> Result<HashMap<String, Vec<HashMap<String, String>>>, JanusApiError> {
+    let executor = HistoricalExecutor::new(Arc::clone(storage), OxigraphAdapter::new());
+    let mut baseline_results = HashMap::new();
+
+    for generated in &parsed.generated_baseline_queries {
+        if shutdown_rx.try_recv().is_ok() {
+            return Ok(HashMap::new());
+        }
+
+        let source_window = parsed
+            .historical_windows
+            .iter()
+            .find(|window| window.window_name == generated.source_window)
+            .ok_or_else(|| {
+                JanusApiError::ExecutionError(format!(
+                    "Missing historical source window '{}' for generated baseline '{}'",
+                    generated.source_window, generated.name
+                ))
+            })?;
+
+        let bindings = execute_generated_baseline_query(
+            &executor,
+            source_window,
+            &generated.sparql_query,
+            shutdown_rx,
+        )?;
+        baseline_results.insert(generated.name.clone(), bindings);
+    }
+
+    Ok(baseline_results)
+}
+
+fn evaluate_and_materialize_query_defined_baselines(
+    storage: &Arc<StreamingSegmentedStorage>,
+    parsed: &crate::parsing::janusql_parser::ParsedJanusQuery,
+    shutdown_rx: &Receiver<()>,
+) -> Result<(HashMap<String, Vec<HashMap<String, String>>>, Vec<Quad>), JanusApiError> {
+    let bindings_by_name = collect_query_defined_baseline_bindings(storage, parsed, shutdown_rx)?;
+    let quads = materialize_query_defined_baseline_quads(parsed, &bindings_by_name)?;
+    Ok((bindings_by_name, quads))
+}
+
+fn execute_generated_baseline_query(
+    executor: &HistoricalExecutor,
+    window: &crate::parsing::janusql_parser::WindowDefinition,
+    sparql_query: &str,
+    shutdown_rx: &Receiver<()>,
+) -> Result<Vec<HashMap<String, String>>, JanusApiError> {
+    match window.window_type {
+        WindowType::HistoricalFixed => executor.execute_fixed_window(window, sparql_query),
+        WindowType::HistoricalSliding => {
+            let mut latest_bindings = Vec::new();
+
+            for window_result in executor.execute_sliding_windows(window, sparql_query) {
+                if shutdown_rx.try_recv().is_ok() {
+                    return Ok(Vec::new());
+                }
+                latest_bindings = window_result?;
+            }
+
+            Ok(latest_bindings)
+        }
+        WindowType::Live => Err(JanusApiError::ExecutionError(format!(
+            "Generated baseline query cannot execute on live window '{}'",
+            window.window_name
+        ))),
+    }
 }
 
 fn collect_sliding_window_baseline_statements(
@@ -670,6 +772,59 @@ fn collect_sliding_window_baseline_statements(
     Ok(baseline_statements_from_accumulator(&accumulator))
 }
 
+fn materialize_query_defined_baseline_quads(
+    parsed: &crate::parsing::janusql_parser::ParsedJanusQuery,
+    bindings_by_name: &HashMap<String, Vec<HashMap<String, String>>>,
+) -> Result<Vec<Quad>, JanusApiError> {
+    let mut materialized = Vec::new();
+    let mut seen = HashSet::new();
+
+    for baseline_use in &parsed.ast.baseline_uses {
+        if !seen.insert(baseline_use.name.clone()) {
+            continue;
+        }
+
+        // The GRAPH template is the materialization contract. We use it instead of
+        // SELECT alias heuristics because the template explicitly states the RDF
+        // shape that should be injected into the live static store.
+        let definition = parsed
+            .ast
+            .baseline_definitions
+            .iter()
+            .find(|definition| definition.name == baseline_use.name)
+            .ok_or_else(|| {
+                JanusApiError::ExecutionError(format!(
+                    "USING BASELINE references missing baseline definition '{}'",
+                    baseline_use.name
+                ))
+            })?;
+        let bindings = bindings_by_name.get(&baseline_use.name).ok_or_else(|| {
+            JanusApiError::ExecutionError(format!(
+                "USING BASELINE references missing evaluated baseline '{}'",
+                baseline_use.name
+            ))
+        })?;
+        let template = parsed
+            .baseline_graph_templates
+            .iter()
+            .find(|template| template.baseline_name == baseline_use.name)
+            .ok_or_else(|| {
+                JanusApiError::ExecutionError(format!(
+                    "USING BASELINE '{}' requires a matching GRAPH reference in the live query",
+                    baseline_use.name
+                ))
+            })?;
+        materialized.extend(materialize_baseline_bindings_as_quads(
+            &baseline_use.name,
+            definition,
+            template,
+            bindings,
+        )?);
+    }
+
+    Ok(materialized)
+}
+
 #[cfg(test)]
 fn materialize_bindings_as_static_baseline(
     processor: &mut LiveStreamProcessing,
@@ -677,6 +832,16 @@ fn materialize_bindings_as_static_baseline(
 ) -> Result<(), JanusApiError> {
     let statements = baseline_statements_from_bindings(bindings);
     materialize_static_baseline_statements(processor, &statements)
+}
+
+fn materialize_static_quads(
+    processor: &mut LiveStreamProcessing,
+    quads: &[Quad],
+) -> Result<(), JanusApiError> {
+    for quad in quads {
+        processor.add_static_quad(quad.clone());
+    }
+    Ok(())
 }
 
 fn materialize_static_baseline_statements(
@@ -694,6 +859,32 @@ fn materialize_static_baseline_statements(
             })?;
     }
     Ok(())
+}
+
+fn materialize_baseline_bindings_as_quads(
+    baseline_name: &str,
+    baseline_definition: &crate::parsing::janusql_parser::BaselineDefinition,
+    baseline_graph_template: &BaselineGraphTemplate,
+    bindings: &[HashMap<String, String>],
+) -> Result<Vec<Quad>, JanusApiError> {
+    let graph_name = GraphName::NamedNode(NamedNode::new(baseline_name).map_err(|e| {
+        JanusApiError::ExecutionError(format!(
+            "Invalid baseline graph name '{}': {}",
+            baseline_name, e
+        ))
+    })?);
+
+    let mut quads = Vec::new();
+    for binding in bindings {
+        for triple in &baseline_graph_template.triples {
+            let subject = resolve_subject_template_term(baseline_name, triple, binding)?;
+            let predicate = resolve_predicate_template_term(baseline_name, triple, binding)?;
+            let object = resolve_object_template_term(baseline_name, triple, binding)?;
+            quads.push(Quad::new(subject, predicate, object, graph_name.clone()));
+        }
+    }
+
+    Ok(quads)
 }
 
 fn baseline_statements_from_bindings(
@@ -791,6 +982,263 @@ fn select_binding_anchor(binding: &HashMap<String, String>) -> Option<(String, S
         .find_map(|(name, raw)| normalize_iri_term(raw).map(|value| (name.clone(), value)))
 }
 
+fn validate_query_defined_baseline_access(
+    parsed: &crate::parsing::janusql_parser::ParsedJanusQuery,
+) -> Result<(), JanusApiError> {
+    for baseline_use in &parsed.ast.baseline_uses {
+        let template = parsed
+            .baseline_graph_templates
+            .iter()
+            .find(|template| template.baseline_name == baseline_use.name)
+            .ok_or_else(|| {
+                JanusApiError::ExecutionError(format!(
+                    "USING BASELINE '{}' requires a matching GRAPH reference in the live query",
+                    baseline_use.name
+                ))
+            })?;
+        let definition = parsed
+            .ast
+            .baseline_definitions
+            .iter()
+            .find(|definition| definition.name == baseline_use.name)
+            .ok_or_else(|| {
+                JanusApiError::ExecutionError(format!(
+                    "USING BASELINE references missing baseline definition '{}'",
+                    baseline_use.name
+                ))
+            })?;
+        validate_baseline_graph_template(definition, template)?;
+    }
+
+    Ok(())
+}
+
+fn validate_baseline_graph_template(
+    baseline_definition: &crate::parsing::janusql_parser::BaselineDefinition,
+    baseline_graph_template: &BaselineGraphTemplate,
+) -> Result<(), JanusApiError> {
+    let output_variables = baseline_definition
+        .output_variables
+        .iter()
+        .map(|variable| variable.trim_start_matches('?'))
+        .collect::<HashSet<_>>();
+
+    for triple in &baseline_graph_template.triples {
+        for term in [&triple.subject, &triple.object] {
+            if let GraphTermTemplate::Variable(variable_name) = term {
+                if !output_variables.contains(variable_name.as_str()) {
+                    return Err(JanusApiError::ExecutionError(format!(
+                        "GRAPH template for baseline '{}' references variable '?{}' that is not produced by the baseline SELECT output",
+                        baseline_graph_template.baseline_name,
+                        variable_name
+                    )));
+                }
+            }
+        }
+
+        if let GraphTermTemplate::Variable(variable_name) = &triple.predicate {
+            return Err(JanusApiError::ExecutionError(format!(
+                "GRAPH template for baseline '{}' uses variable predicate '?{}', but predicates must be concrete IRIs for now",
+                baseline_graph_template.baseline_name,
+                variable_name
+            )));
+        }
+    }
+
+    Ok(())
+}
+
+fn resolve_subject_template_term(
+    baseline_name: &str,
+    triple: &TripleTemplate,
+    binding: &HashMap<String, String>,
+) -> Result<NamedOrBlankNode, JanusApiError> {
+    match &triple.subject {
+        GraphTermTemplate::Variable(variable_name) => {
+            let raw_value = binding.get(variable_name).ok_or_else(|| {
+                JanusApiError::ExecutionError(format!(
+                    "Baseline '{}' binding is missing GRAPH template variable '?{}'",
+                    baseline_name, variable_name
+                ))
+            })?;
+            parse_subject_term(raw_value).map_err(|e| {
+                JanusApiError::ExecutionError(format!(
+                    "Failed to materialize baseline '{}' subject from variable '?{}' with value '{}': {}",
+                    baseline_name, variable_name, raw_value, e
+                ))
+            })
+        }
+        GraphTermTemplate::Iri(iri) => parse_named_or_blank_node(iri).map_err(|e| {
+            JanusApiError::ExecutionError(format!(
+                "Failed to materialize baseline '{}' subject IRI '{}': {}",
+                baseline_name, iri, e
+            ))
+        }),
+        GraphTermTemplate::Literal(raw_literal) => Err(JanusApiError::ExecutionError(format!(
+            "GRAPH template for baseline '{}' has a literal subject '{}', but subjects must be IRIs or blank nodes",
+            baseline_name, raw_literal
+        ))),
+    }
+}
+
+fn resolve_predicate_template_term(
+    baseline_name: &str,
+    triple: &TripleTemplate,
+    binding: &HashMap<String, String>,
+) -> Result<NamedNode, JanusApiError> {
+    match &triple.predicate {
+        GraphTermTemplate::Iri(iri) => NamedNode::new(iri.clone()).map_err(|e| {
+            JanusApiError::ExecutionError(format!(
+                "Failed to materialize baseline '{}' predicate '{}': {}",
+                baseline_name, iri, e
+            ))
+        }),
+        GraphTermTemplate::Variable(variable_name) => {
+            let _ = binding;
+            Err(JanusApiError::ExecutionError(format!(
+                "GRAPH template for baseline '{}' uses variable predicate '?{}', but predicates must be concrete IRIs for now",
+                baseline_name, variable_name
+            )))
+        }
+        GraphTermTemplate::Literal(raw_literal) => Err(JanusApiError::ExecutionError(format!(
+            "GRAPH template for baseline '{}' has a literal predicate '{}', but predicates must be IRIs",
+            baseline_name, raw_literal
+        ))),
+    }
+}
+
+fn resolve_object_template_term(
+    baseline_name: &str,
+    triple: &TripleTemplate,
+    binding: &HashMap<String, String>,
+) -> Result<Term, JanusApiError> {
+    match &triple.object {
+        GraphTermTemplate::Variable(variable_name) => {
+            let raw_value = binding.get(variable_name).ok_or_else(|| {
+                JanusApiError::ExecutionError(format!(
+                    "Baseline '{}' binding is missing GRAPH template variable '?{}'",
+                    baseline_name, variable_name
+                ))
+            })?;
+            parse_term(raw_value).map_err(|e| {
+                JanusApiError::ExecutionError(format!(
+                    "Failed to materialize baseline '{}' object from variable '?{}' with value '{}': {}",
+                    baseline_name, variable_name, raw_value, e
+                ))
+            })
+        }
+        GraphTermTemplate::Iri(iri) => parse_term(iri).map_err(|e| {
+            JanusApiError::ExecutionError(format!(
+                "Failed to materialize baseline '{}' object IRI '{}': {}",
+                baseline_name, iri, e
+            ))
+        }),
+        GraphTermTemplate::Literal(raw_literal) => {
+            parse_literal_term(raw_literal).map(Term::Literal).map_err(|e| {
+                JanusApiError::ExecutionError(format!(
+                    "Failed to materialize baseline '{}' literal object '{}': {}",
+                    baseline_name, raw_literal, e
+                ))
+            })
+        }
+    }
+}
+
+fn parse_subject_term(raw: &str) -> Result<NamedOrBlankNode, String> {
+    parse_named_or_blank_node(raw)
+}
+
+fn parse_term(raw: &str) -> Result<Term, String> {
+    if let Some(blank_node) = normalize_blank_node_term(raw) {
+        return BlankNode::new(blank_node).map(Term::BlankNode).map_err(|e| e.to_string());
+    }
+    if let Some(iri) = normalize_iri_term(raw) {
+        return NamedNode::new(iri).map(Term::NamedNode).map_err(|e| e.to_string());
+    }
+
+    parse_literal_term(raw).map(Term::Literal)
+}
+
+fn parse_named_or_blank_node(raw: &str) -> Result<NamedOrBlankNode, String> {
+    if let Some(blank_node) = normalize_blank_node_term(raw) {
+        return BlankNode::new(blank_node)
+            .map(NamedOrBlankNode::BlankNode)
+            .map_err(|e| e.to_string());
+    }
+    if let Some(iri) = normalize_iri_term(raw) {
+        return NamedNode::new(iri).map(NamedOrBlankNode::NamedNode).map_err(|e| e.to_string());
+    }
+    Err(format!("expected IRI or blank node subject but found {}", raw.trim()))
+}
+
+fn parse_literal_term(raw: &str) -> Result<Literal, String> {
+    let trimmed = raw.trim();
+    if !trimmed.starts_with('"') {
+        if trimmed.parse::<i64>().is_ok() {
+            return Ok(Literal::new_typed_literal(
+                trimmed,
+                NamedNode::new("http://www.w3.org/2001/XMLSchema#integer").unwrap(),
+            ));
+        }
+        if trimmed.parse::<f64>().is_ok() {
+            return Ok(Literal::new_typed_literal(
+                trimmed,
+                NamedNode::new("http://www.w3.org/2001/XMLSchema#decimal").unwrap(),
+            ));
+        }
+        return Ok(Literal::new_simple_literal(trimmed));
+    }
+
+    let (lexical, suffix) = split_literal_lexical_and_suffix(trimmed)?;
+    let lexical = unescape_literal_lexical(lexical);
+
+    if let Some(language) = suffix.strip_prefix('@') {
+        return Ok(
+            Literal::new_language_tagged_literal(lexical, language).map_err(|e| e.to_string())?
+        );
+    }
+
+    if let Some(datatype_iri) = suffix.strip_prefix("^^") {
+        let datatype = if datatype_iri.starts_with('<') && datatype_iri.ends_with('>') {
+            &datatype_iri[1..datatype_iri.len() - 1]
+        } else {
+            datatype_iri
+        };
+        return Ok(Literal::new_typed_literal(
+            lexical,
+            NamedNode::new(datatype).map_err(|e| e.to_string())?,
+        ));
+    }
+
+    Ok(Literal::new_simple_literal(lexical))
+}
+
+fn split_literal_lexical_and_suffix(raw: &str) -> Result<(&str, &str), String> {
+    let mut escaped = false;
+
+    for (index, ch) in raw.char_indices().skip(1) {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+
+        match ch {
+            '\\' => escaped = true,
+            '"' => return Ok((&raw[1..index], raw[index + 1..].trim())),
+            _ => {}
+        }
+    }
+
+    Err(format!("invalid RDF literal '{}'", raw))
+}
+
+fn unescape_literal_lexical(raw: &str) -> String {
+    raw.replace("\\\"", "\"")
+        .replace("\\\\", "\\")
+        .replace("\\n", "\n")
+        .replace("\\t", "\t")
+}
+
 fn normalize_binding_term(raw: &str) -> String {
     normalize_iri_term(raw)
         .or_else(|| normalize_literal_term(raw))
@@ -806,6 +1254,11 @@ fn normalize_iri_term(raw: &str) -> Option<String> {
     } else {
         None
     }
+}
+
+fn normalize_blank_node_term(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    trimmed.strip_prefix("_:").map(str::to_string)
 }
 
 fn normalize_literal_term(raw: &str) -> Option<String> {
@@ -886,11 +1339,27 @@ fn parse_mqtt_uri(stream_uri: &str) -> (String, u16, String) {
 #[cfg(test)]
 mod tests {
     use super::{
-        baseline_statements_from_bindings, materialize_bindings_as_static_baseline,
-        normalize_binding_term, parse_mqtt_uri, JANUS_BASELINE_NS,
+        baseline_statements_from_bindings, collect_query_defined_baseline_bindings,
+        materialize_baseline_bindings_as_quads, materialize_bindings_as_static_baseline,
+        normalize_binding_term, parse_mqtt_uri, validate_baseline_graph_template,
+        JANUS_BASELINE_NS,
     };
-    use crate::{core::RDFEvent, stream::live_stream_processing::LiveStreamProcessing};
-    use std::{collections::HashMap, thread, time::Duration};
+    use crate::{
+        core::RDFEvent,
+        parsing::janusql_parser::{
+            BaselineDefinition, BaselineGraphTemplate, GraphTermTemplate, JanusQLParser,
+            TripleTemplate,
+        },
+        storage::{segmented_storage::StreamingSegmentedStorage, util::StreamingConfig},
+        stream::live_stream_processing::LiveStreamProcessing,
+    };
+    use oxigraph::model::{GraphName, Literal, NamedNode, NamedOrBlankNode, Quad, Term};
+    use std::{
+        collections::HashMap,
+        sync::{mpsc, Arc},
+        thread,
+        time::Duration,
+    };
 
     #[test]
     fn test_parse_mqtt_uri_with_port() {
@@ -943,6 +1412,299 @@ mod tests {
             normalize_binding_term("\"42.5\"^^<http://www.w3.org/2001/XMLSchema#decimal>"),
             "42.5"
         );
+    }
+
+    #[test]
+    fn test_materialize_query_defined_baseline_bindings_as_quads() {
+        let definition = BaselineDefinition {
+            name: "http://example.org/dayBaseline".to_string(),
+            source_window: "http://example.org/historyDay".to_string(),
+            raw_query: String::new(),
+            select_clause: "SELECT ?sensor (AVG(?value) AS ?dayAvgValue)".to_string(),
+            where_clause: "WHERE { ?sensor <http://example.org/hasValue> ?value . }".to_string(),
+            group_by_clause: Some("GROUP BY ?sensor".to_string()),
+            output_variables: vec!["?sensor".to_string(), "?dayAvgValue".to_string()],
+        };
+        let bindings = vec![HashMap::from([
+            ("sensor".to_string(), "<http://example.org/s1>".to_string()),
+            (
+                "dayAvgValue".to_string(),
+                "\"42.0\"^^<http://www.w3.org/2001/XMLSchema#decimal>".to_string(),
+            ),
+        ])];
+        let template = BaselineGraphTemplate {
+            baseline_name: "http://example.org/dayBaseline".to_string(),
+            triples: vec![TripleTemplate {
+                subject: GraphTermTemplate::Variable("sensor".to_string()),
+                predicate: GraphTermTemplate::Iri("http://example.org/dayAvgValue".to_string()),
+                object: GraphTermTemplate::Variable("dayAvgValue".to_string()),
+            }],
+        };
+
+        let quads = materialize_baseline_bindings_as_quads(
+            "http://example.org/dayBaseline",
+            &definition,
+            &template,
+            &bindings,
+        )
+        .expect("baseline quads should materialize");
+
+        assert_eq!(
+            quads,
+            vec![Quad::new(
+                NamedOrBlankNode::NamedNode(NamedNode::new("http://example.org/s1").unwrap()),
+                NamedNode::new("http://example.org/dayAvgValue").unwrap(),
+                Term::Literal(Literal::new_typed_literal(
+                    "42.0",
+                    NamedNode::new("http://www.w3.org/2001/XMLSchema#decimal").unwrap(),
+                )),
+                GraphName::NamedNode(NamedNode::new("http://example.org/dayBaseline").unwrap()),
+            )]
+        );
+    }
+
+    #[test]
+    fn test_materialize_query_defined_baseline_preserves_string_and_language_literals() {
+        let definition = BaselineDefinition {
+            name: "http://example.org/dayBaseline".to_string(),
+            source_window: "http://example.org/historyDay".to_string(),
+            raw_query: String::new(),
+            select_clause: "SELECT ?sensor ?label ?note".to_string(),
+            where_clause: "WHERE { ?sensor ?p ?o . }".to_string(),
+            group_by_clause: None,
+            output_variables: vec![
+                "?sensor".to_string(),
+                "?label".to_string(),
+                "?note".to_string(),
+            ],
+        };
+        let bindings = vec![HashMap::from([
+            ("sensor".to_string(), "<http://example.org/s1>".to_string()),
+            ("label".to_string(), "\"pump\"".to_string()),
+            ("note".to_string(), "\"bonjour\"@fr".to_string()),
+        ])];
+        let template = BaselineGraphTemplate {
+            baseline_name: "http://example.org/dayBaseline".to_string(),
+            triples: vec![
+                TripleTemplate {
+                    subject: GraphTermTemplate::Variable("sensor".to_string()),
+                    predicate: GraphTermTemplate::Iri("http://example.org/label".to_string()),
+                    object: GraphTermTemplate::Variable("label".to_string()),
+                },
+                TripleTemplate {
+                    subject: GraphTermTemplate::Variable("sensor".to_string()),
+                    predicate: GraphTermTemplate::Iri("http://example.org/note".to_string()),
+                    object: GraphTermTemplate::Variable("note".to_string()),
+                },
+            ],
+        };
+
+        let quads = materialize_baseline_bindings_as_quads(
+            "http://example.org/dayBaseline",
+            &definition,
+            &template,
+            &bindings,
+        )
+        .expect("baseline quads should materialize");
+
+        assert_eq!(quads.len(), 2);
+        assert!(quads.iter().any(|quad| quad.predicate.as_str() == "http://example.org/label"
+            && quad.object == Term::Literal(Literal::new_simple_literal("pump"))));
+        assert!(quads.iter().any(|quad| quad.predicate.as_str() == "http://example.org/note"
+            && quad.object
+                == Term::Literal(Literal::new_language_tagged_literal("bonjour", "fr").unwrap())));
+    }
+
+    #[test]
+    fn test_materialize_query_defined_baseline_rejects_non_iri_subject() {
+        let definition = BaselineDefinition {
+            name: "http://example.org/dayBaseline".to_string(),
+            source_window: "http://example.org/historyDay".to_string(),
+            raw_query: String::new(),
+            select_clause: "SELECT ?sensor (AVG(?value) AS ?dayAvgValue)".to_string(),
+            where_clause: "WHERE { ?sensor ?p ?value . }".to_string(),
+            group_by_clause: None,
+            output_variables: vec!["?sensor".to_string(), "?dayAvgValue".to_string()],
+        };
+        let template = BaselineGraphTemplate {
+            baseline_name: "http://example.org/dayBaseline".to_string(),
+            triples: vec![TripleTemplate {
+                subject: GraphTermTemplate::Variable("sensor".to_string()),
+                predicate: GraphTermTemplate::Iri("http://example.org/dayAvgValue".to_string()),
+                object: GraphTermTemplate::Variable("dayAvgValue".to_string()),
+            }],
+        };
+        let bindings = vec![HashMap::from([
+            ("sensor".to_string(), "\"not-an-iri\"".to_string()),
+            (
+                "dayAvgValue".to_string(),
+                "\"42.0\"^^<http://www.w3.org/2001/XMLSchema#decimal>".to_string(),
+            ),
+        ])];
+
+        let err = materialize_baseline_bindings_as_quads(
+            "http://example.org/dayBaseline",
+            &definition,
+            &template,
+            &bindings,
+        )
+        .expect_err("materialization should fail for non-IRI subject");
+
+        assert!(err.to_string().contains("expected IRI or blank node subject"));
+    }
+
+    #[test]
+    fn test_validate_query_defined_baseline_rejects_missing_template_variable() {
+        let definition = BaselineDefinition {
+            name: "http://example.org/dayBaseline".to_string(),
+            source_window: "http://example.org/historyDay".to_string(),
+            raw_query: String::new(),
+            select_clause: "SELECT ?sensor (AVG(?value) AS ?dayAvgValue)".to_string(),
+            where_clause: "WHERE { ?sensor ?p ?value . }".to_string(),
+            group_by_clause: Some("GROUP BY ?sensor".to_string()),
+            output_variables: vec!["?sensor".to_string(), "?dayAvgValue".to_string()],
+        };
+        let template = BaselineGraphTemplate {
+            baseline_name: "http://example.org/dayBaseline".to_string(),
+            triples: vec![TripleTemplate {
+                subject: GraphTermTemplate::Variable("sensor".to_string()),
+                predicate: GraphTermTemplate::Iri("http://example.org/dayCount".to_string()),
+                object: GraphTermTemplate::Variable("dayCount".to_string()),
+            }],
+        };
+
+        let err = validate_baseline_graph_template(&definition, &template)
+            .expect_err("validation should fail when template variable is absent");
+        assert!(err.to_string().contains("references variable '?dayCount' that is not produced"));
+    }
+
+    #[test]
+    fn test_validate_query_defined_baseline_rejects_variable_predicate() {
+        let definition = BaselineDefinition {
+            name: "http://example.org/dayBaseline".to_string(),
+            source_window: "http://example.org/historyDay".to_string(),
+            raw_query: String::new(),
+            select_clause: "SELECT ?sensor ?pred ?dayAvgValue".to_string(),
+            where_clause: "WHERE { ?sensor ?pred ?dayAvgValue . }".to_string(),
+            group_by_clause: None,
+            output_variables: vec![
+                "?sensor".to_string(),
+                "?pred".to_string(),
+                "?dayAvgValue".to_string(),
+            ],
+        };
+        let template = BaselineGraphTemplate {
+            baseline_name: "http://example.org/dayBaseline".to_string(),
+            triples: vec![TripleTemplate {
+                subject: GraphTermTemplate::Variable("sensor".to_string()),
+                predicate: GraphTermTemplate::Variable("pred".to_string()),
+                object: GraphTermTemplate::Variable("dayAvgValue".to_string()),
+            }],
+        };
+
+        let err = validate_baseline_graph_template(&definition, &template)
+            .expect_err("variable predicate should be rejected");
+        assert!(err.to_string().contains("predicates must be concrete IRIs"));
+    }
+
+    #[test]
+    fn test_materialize_query_defined_baseline_uses_multiple_template_triples() {
+        let definition = BaselineDefinition {
+            name: "http://example.org/dayBaseline".to_string(),
+            source_window: "http://example.org/historyDay".to_string(),
+            raw_query: String::new(),
+            select_clause: "SELECT ?sensor ?dayAvgValue ?dayCount".to_string(),
+            where_clause: "WHERE { ?sensor ?p ?o . }".to_string(),
+            group_by_clause: None,
+            output_variables: vec![
+                "?sensor".to_string(),
+                "?dayAvgValue".to_string(),
+                "?dayCount".to_string(),
+            ],
+        };
+        let template = BaselineGraphTemplate {
+            baseline_name: "http://example.org/dayBaseline".to_string(),
+            triples: vec![
+                TripleTemplate {
+                    subject: GraphTermTemplate::Variable("sensor".to_string()),
+                    predicate: GraphTermTemplate::Iri("http://example.org/dayAvgValue".to_string()),
+                    object: GraphTermTemplate::Variable("dayAvgValue".to_string()),
+                },
+                TripleTemplate {
+                    subject: GraphTermTemplate::Variable("sensor".to_string()),
+                    predicate: GraphTermTemplate::Iri("http://example.org/dayCount".to_string()),
+                    object: GraphTermTemplate::Variable("dayCount".to_string()),
+                },
+            ],
+        };
+        let bindings = vec![HashMap::from([
+            ("sensor".to_string(), "<http://example.org/s1>".to_string()),
+            (
+                "dayAvgValue".to_string(),
+                "\"42.0\"^^<http://www.w3.org/2001/XMLSchema#decimal>".to_string(),
+            ),
+            (
+                "dayCount".to_string(),
+                "\"10\"^^<http://www.w3.org/2001/XMLSchema#integer>".to_string(),
+            ),
+        ])];
+
+        let quads = materialize_baseline_bindings_as_quads(
+            "http://example.org/dayBaseline",
+            &definition,
+            &template,
+            &bindings,
+        )
+        .expect("template materialization should succeed");
+
+        assert_eq!(quads.len(), 2);
+        assert!(quads
+            .iter()
+            .any(|quad| quad.predicate.as_str() == "http://example.org/dayAvgValue"));
+        assert!(quads
+            .iter()
+            .any(|quad| quad.predicate.as_str() == "http://example.org/dayCount"));
+    }
+
+    #[test]
+    fn test_materialize_query_defined_baseline_uses_template_predicate_not_variable_name() {
+        let definition = BaselineDefinition {
+            name: "http://example.org/dayBaseline".to_string(),
+            source_window: "http://example.org/historyDay".to_string(),
+            raw_query: String::new(),
+            select_clause: "SELECT ?sensor ?dayAvgValue".to_string(),
+            where_clause: "WHERE { ?sensor ?p ?o . }".to_string(),
+            group_by_clause: None,
+            output_variables: vec!["?sensor".to_string(), "?dayAvgValue".to_string()],
+        };
+        let template = BaselineGraphTemplate {
+            baseline_name: "http://example.org/dayBaseline".to_string(),
+            triples: vec![TripleTemplate {
+                subject: GraphTermTemplate::Variable("sensor".to_string()),
+                predicate: GraphTermTemplate::Iri(
+                    "http://example.org/customBaselineValue".to_string(),
+                ),
+                object: GraphTermTemplate::Variable("dayAvgValue".to_string()),
+            }],
+        };
+        let bindings = vec![HashMap::from([
+            ("sensor".to_string(), "<http://example.org/s1>".to_string()),
+            (
+                "dayAvgValue".to_string(),
+                "\"42.0\"^^<http://www.w3.org/2001/XMLSchema#decimal>".to_string(),
+            ),
+        ])];
+
+        let quads = materialize_baseline_bindings_as_quads(
+            "http://example.org/dayBaseline",
+            &definition,
+            &template,
+            &bindings,
+        )
+        .expect("template materialization should succeed");
+
+        assert_eq!(quads.len(), 1);
+        assert_eq!(quads[0].predicate.as_str(), "http://example.org/customBaselineValue");
     }
 
     #[test]
@@ -1070,5 +1832,170 @@ mod tests {
                 "30".to_string()
             )]
         );
+    }
+
+    #[test]
+    fn test_query_defined_baselines_are_evaluated_over_historical_windows() {
+        let config = StreamingConfig {
+            segment_base_path: format!(
+                "./test_data/janus_api_query_defined_baselines_{}",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_millis()
+            ),
+            ..StreamingConfig::default()
+        };
+        let storage =
+            StreamingSegmentedStorage::new(config).expect("Failed to create segmented storage");
+
+        for i in 1..=10 {
+            storage
+                .write_rdf(
+                    i * 100,
+                    "http://example.org/sensor1",
+                    "http://example.org/temperature",
+                    &(20 + i).to_string(),
+                    "http://example.org/sensors",
+                )
+                .expect("Failed to write RDF event");
+        }
+        storage.flush().expect("Failed to flush storage");
+
+        let parser = JanusQLParser::new().expect("Failed to create parser");
+        let parsed = parser
+            .parse(
+                r#"
+PREFIX ex: <http://example.org/>
+
+FROM NAMED WINDOW ex:liveMinute ON STREAM ex:stream [RANGE 60 STEP 5]
+FROM NAMED WINDOW ex:historyDay ON LOG ex:stream [START 0 END 6000]
+
+DEFINE BASELINE ex:dayBaseline ON WINDOW ex:historyDay AS
+SELECT ?sensor
+       (AVG(?value) AS ?dayAvgValue)
+       (COUNT(?value) AS ?dayCount)
+WHERE {
+  ?sensor ex:temperature ?value .
+}
+GROUP BY ?sensor
+
+REGISTER RStream ex:output AS
+USING BASELINE ex:dayBaseline
+SELECT ?sensor
+WHERE {
+  WINDOW ex:liveMinute {
+    ?sensor ex:temperature ?value .
+  }
+}
+GROUP BY ?sensor
+                "#,
+            )
+            .expect("Failed to parse JanusQL query");
+
+        let (_shutdown_tx, shutdown_rx) = mpsc::channel::<()>();
+        let bindings =
+            collect_query_defined_baseline_bindings(&Arc::new(storage), &parsed, &shutdown_rx)
+                .expect("Failed to evaluate query-defined baselines");
+
+        let day_baseline = bindings
+            .get("http://example.org/dayBaseline")
+            .expect("expected dayBaseline bindings");
+        assert_eq!(day_baseline.len(), 1);
+        assert!(day_baseline[0].contains_key("sensor"));
+        assert!(day_baseline[0].contains_key("dayAvgValue"));
+        assert!(day_baseline[0].contains_key("dayCount"));
+    }
+
+    #[test]
+    fn test_query_defined_baseline_static_graph_can_drive_live_group_by_having() {
+        let query = r#"
+            PREFIX : <http://example.org/>
+            REGISTER RStream :output AS
+            SELECT ?sensor
+                   (AVG(?value) AS ?minuteAvgValue)
+                   ?dayAvgValue
+                   ((AVG(?value) - ?dayAvgValue) AS ?difference)
+            FROM NAMED WINDOW :liveMinute ON STREAM :stream [RANGE 60 STEP 5]
+            WHERE {
+                WINDOW :liveMinute {
+                    ?sensor :hasValue ?value .
+                }
+                GRAPH :dayBaseline {
+                    ?sensor :dayAvgValue ?dayAvgValue .
+                }
+            }
+            GROUP BY ?sensor ?dayAvgValue
+            HAVING(AVG(?value) > ?dayAvgValue)
+        "#;
+        let definition = BaselineDefinition {
+            name: "http://example.org/dayBaseline".to_string(),
+            source_window: "http://example.org/historyDay".to_string(),
+            raw_query: String::new(),
+            select_clause: "SELECT ?sensor (AVG(?value) AS ?dayAvgValue)".to_string(),
+            where_clause: "WHERE { ?sensor :hasValue ?value . }".to_string(),
+            group_by_clause: Some("GROUP BY ?sensor".to_string()),
+            output_variables: vec!["?sensor".to_string(), "?dayAvgValue".to_string()],
+        };
+        let template = BaselineGraphTemplate {
+            baseline_name: "http://example.org/dayBaseline".to_string(),
+            triples: vec![TripleTemplate {
+                subject: GraphTermTemplate::Variable("sensor".to_string()),
+                predicate: GraphTermTemplate::Iri("http://example.org/dayAvgValue".to_string()),
+                object: GraphTermTemplate::Variable("dayAvgValue".to_string()),
+            }],
+        };
+        let bindings = vec![HashMap::from([
+            ("sensor".to_string(), "<http://example.org/s1>".to_string()),
+            (
+                "dayAvgValue".to_string(),
+                "\"25\"^^<http://www.w3.org/2001/XMLSchema#decimal>".to_string(),
+            ),
+        ])];
+        let prefixes = HashMap::from([("".to_string(), "http://example.org/".to_string())]);
+
+        let quads = materialize_baseline_bindings_as_quads(
+            "http://example.org/dayBaseline",
+            &definition,
+            &template,
+            &bindings,
+        )
+        .expect("baseline quads should materialize");
+
+        let mut processor = LiveStreamProcessing::new(query.to_string()).unwrap();
+        processor.register_stream("http://example.org/stream").unwrap();
+        for quad in quads {
+            processor.add_static_quad(quad);
+        }
+        processor.start_processing().unwrap();
+        processor
+            .add_events(
+                "http://example.org/stream",
+                vec![
+                    RDFEvent::new(
+                        1,
+                        "http://example.org/s1",
+                        "http://example.org/hasValue",
+                        "30",
+                        "",
+                    ),
+                    RDFEvent::new(
+                        2,
+                        "http://example.org/s1",
+                        "http://example.org/hasValue",
+                        "32",
+                        "",
+                    ),
+                ],
+            )
+            .unwrap();
+        processor.close_stream("http://example.org/stream", 100).unwrap();
+        thread::sleep(Duration::from_millis(300));
+
+        let results = processor.collect_results(None).unwrap();
+        assert!(!results.is_empty(), "expected live result with baseline graph join");
+        let rendered = format!("{:?}", results);
+        assert!(rendered.contains("dayAvgValue"));
+        assert!(rendered.contains("difference"));
     }
 }

@@ -1,8 +1,11 @@
 use clap::Parser;
+use janus::paper_bench::cli_output::{
+    default_benchmark_output_dir, print_benchmark_stdout, print_verbose_rows, BenchmarkArtifact,
+};
 use janus::paper_bench::historical_range::{
     run_historical_range_comparison, HistoricalRangeComparisonConfig, HistoricalRangeMode,
     HistoricalRangeQueryCase, HistoricalRangeQueryCaseArg, DEFAULT_DATASET_SIZES,
-    DEFAULT_FIXED_RANGE_SECONDS, FIXED_60S_PLOT_PATH, FULL_HISTORY_PLOT_PATH, RESULT_MARKDOWN_PATH,
+    DEFAULT_FIXED_RANGE_SECONDS, FIXED_60S_PLOT_FILE, FULL_HISTORY_PLOT_FILE, RESULT_MARKDOWN_FILE,
 };
 use std::path::PathBuf;
 
@@ -30,12 +33,18 @@ struct Args {
     mode: HistoricalRangeMode,
     #[arg(long, default_value_t = false)]
     debug_equivalence: bool,
-    #[arg(long, default_value = "target/paper_benchmarks/paper_h2_range_comparison")]
-    output_dir: PathBuf,
+    #[arg(long)]
+    output_dir: Option<PathBuf>,
+    #[arg(long)]
+    verbose: bool,
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
+    let output_dir = args
+        .output_dir
+        .clone()
+        .unwrap_or_else(|| default_benchmark_output_dir("paper_historical_range_comparison"));
     let outcome = run_historical_range_comparison(&HistoricalRangeComparisonConfig {
         runs: args.runs,
         warmup_runs: args.warmup_runs,
@@ -44,21 +53,33 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         fixed_range_seconds: args.fixed_range_seconds,
         mode: args.mode,
         debug_equivalence: args.debug_equivalence,
-        output_dir: args.output_dir.clone(),
+        output_dir: output_dir.clone(),
     })?;
 
-    println!(
-        "raw_jsonl={}",
-        args.output_dir.join("paper_historical_range_comparison.raw.jsonl").display()
+    let raw_jsonl_path = output_dir.join("paper_historical_range_comparison.raw.jsonl");
+    let summary_csv_path = output_dir.join("paper_historical_range_comparison.summary.csv");
+    let markdown_path = output_dir.join(RESULT_MARKDOWN_FILE);
+    let fixed_plot_path = output_dir.join(FIXED_60S_PLOT_FILE);
+    let full_plot_path = output_dir.join(FULL_HISTORY_PLOT_FILE);
+
+    print_benchmark_stdout(
+        "paper_historical_range_comparison",
+        Some(outcome.run_outcomes.iter().all(|run| run.equivalent)),
+        Some(args.warmup_runs),
+        Some(args.runs),
+        &output_dir,
+        &[
+            BenchmarkArtifact { label: "raw_jsonl", path: &raw_jsonl_path },
+            BenchmarkArtifact { label: "summary_csv", path: &summary_csv_path },
+            BenchmarkArtifact { label: "markdown", path: &markdown_path },
+            BenchmarkArtifact { label: "fixed_plot", path: &fixed_plot_path },
+            BenchmarkArtifact { label: "full_history_plot", path: &full_plot_path },
+        ],
     );
-    println!(
-        "summary_csv={}",
-        args.output_dir.join("paper_historical_range_comparison.summary.csv").display()
-    );
-    println!("markdown={RESULT_MARKDOWN_PATH}");
-    println!("fixed_plot={FIXED_60S_PLOT_PATH}");
-    println!("full_history_plot={FULL_HISTORY_PLOT_PATH}");
-    println!("rows={}", outcome.raw_rows.len());
-    println!("summary_rows={}", outcome.summary_rows.len());
+
+    if args.verbose {
+        print_verbose_rows(&outcome.run_outcomes)?;
+    }
+
     Ok(())
 }

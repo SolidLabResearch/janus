@@ -1,5 +1,8 @@
 use janus::core::RDFEvent;
+use janus::execution::ResultConverter;
+use janus::parsing::janusql_parser::JanusQLParser;
 use janus::stream::live_stream_processing::LiveStreamProcessing;
+use oxigraph::model::{GraphName, Literal, NamedNode, Quad};
 use std::thread;
 use std::time::Duration;
 
@@ -211,6 +214,95 @@ fn test_processing_state_management() {
     // Try to start again (should fail)
     let result = processor.start_processing();
     assert!(result.is_err());
+}
+
+#[test]
+fn test_live_query_joins_window_and_named_graph_with_group_by_having_and_arithmetic() {
+    let parser = JanusQLParser::new().unwrap();
+    let query = r#"
+        PREFIX : <http://example.org/>
+
+        FROM NAMED WINDOW :liveMinute ON STREAM :stream [RANGE 60000 STEP 1000]
+
+        REGISTER RStream :output AS
+        SELECT ?sensor
+               (AVG(?value) AS ?minuteAvgValue)
+               ?dayAvgValue
+               ((AVG(?value) - ?dayAvgValue) AS ?difference)
+        WHERE {
+            WINDOW :liveMinute {
+                ?sensor :hasValue ?value .
+            }
+            GRAPH :dayBaseline {
+                ?sensor :dayAvgValue ?dayAvgValue .
+            }
+        }
+        GROUP BY ?sensor ?dayAvgValue
+        HAVING(AVG(?value) > ?dayAvgValue)
+    "#;
+
+    let parsed = parser.parse(query).unwrap();
+    assert!(parsed.rspql_query.contains("GRAPH :dayBaseline"));
+    assert!(parsed.rspql_query.contains("GROUP BY ?sensor ?dayAvgValue"));
+    assert!(parsed.rspql_query.contains("HAVING(AVG(?value) > ?dayAvgValue)"));
+
+    let mut processor = LiveStreamProcessing::new(parsed.rspql_query.clone()).unwrap();
+    processor.register_stream("http://example.org/stream").unwrap();
+    processor.add_static_quad(Quad::new(
+        NamedNode::new("http://example.org/sensor1").unwrap(),
+        NamedNode::new("http://example.org/dayAvgValue").unwrap(),
+        Literal::new_typed_literal(
+            "11",
+            NamedNode::new("http://www.w3.org/2001/XMLSchema#decimal").unwrap(),
+        ),
+        GraphName::NamedNode(NamedNode::new("http://example.org/dayBaseline").unwrap()),
+    ));
+    processor.start_processing().unwrap();
+
+    for (timestamp, value) in [(1000, "20"), (1010, "22"), (1020, "24")] {
+        processor
+            .add_event(
+                "http://example.org/stream",
+                RDFEvent::new(
+                    timestamp,
+                    "http://example.org/sensor1",
+                    "http://example.org/hasValue",
+                    value,
+                    "",
+                ),
+            )
+            .unwrap();
+    }
+    processor.close_stream("http://example.org/stream", 5000).unwrap();
+
+    thread::sleep(Duration::from_millis(250));
+
+    let results = processor.collect_results(None).unwrap();
+    assert!(!results.is_empty(), "expected a live result from the graph join");
+
+    let converted = ResultConverter::new("live_graph_join".into())
+        .from_live_binding(results.into_iter().next().expect("expected at least one live binding"));
+    let binding = converted.bindings.first().expect("expected converted live binding");
+
+    let minute_avg_value = binding
+        .get("minuteAvgValue")
+        .expect("missing minuteAvgValue")
+        .parse::<f64>()
+        .expect("minuteAvgValue should be numeric");
+    let day_avg_value = binding
+        .get("dayAvgValue")
+        .expect("missing dayAvgValue")
+        .parse::<f64>()
+        .expect("dayAvgValue should be numeric");
+    let difference = binding
+        .get("difference")
+        .expect("missing difference")
+        .parse::<f64>()
+        .expect("difference should be numeric");
+
+    assert_eq!(minute_avg_value, 22.0);
+    assert_eq!(day_avg_value, 11.0);
+    assert_eq!(difference, 11.0);
 }
 
 #[test]

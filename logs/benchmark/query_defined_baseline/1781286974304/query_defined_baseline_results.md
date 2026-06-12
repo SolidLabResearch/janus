@@ -1,0 +1,3 @@
+| historical_events | baseline_entities | expected_emitted_windows | expected_full_windows | warmup_window_count | observed_emitted_windows | observed_baseline_rows | observed_live_only_rows | injected_quads | baseline_eval_ms | materialization_ms | static_injection_ms | first_result_overhead_ms | peak_rss_mb | mean_cpu_percent | correctness_rate |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 1000000 | 10 | 0.000 | 0.000 |  | 1.000 | 10.000 | 10.000 | 10 | 656.458 ± 0.000 | 0.059 ± 0.000 | 0.010 ± 0.000 | 0.013 ± 0.000 | 614.656 ± 0.000 | 99.985 ± 0.000 | 1.000 |

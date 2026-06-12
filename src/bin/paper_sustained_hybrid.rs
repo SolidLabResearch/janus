@@ -1,4 +1,7 @@
 use clap::Parser;
+use janus::paper_bench::cli_output::{
+    default_benchmark_output_dir, print_benchmark_stdout, print_verbose_rows, BenchmarkArtifact,
+};
 use janus::paper_bench::{
     external::OxigraphExternalAdapter,
     harness::{
@@ -34,8 +37,10 @@ struct Args {
     mode: ExecutionMode,
     #[arg(long, value_enum, default_value_t = TimeMode::Virtual)]
     time_mode: TimeMode,
-    #[arg(long, default_value = "target/paper_benchmarks/paper_sustained_hybrid")]
-    output_dir: PathBuf,
+    #[arg(long)]
+    output_dir: Option<PathBuf>,
+    #[arg(long)]
+    verbose: bool,
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -46,7 +51,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let event_interval_ms = sustained_event_interval_ms(args.event_rate_hz);
     let expected_wall_clock_duration_ms =
         sustained_expected_wall_clock_duration_ms(args.live_duration_seconds);
-    ensure_output_dir(&args.output_dir)?;
+    let output_dir = args
+        .output_dir
+        .clone()
+        .unwrap_or_else(|| default_benchmark_output_dir("paper_sustained_hybrid"));
+    ensure_output_dir(&output_dir)?;
 
     let metadata = collect_repro_metadata();
     let adapter = OxigraphExternalAdapter::new();
@@ -80,7 +89,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             metadata: &metadata,
             adapter: &adapter,
             warm_workload: warm_workload.as_ref(),
-            debug_output_dir: args.debug_equivalence.then_some(args.output_dir.as_path()),
+            debug_output_dir: args.debug_equivalence.then_some(output_dir.as_path()),
         })?;
         all_rows.push(pair.unified);
         all_rows.push(pair.decomposed);
@@ -102,7 +111,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             metadata: &metadata,
             adapter: &adapter,
             warm_workload: warm_workload.as_ref(),
-            debug_output_dir: args.debug_equivalence.then_some(args.output_dir.as_path()),
+            debug_output_dir: args.debug_equivalence.then_some(output_dir.as_path()),
         })?;
         all_rows.push(pair.unified);
         all_rows.push(pair.decomposed);
@@ -114,13 +123,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         all_rows.iter().filter(|row| !row.is_warmup).cloned().collect::<Vec<_>>()
     };
 
-    let jsonl_path = args.output_dir.join("paper_sustained_hybrid.raw.jsonl");
-    let csv_path = args.output_dir.join("paper_sustained_hybrid.summary.csv");
+    let jsonl_path = output_dir.join("paper_sustained_hybrid.raw.jsonl");
+    let csv_path = output_dir.join("paper_sustained_hybrid.summary.csv");
     write_jsonl(&jsonl_path, &output_rows)?;
     write_sustained_summary_csv(&csv_path, &summarize_sustained(&output_rows))?;
 
-    println!("raw_jsonl={}", jsonl_path.display());
-    println!("summary_csv={}", csv_path.display());
+    print_benchmark_stdout(
+        "paper_sustained_hybrid",
+        None,
+        Some(args.warmup_runs),
+        Some(args.runs),
+        &output_dir,
+        &[
+            BenchmarkArtifact { label: "raw_jsonl", path: &jsonl_path },
+            BenchmarkArtifact { label: "summary_csv", path: &csv_path },
+        ],
+    );
+
+    if args.verbose {
+        print_verbose_rows(&output_rows)?;
+    }
+
     Ok(())
 }
 

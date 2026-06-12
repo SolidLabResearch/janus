@@ -10,6 +10,7 @@ A Janus-QL query typically contains:
 - a `REGISTER` clause
 - one or more `FROM NAMED WINDOW` clauses
 - an optional `USING BASELINE` clause
+- optional `DEFINE BASELINE ... ON WINDOW ... AS SELECT ...` clauses
 - a `WHERE` clause with `WINDOW <name> { ... }` blocks
 
 Example:
@@ -92,21 +93,90 @@ Semantics:
 
 If the clause is absent, the HTTP/API registration-level `baseline_mode` is used as a fallback.
 
+## Query-Defined Baselines
+
+Janus also supports query-defined baselines. They are evaluated over a historical `LOG` window before live startup, materialized through a `GRAPH :name { ... }` template, and injected into the live RSP engine as static RDF quads.
+
+Canonical example:
+
+```sparql
+PREFIX : <http://example.org/>
+
+FROM NAMED WINDOW :liveMinute ON STREAM :stream [RANGE 60000 STEP 1000]
+FROM NAMED WINDOW :historyDay ON LOG :stream [START 0 END 86400000]
+
+DEFINE BASELINE :dayBaseline ON WINDOW :historyDay AS
+SELECT ?sensor
+       (AVG(?value) AS ?dayAvgValue)
+WHERE {
+  ?sensor :hasValue ?value .
+}
+GROUP BY ?sensor
+
+REGISTER RStream :output AS
+USING BASELINE :dayBaseline
+SELECT ?sensor
+       (AVG(?value) AS ?minuteAvgValue)
+       ?dayAvgValue
+       ((AVG(?value) - ?dayAvgValue) AS ?difference)
+WHERE {
+  WINDOW :liveMinute {
+    ?sensor :hasValue ?value .
+  }
+
+  GRAPH :dayBaseline {
+    ?sensor :dayAvgValue ?dayAvgValue .
+  }
+}
+GROUP BY ?sensor ?dayAvgValue
+HAVING(AVG(?value) > ?dayAvgValue)
+```
+
+Semantics:
+
+- `DEFINE BASELINE :dayBaseline ON WINDOW :historyDay AS SELECT ...` defines the historical binding relation that is prepared at startup.
+- `USING BASELINE :dayBaseline` marks that baseline as required and injects it into the live engine before live processing begins.
+- `GRAPH :dayBaseline { ... }` is the materialization template. Janus substitutes each baseline row into that template and emits the resulting quads into the live static store.
+- baseline variables such as `?dayAvgValue` are then available to the live query in `SELECT`, `GROUP BY`, `HAVING`, and arithmetic expressions.
+
+## Query-Defined Baseline Materialization
+
+Materialization is template-driven rather than inferred from `SELECT` aliases:
+
+- the `GRAPH :baselineName { ... }` block defines the RDF shape that is inserted
+- the baseline query must project every variable used by that template
+- template predicates must be concrete IRIs
+- template subjects must resolve to an IRI or blank node
+
+Example binding:
+
+- `?sensor = :s1`
+- `?dayAvgValue = 42.0`
+
+becomes:
+
+```trig
+GRAPH :dayBaseline {
+  :s1 :dayAvgValue 42.0 .
+}
+```
+
 ## What Janus Generates Internally
 
 The parser splits the query into:
 
 - one live RSP-QL query built from live windows
 - one SPARQL query per historical window
+- one SPARQL query per query-defined baseline
 
 Important detail:
 
 - non-window patterns in the `WHERE` clause are preserved in the live query
-- this is what makes baseline joins like `?sensor baseline:mean ?mean` work during live execution
+- this is what makes static joins such as `GRAPH :dayBaseline { ?sensor :dayAvgValue ?dayAvgValue . }` work during live execution
 
 ## Baseline Predicates
 
-Baseline values are exposed to the live side as static triples under:
+Legacy `USING BASELINE <window> LAST|AGGREGATE` values are exposed to the live side as static triples under:
 
 ```text
 https://janus.rs/baseline#<variable_name>
@@ -124,6 +194,24 @@ ex:s1  <https://janus.rs/baseline#mean>  "21.5"
 ```
 
 This is why live queries join on `baseline:*` predicates rather than directly reusing historical bindings.
+
+Query-defined baselines use the baseline name as the graph IRI instead:
+
+```trig
+GRAPH :dayBaseline {
+  :s1 :dayAvgValue 42.0 .
+}
+```
+
+The live query must therefore join through `GRAPH :dayBaseline { ... }` rather than through `baseline:*` predicates.
+
+## Limitations
+
+- query-defined baseline materialization is a startup snapshot, not a continuously updated historical/live relation
+- the `GRAPH` template predicates must be concrete IRIs
+- template variables must be projected by the baseline query
+- template subjects must resolve to an IRI or blank node
+- large baseline result sets may make static-store injection expensive at startup
 
 ## Practical Guidance
 

@@ -350,6 +350,67 @@ cargo run --release --bin paper_historical_scaling -- \
   --output-dir target/paper_benchmarks/validation_h2
 ```
 
+## Query-Defined Baseline Smoke Benchmark
+
+This runner exercises the query-defined baseline path with a short, deterministic fixture:
+
+- historical baseline query execution is always accelerated
+- GRAPH-template materialization
+- static quad injection
+- live startup
+- first-result latency
+- live-only comparison with the same live window and aggregate
+- live replay can run in accelerated mode, which remains the default, or realtime mode for wall-clock sanity checks
+
+Binary:
+
+- `paper_query_defined_baseline`
+
+Default smoke command:
+
+```bash
+cargo run --release --bin paper_query_defined_baseline -- \
+  --warmup-runs 0 --runs 1
+```
+
+Live replay controls:
+
+- `--live-replay-mode accelerated|realtime`
+- `--live-rate-hz <float>`
+- `--live-duration-seconds <u64>`
+- `--live-window-size-seconds <u64>`
+- `--live-window-slide-seconds <u64>`
+
+Behavior notes:
+
+- historical preload and historical baseline evaluation always stay accelerated
+- accelerated live replay preserves the current benchmark behavior and does not add sleeps
+- realtime live replay sleeps only between live events, so it is suitable for short live-arrival sanity checks
+- the realtime path is not intended for million-scale historical experiments; keep live replay accelerated unless you are explicitly testing wall-clock behavior
+- when realtime mode is selected without explicit window values, the runner uses a 240-second live duration with 120-second windows sliding every 60 seconds
+
+The runner writes a timestamped directory under `logs/benchmark/query_defined_baseline/` containing:
+
+- `query_defined_baseline.raw.json`
+- `query_defined_baseline.summary.csv`
+- `query_defined_baseline_results.md`
+
+Longer run after smoke passes:
+
+```bash
+cargo run --release --bin paper_query_defined_baseline -- \
+  --warmup-runs 1 --runs 25
+```
+
+Note:
+
+- the smoke fixture keeps the historical window fixed so the default run stays short and deterministic
+- the smoke runner uses the tested `ex:` alias surface and a conservative live query shape so it stays within the current runtime parse path
+- if you want to stretch the benchmark, increase `--runs` first before expanding the fixture size
+- the benchmark verifies `?sensor`, `?minuteAvgValue`, `?dayAvgValue`, and `?difference` on the baseline path and compares against a live-only query with the same live window
+- realtime mode records `expected_emitted_windows`, `expected_full_windows`, `warmup_window_count`, observed emitted-window counts, observed row counts, and per-window latency values when available
+- realtime mode may emit an initial partial or warm-up window on the first slide, depending on engine boundary semantics
+
 ## Recommended Final Paper Commands
 
 ```bash

@@ -23,10 +23,9 @@ type BoxError = Box<dyn Error>;
 
 pub const DEFAULT_DATASET_SIZES: [usize; 4] = [10_000, 50_000, 100_000, 500_000];
 pub const DEFAULT_FIXED_RANGE_SECONDS: u64 = 60;
-pub const RESULT_MARKDOWN_PATH: &str = "target/paper_benchmarks/h2_range_comparison_results.md";
-pub const FIXED_60S_PLOT_PATH: &str = "target/paper_benchmarks/h2_fixed_60s_janus_vs_oxigraph.png";
-pub const FULL_HISTORY_PLOT_PATH: &str =
-    "target/paper_benchmarks/h2_full_history_janus_vs_oxigraph.png";
+pub const RESULT_MARKDOWN_FILE: &str = "h2_range_comparison_results.md";
+pub const FIXED_60S_PLOT_FILE: &str = "h2_fixed_60s_janus_vs_oxigraph.png";
+pub const FULL_HISTORY_PLOT_FILE: &str = "h2_full_history_janus_vs_oxigraph.png";
 
 const BASE_TIMESTAMP_MS: u64 = 1_720_000_000_000;
 const TIMESTAMP_STEP_MS: u64 = 10;
@@ -300,9 +299,9 @@ pub fn run_historical_range_comparison(
     let summary_rows = summarize_rows(&raw_rows);
     let raw_jsonl = config.output_dir.join("paper_historical_range_comparison.raw.jsonl");
     let summary_csv = config.output_dir.join("paper_historical_range_comparison.summary.csv");
-    let markdown_path = PathBuf::from(RESULT_MARKDOWN_PATH);
-    let fixed_plot_path = PathBuf::from(FIXED_60S_PLOT_PATH);
-    let full_plot_path = PathBuf::from(FULL_HISTORY_PLOT_PATH);
+    let markdown_path = config.output_dir.join(RESULT_MARKDOWN_FILE);
+    let fixed_plot_path = config.output_dir.join(FIXED_60S_PLOT_FILE);
+    let full_plot_path = config.output_dir.join(FULL_HISTORY_PLOT_FILE);
 
     write_jsonl(&raw_jsonl, &raw_rows)?;
     write_summary_csv(&summary_csv, &summary_rows)?;
