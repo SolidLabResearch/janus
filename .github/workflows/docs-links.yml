@@ -1,6 +1,13 @@
 name: Docs Link Check
 
 on:
+  push:
+    branches:
+      - "**"
+    paths:
+      - "**/*.md"
+      - ".github/workflows/docs-links.yml"
+      - "scripts/check_doc_links.sh"
   pull_request:
     branches: [main, develop]
     paths:

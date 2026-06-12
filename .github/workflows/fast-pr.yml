@@ -1,6 +1,12 @@
 name: Fast PR Checks
 
 on:
+  push:
+    branches:
+      - "**"
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
   pull_request:
     branches: [main, develop]
     paths-ignore:

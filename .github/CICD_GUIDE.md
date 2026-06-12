@@ -8,7 +8,7 @@ The Janus project uses GitHub Actions for continuous integration and deployment.
 
 ### Automatic Triggers
 
-- **Push to branches:** `main`, `develop`, `adapter-querying`
+- **Push to branches:** all branches for fast PR checks; `main`, `develop`, and `adapter-querying` still trigger release CI
 - **Pull requests to:** `main`, `develop`
 - **Release tags:** `v*` (e.g., `v1.0.0`)
 
