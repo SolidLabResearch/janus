@@ -45,9 +45,13 @@ The query-level clause takes precedence when present.
 For query-defined baselines, `USING BASELINE :name` means:
 
 1. evaluate the generated historical baseline query over its source `LOG` window
-2. materialize the resulting bindings through the matching `GRAPH :name { ... }` template
-3. insert the resulting RDF quads into the live RSP engine static store before live startup
-4. allow the live query to bind those values during live execution
+2. store the `SELECT` result as a named baseline snapshot keyed by evaluation time
+3. resolve the correct snapshot for each live evaluation timestamp
+4. expose that snapshot to the live query through `USING BASELINE :name`
+
+For compatibility with the current live query shape, Janus still materializes evaluation-local
+quads from the snapshot's binding rows when the live query contains a matching
+`GRAPH :name { ... }` block. The snapshot remains the authoritative stored form.
 
 ## Canonical Query-Defined Example
 
@@ -83,7 +87,7 @@ GROUP BY ?sensor ?dayAvgValue
 HAVING(AVG(?value) > ?dayAvgValue)
 ```
 
-This compares the 1-minute live average against the 1-day historical average for each sensor. The historical `AVG` result is turned into static RDF before the live query starts, so `?dayAvgValue` is an ordinary live-side binding once the query runs.
+This compares the 1-minute live average against the 1-day historical average for each sensor.
 
 ## Query-Defined Materialization Rule
 
@@ -107,7 +111,9 @@ GRAPH :dayBaseline {
 }
 ```
 
-This is why Janus uses the `GRAPH` template rather than trying to infer quads from `SELECT` projection aliases: the template states the exact RDF layout that should be injected, while `SELECT` only describes the available bindings.
+This is why Janus uses the `GRAPH` template rather than trying to infer quads from `SELECT`
+projection aliases: the template states the exact RDF layout for the evaluation-local join view,
+while `SELECT` describes the stored binding rows.
 
 ## LAST vs AGGREGATE
 
@@ -138,12 +144,14 @@ This is useful when you want:
 
 ## Fixed Historical Windows
 
-For a fixed historical window, the distinction between `LAST` and `AGGREGATE` is much smaller because there is only one historical result set.
+For a fixed historical window, Janus resolves the same absolute interval for every live
+evaluation and computes one reusable baseline snapshot.
 
-In practice:
+For a sliding historical window:
 
-- fixed historical baseline is usually the simplest and clearest baseline path
-- historical sliding baseline is more advanced and can cost more at startup
+- at live evaluation time `T`, Janus resolves `[T - OFFSET - RANGE, T - OFFSET]`
+- the baseline snapshot is recomputed or refreshed for that `T`
+- snapshots are versioned by baseline id and evaluation timestamp
 
 ## Startup Behavior
 
@@ -164,10 +172,10 @@ Effect on query results:
 
 Behavior for query-defined baselines:
 
-1. the generated historical baseline query is evaluated before live startup
-2. the result bindings are materialized into named-graph static quads
-3. those quads are injected into the live RSP engine before `start_processing()`
-4. the live query starts only after that injection succeeds
+1. fixed historical baselines are computed once and stored as snapshots
+2. sliding historical baselines are resolved per live evaluation timestamp
+3. Janus keeps the stored form as binding-row snapshots, not live stream events
+4. the live query joins against the snapshot selected for that evaluation
 
 ## What Janus Stores
 
@@ -186,16 +194,20 @@ It does not retain:
 
 For query-defined baselines it retains:
 
-- the evaluated historical bindings per baseline name
-- the final materialized baseline quads inside the live static store
+- the evaluated historical binding rows per baseline name and evaluation timestamp
+- source-window metadata for each snapshot
+- an evaluation-local materialized join view only when live execution needs it
 
 ## Limitations
 
-- query-defined baselines are startup snapshots, not continuously updated historical/live state
+- query-defined baselines support `SELECT` snapshots only
+- `CONSTRUCT` baselines are not supported
+- sliding historical baseline `STEP` must match the live `STEP`
 - the `GRAPH` template predicates must be concrete IRIs
 - template variables must be projected by the baseline query
 - template subjects must resolve to an IRI or blank node
-- large baseline result sets can make static-store injection expensive at startup
+- the current implementation is tested for projected variables, `AVG`, `GROUP BY`, and arithmetic
+  joins in the live query
 
 ## Recommended Usage
 

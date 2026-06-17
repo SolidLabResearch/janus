@@ -77,21 +77,28 @@ impl HistoricalExecutor {
         window: &WindowDefinition,
         sparql_query: &str,
     ) -> Result<Vec<HashMap<String, String>>, JanusApiError> {
-        // Query storage directly instead of using the operator
-        let start = window.start.ok_or_else(|| {
-            JanusApiError::ExecutionError("Fixed window requires start timestamp".to_string())
-        })?;
-        let end = window.end.ok_or_else(|| {
-            JanusApiError::ExecutionError("Fixed window requires end timestamp".to_string())
-        })?;
+        let (start, end) = window
+            .resolve_historical_bounds(window.end.unwrap_or_default())
+            .ok_or_else(|| {
+                JanusApiError::ExecutionError(
+                    "Fixed window requires start/end timestamps".to_string(),
+                )
+            })?;
+        self.execute_window_bounds(start, end, sparql_query)
+    }
 
-        // Query the storage for events in the fixed window
+    /// Execute a historical query over explicit bounds.
+    pub fn execute_window_bounds(
+        &self,
+        start: u64,
+        end: u64,
+        sparql_query: &str,
+    ) -> Result<Vec<HashMap<String, String>>, JanusApiError> {
         let events = self
             .storage
             .query(start, end)
             .map_err(|e| JanusApiError::StorageError(format!("Failed to query storage: {}", e)))?;
 
-        // Execute SPARQL on the events
         self.execute_sparql_on_events(&events, sparql_query)
     }
 

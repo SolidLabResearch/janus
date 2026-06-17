@@ -13,6 +13,10 @@ use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::{Receiver, RecvError};
 use std::sync::{mpsc, Arc, Mutex};
 
+/// Callback used to resolve evaluation-local static quads during live execution.
+pub type DynamicStaticQuadProvider =
+    Arc<dyn Fn(u64) -> Result<Vec<Quad>, LiveStreamProcessingError> + Send + Sync>;
+
 /// Live stream processing engine for RSP-QL queries
 pub struct LiveStreamProcessing {
     /// RSP-RS engine instance
@@ -23,6 +27,8 @@ pub struct LiveStreamProcessing {
     result_receiver: Option<Receiver<BindingWithTimestamp>>,
     /// Static quads mirrored in Janus for Janus-side live query evaluation.
     static_data: Arc<Mutex<HashSet<Quad>>>,
+    /// Evaluation-local static quads resolved for the current live timestamp.
+    dynamic_static_quad_provider: Option<DynamicStaticQuadProvider>,
     /// Flag indicating if processing has started
     processing_started: bool,
 }
@@ -88,6 +94,7 @@ impl LiveStreamProcessing {
             streams: HashMap::new(),
             result_receiver: None,
             static_data: Arc::new(Mutex::new(HashSet::new())),
+            dynamic_static_quad_provider: None,
             processing_started: false,
         })
     }
@@ -282,6 +289,21 @@ impl LiveStreamProcessing {
         self.static_data.lock().unwrap().insert(quad);
     }
 
+    /// Registers a callback that resolves evaluation-local static quads for each live timestamp.
+    pub fn set_dynamic_static_quad_provider(
+        &mut self,
+        provider: DynamicStaticQuadProvider,
+    ) -> Result<(), LiveStreamProcessingError> {
+        if self.processing_started {
+            return Err(LiveStreamProcessingError(
+                "Cannot register dynamic static quad provider after processing starts".to_string(),
+            ));
+        }
+
+        self.dynamic_static_quad_provider = Some(provider);
+        Ok(())
+    }
+
     /// Receives the next query result from the processing engine
     ///
     /// # Returns
@@ -452,6 +474,7 @@ impl LiveStreamProcessing {
         }
         let windows = Arc::new(windows);
         let static_data = Arc::clone(&self.static_data);
+        let dynamic_static_quad_provider = self.dynamic_static_quad_provider.clone();
 
         for window_def in parsed_query.s2r {
             let window_arc = windows.get(&window_def.window_name).cloned().ok_or_else(|| {
@@ -464,6 +487,7 @@ impl LiveStreamProcessing {
             let sparql_query = Arc::clone(&sparql_query);
             let all_windows = Arc::clone(&windows);
             let static_data = Arc::clone(&static_data);
+            let dynamic_static_quad_provider = dynamic_static_quad_provider.clone();
             let window_name = window_def.window_name.clone();
             let window_width = window_def.width;
 
@@ -486,10 +510,17 @@ impl LiveStreamProcessing {
                     }
                 }
 
+                let Ok(evaluation_time) = u64::try_from(timestamp) else {
+                    eprintln!("Live Janus evaluation error: negative live evaluation timestamp");
+                    return;
+                };
+
                 match Self::execute_live_query(
                     &container,
                     &sparql_query,
                     &static_data.lock().unwrap(),
+                    dynamic_static_quad_provider.as_ref(),
+                    evaluation_time,
                 ) {
                     Ok(bindings) => {
                         for binding in bindings {
@@ -515,6 +546,8 @@ impl LiveStreamProcessing {
         container: &rsp_rs::QuadContainer,
         query: &str,
         static_data: &HashSet<Quad>,
+        dynamic_static_quad_provider: Option<&DynamicStaticQuadProvider>,
+        evaluation_time: u64,
     ) -> Result<Vec<String>, LiveStreamProcessingError> {
         let store = Store::new()
             .map_err(|e| LiveStreamProcessingError(format!("Failed to create store: {}", e)))?;
@@ -531,6 +564,16 @@ impl LiveStreamProcessing {
                     e
                 ))
             })?;
+        }
+        if let Some(provider) = dynamic_static_quad_provider {
+            for quad in provider(evaluation_time)? {
+                store.insert(&quad).map_err(|e| {
+                    LiveStreamProcessingError(format!(
+                        "Failed to insert dynamic static quad into live store: {}",
+                        e
+                    ))
+                })?;
+            }
         }
 
         let parsed_query = build_evaluator().parse_query(query).map_err(|e| {

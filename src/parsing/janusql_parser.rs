@@ -40,6 +40,44 @@ pub struct WindowDefinition {
     pub window_type: WindowType,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Explicit historical window specification for deterministic bound resolution.
+pub enum HistoricalWindowSpec {
+    /// Absolute historical interval reused for every live evaluation.
+    Fixed { start: u64, end: u64 },
+    /// Historical interval resolved relative to a live evaluation timestamp.
+    Sliding { offset: u64, range: u64, step: u64 },
+}
+
+impl WindowDefinition {
+    /// Returns the historical window specification for historical windows.
+    pub fn historical_window_spec(&self) -> Option<HistoricalWindowSpec> {
+        match self.window_type {
+            WindowType::HistoricalFixed => {
+                Some(HistoricalWindowSpec::Fixed { start: self.start?, end: self.end? })
+            }
+            WindowType::HistoricalSliding => Some(HistoricalWindowSpec::Sliding {
+                offset: self.offset?,
+                range: self.width,
+                step: self.slide,
+            }),
+            WindowType::Live => None,
+        }
+    }
+
+    /// Resolves the historical bounds for this window at the provided evaluation timestamp.
+    pub fn resolve_historical_bounds(&self, evaluation_time: u64) -> Option<(u64, u64)> {
+        match self.historical_window_spec()? {
+            HistoricalWindowSpec::Fixed { start, end } => Some((start, end)),
+            HistoricalWindowSpec::Sliding { offset, range, .. } => {
+                let historical_end = evaluation_time.saturating_sub(offset);
+                let historical_start = historical_end.saturating_sub(range);
+                Some((historical_start, historical_end))
+            }
+        }
+    }
+}
+
 /// R2S operator definition which does the relation to stream conversion by executing a SPARQL query
 /// parsed from the JanusQL query on top of the defined windows to create a stream output result.
 #[derive(Debug, Clone)]

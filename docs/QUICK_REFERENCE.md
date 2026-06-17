@@ -57,6 +57,31 @@ WHERE {
 [RANGE 10000 STEP 5000]                   # Live sliding
 ```
 
+Historical sliding semantics at live evaluation time `T`:
+
+```text
+[T - OFFSET - RANGE, T - OFFSET]
+```
+
+Query-defined baseline support:
+
+```sparql
+DEFINE BASELINE ex:b ON WINDOW ex:hist AS
+SELECT ?sensor (AVG(?value) AS ?baselineValue)
+WHERE { ?sensor ex:hasValue ?value . }
+GROUP BY ?sensor
+
+USING BASELINE ex:b
+```
+
+Notes:
+
+- query-defined baselines store `SELECT` snapshots separately from the live stream window
+- fixed historical baselines are computed once and reused
+- sliding historical baselines are refreshed per live evaluation timestamp
+- sliding historical baseline `STEP` must match the live `STEP`
+- `CONSTRUCT` baselines are not supported
+
 ## cURL Examples
 
 ### Register Query

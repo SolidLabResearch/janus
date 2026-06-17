@@ -4,7 +4,8 @@
 //! R2S operators, and query generation.
 
 use janus::parsing::janusql_parser::{
-    BaselineBootstrapMode, GraphTermTemplate, JanusQLParser, SourceKind, WindowSpec,
+    BaselineBootstrapMode, GraphTermTemplate, HistoricalWindowSpec, JanusQLParser, SourceKind,
+    WindowSpec,
 };
 
 #[test]
@@ -194,6 +195,48 @@ fn test_parse_ast_on_log_historical_sliding_window() {
 }
 
 #[test]
+fn test_fixed_historical_log_window_parses_to_fixed_spec() {
+    let parser = JanusQLParser::new().unwrap();
+    let query = r#"
+        PREFIX : <http://example.org/>
+        SELECT ?sensor
+        FROM NAMED WINDOW :historyDay ON LOG :stream [START 0 END 86400000]
+        WHERE {
+            WINDOW :historyDay { ?sensor :hasValue ?value . }
+        }
+    "#;
+
+    let parsed = parser.parse(query).unwrap();
+    assert_eq!(parsed.historical_windows.len(), 1);
+    let window = &parsed.historical_windows[0];
+    assert_eq!(
+        window.historical_window_spec(),
+        Some(HistoricalWindowSpec::Fixed { start: 0, end: 86_400_000 })
+    );
+}
+
+#[test]
+fn test_sliding_historical_log_window_parses_to_sliding_spec() {
+    let parser = JanusQLParser::new().unwrap();
+    let query = r#"
+        PREFIX : <http://example.org/>
+        SELECT ?sensor
+        FROM NAMED WINDOW :sameMinuteYesterday ON LOG :stream [OFFSET 86400000 RANGE 60000 STEP 60000]
+        WHERE {
+            WINDOW :sameMinuteYesterday { ?sensor :hasValue ?value . }
+        }
+    "#;
+
+    let parsed = parser.parse(query).unwrap();
+    assert_eq!(parsed.historical_windows.len(), 1);
+    let window = &parsed.historical_windows[0];
+    assert_eq!(
+        window.historical_window_spec(),
+        Some(HistoricalWindowSpec::Sliding { offset: 86_400_000, range: 60_000, step: 60_000 })
+    );
+}
+
+#[test]
 fn test_parse_ast_extracts_window_body_with_nested_braces() {
     let parser = JanusQLParser::new().unwrap();
     let query = r#"
@@ -323,6 +366,65 @@ fn parse_define_baseline_with_avg_count() {
     assert_eq!(definition.output_variables, vec!["?sensor", "?dayAvgValue", "?dayCount"]);
     assert_eq!(parsed.baseline_graph_templates.len(), 0);
     assert_eq!(parsed.generated_baseline_queries.len(), 1);
+}
+
+#[test]
+fn test_define_baseline_parser_exposes_name_window_and_projection() {
+    let parser = JanusQLParser::new().unwrap();
+    let query = r#"
+        PREFIX : <http://example.org/>
+        FROM NAMED WINDOW :sameMinuteYesterday ON LOG :stream [OFFSET 86400000 RANGE 60000 STEP 60000]
+        DEFINE BASELINE :yesterdayBaseline ON WINDOW :sameMinuteYesterday AS
+        SELECT ?sensor
+               (AVG(?value) AS ?yesterdayAvgValue)
+        WHERE {
+          ?sensor :hasValue ?value .
+        }
+        GROUP BY ?sensor
+        REGISTER RStream :output AS
+        SELECT ?sensor
+        WHERE { }
+    "#;
+
+    let parsed = parser.parse(query).unwrap();
+    let definition = &parsed.ast.baseline_definitions[0];
+    assert_eq!(definition.name, "http://example.org/yesterdayBaseline");
+    assert_eq!(definition.source_window, "http://example.org/sameMinuteYesterday");
+    assert!(definition.output_variables.contains(&"?sensor".to_string()));
+    assert!(definition.output_variables.contains(&"?yesterdayAvgValue".to_string()));
+    assert!(parsed.generated_baseline_queries[0].sparql_query.contains("AVG(?value)"));
+}
+
+#[test]
+fn test_using_baseline_parser_tracks_named_baseline_use() {
+    let parser = JanusQLParser::new().unwrap();
+    let query = r#"
+        PREFIX : <http://example.org/>
+        FROM NAMED WINDOW :liveMinute ON STREAM :stream [RANGE 60000 STEP 60000]
+        FROM NAMED WINDOW :sameMinuteYesterday ON LOG :stream [OFFSET 86400000 RANGE 60000 STEP 60000]
+        DEFINE BASELINE :yesterdayBaseline ON WINDOW :sameMinuteYesterday AS
+        SELECT ?sensor
+               (AVG(?value) AS ?yesterdayAvgValue)
+        WHERE {
+          ?sensor :hasValue ?value .
+        }
+        GROUP BY ?sensor
+        REGISTER RStream :output AS
+        USING BASELINE :yesterdayBaseline
+        SELECT ?sensor ?yesterdayAvgValue
+        WHERE {
+          WINDOW :liveMinute {
+            ?sensor :hasValue ?value .
+          }
+          GRAPH :yesterdayBaseline {
+            ?sensor :yesterdayAvgValue ?yesterdayAvgValue .
+          }
+        }
+    "#;
+
+    let parsed = parser.parse(query).unwrap();
+    assert_eq!(parsed.ast.baseline_uses.len(), 1);
+    assert_eq!(parsed.ast.baseline_uses[0].name, "http://example.org/yesterdayBaseline");
 }
 
 #[test]

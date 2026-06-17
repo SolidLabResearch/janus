@@ -69,7 +69,21 @@ Use `ON LOG` with `OFFSET`, `RANGE`, and `STEP`.
 FROM NAMED WINDOW ex:hist ON LOG ex:store [OFFSET 3600000 RANGE 300000 STEP 300000]
 ```
 
-This becomes a sequence of historical SPARQL executions over overlapping or stepped windows.
+At live evaluation time `T`, this resolves to:
+
+```text
+[T - OFFSET - RANGE, T - OFFSET]
+```
+
+Example:
+
+```text
+T = 172800000
+OFFSET = 86400000
+RANGE = 60000
+
+=> [86340000, 86400000]
+```
 
 ## Baseline Clause
 
@@ -95,7 +109,9 @@ If the clause is absent, the HTTP/API registration-level `baseline_mode` is used
 
 ## Query-Defined Baselines
 
-Janus also supports query-defined baselines. They are evaluated over a historical `LOG` window before live startup, materialized through a `GRAPH :name { ... }` template, and injected into the live RSP engine as static RDF quads.
+Janus also supports query-defined baselines. They are evaluated over a historical `LOG` window and
+stored as named `SELECT`-result snapshots. During live evaluation, Janus resolves the snapshot
+that matches the current evaluation time and joins it into the live query.
 
 Canonical example:
 
@@ -134,9 +150,10 @@ HAVING(AVG(?value) > ?dayAvgValue)
 
 Semantics:
 
-- `DEFINE BASELINE :dayBaseline ON WINDOW :historyDay AS SELECT ...` defines the historical binding relation that is prepared at startup.
-- `USING BASELINE :dayBaseline` marks that baseline as required and injects it into the live engine before live processing begins.
-- `GRAPH :dayBaseline { ... }` is the materialization template. Janus substitutes each baseline row into that template and emits the resulting quads into the live static store.
+- `DEFINE BASELINE :dayBaseline ON WINDOW :historyDay AS SELECT ...` defines the historical
+  binding relation used to build baseline snapshots.
+- `USING BASELINE :dayBaseline` marks that baseline as required for live evaluation.
+- `GRAPH :dayBaseline { ... }` remains the compatibility join shape for the live query.
 - baseline variables such as `?dayAvgValue` are then available to the live query in `SELECT`, `GROUP BY`, `HAVING`, and arithmetic expressions.
 
 ## Query-Defined Baseline Materialization
@@ -172,7 +189,8 @@ The parser splits the query into:
 Important detail:
 
 - non-window patterns in the `WHERE` clause are preserved in the live query
-- this is what makes static joins such as `GRAPH :dayBaseline { ?sensor :dayAvgValue ?dayAvgValue . }` work during live execution
+- this is what makes joins such as `GRAPH :dayBaseline { ?sensor :dayAvgValue ?dayAvgValue . }`
+  work during live execution
 
 ## Baseline Predicates
 
@@ -195,7 +213,7 @@ ex:s1  <https://janus.rs/baseline#mean>  "21.5"
 
 This is why live queries join on `baseline:*` predicates rather than directly reusing historical bindings.
 
-Query-defined baselines use the baseline name as the graph IRI instead:
+Query-defined baselines use the baseline name as the graph IRI for the evaluation-local join view:
 
 ```trig
 GRAPH :dayBaseline {
@@ -207,11 +225,14 @@ The live query must therefore join through `GRAPH :dayBaseline { ... }` rather t
 
 ## Limitations
 
-- query-defined baseline materialization is a startup snapshot, not a continuously updated historical/live relation
+- query-defined baselines support `SELECT` snapshots only
+- `CONSTRUCT` baselines are not supported
+- sliding historical baseline `STEP` must match the live `STEP`
 - the `GRAPH` template predicates must be concrete IRIs
 - template variables must be projected by the baseline query
 - template subjects must resolve to an IRI or blank node
-- large baseline result sets may make static-store injection expensive at startup
+- the current implementation is tested for projected variables, `AVG`, `GROUP BY`, and arithmetic
+  joins in the live query
 
 ## Practical Guidance
 

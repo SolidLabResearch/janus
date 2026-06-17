@@ -2,13 +2,19 @@ use crate::{
     core::RDFEvent,
     execution::{HistoricalExecutor, ResultConverter},
     parsing::janusql_parser::{
-        BaselineGraphTemplate, GraphTermTemplate, JanusQLParser, TripleTemplate, WindowType,
+        BaselineDefinition, BaselineGraphTemplate, GraphTermTemplate, JanusQLParser,
+        ParsedJanusQuery, TripleTemplate, WindowType,
     },
     querying::oxigraph_adapter::OxigraphAdapter,
-    registry::query_registry::{BaselineBootstrapMode, QueryId, QueryMetadata, QueryRegistry},
+    registry::{
+        baseline_registry::{BaselineRegistry, BaselineSnapshot},
+        query_registry::{BaselineBootstrapMode, QueryId, QueryMetadata, QueryRegistry},
+    },
     storage::segmented_storage::StreamingSegmentedStorage,
     stream::{
-        live_stream_processing::LiveStreamProcessing,
+        live_stream_processing::{
+            DynamicStaticQuadProvider, LiveStreamProcessing, LiveStreamProcessingError,
+        },
         mqtt_subscriber::{MqttSubscriber, MqttSubscriberConfig},
     },
 };
@@ -95,9 +101,9 @@ struct RunningQuery {
     metadata: QueryMetadata,
     status: Arc<RwLock<ExecutionStatus>>,
     // Query-defined baselines are evaluated at startup and stored here for
-    // inspection/debugging after they have also been materialized into the
-    // live engine static store.
+    // inspection/debugging as the latest SELECT-result snapshot rows.
     query_defined_baselines: Arc<RwLock<HashMap<String, Vec<HashMap<String, String>>>>>,
+    baseline_registry: Arc<BaselineRegistry>,
     // Primary sender used to send the results to the main subscriber
     primary_sender: Sender<QueryResult>,
     // Additional senders for other subscribers (if any)
@@ -230,9 +236,10 @@ impl JanusApi {
         let effective_baseline_window =
             parsed.baseline.as_ref().map(|baseline| baseline.window_name.clone());
         validate_query_defined_baseline_access(parsed)?;
+        validate_query_defined_baseline_step_alignment(parsed)?;
         let requires_async_baseline_warmup = !parsed.live_windows.is_empty()
             && !parsed.historical_windows.is_empty()
-            && (parsed.baseline.is_some() || !parsed.sparql_queries.is_empty());
+            && parsed.baseline.is_some();
         let mut historical_handles = Vec::new();
         let mut shutdown_senders = Vec::new();
         let initial_status = if requires_async_baseline_warmup {
@@ -317,6 +324,7 @@ impl JanusApi {
         let mut mqtt_subscriber_handles = Vec::new();
         let mut baseline_handle = None;
         let query_defined_baselines = Arc::new(RwLock::new(HashMap::new()));
+        let baseline_registry = Arc::new(BaselineRegistry::new());
 
         let live_handle = if !parsed.live_windows.is_empty() && !parsed.rspql_query.is_empty() {
             let tx = result_tx.clone();
@@ -341,16 +349,24 @@ impl JanusApi {
             {
                 let mut processor = live_processor.lock().unwrap();
                 if !parsed.ast.baseline_uses.is_empty() {
-                    let (query_defined_baselines_map, baseline_quads) =
-                        evaluate_and_materialize_query_defined_baselines(
-                            &self.storage,
-                            parsed,
-                            &mpsc::channel::<()>().1,
-                        )?;
-                    if let Ok(mut stored) = query_defined_baselines.write() {
-                        *stored = query_defined_baselines_map;
-                    }
-                    materialize_static_quads(&mut processor, &baseline_quads)?;
+                    initialize_fixed_query_defined_baselines(
+                        &self.storage,
+                        parsed,
+                        &baseline_registry,
+                        &query_defined_baselines,
+                    )?;
+                    let provider = build_query_defined_baseline_provider(
+                        Arc::clone(&self.storage),
+                        parsed.clone(),
+                        Arc::clone(&baseline_registry),
+                        Arc::clone(&query_defined_baselines),
+                    );
+                    processor.set_dynamic_static_quad_provider(provider).map_err(|e| {
+                        JanusApiError::LiveProcessingError(format!(
+                            "Failed to register dynamic baseline provider: {}",
+                            e
+                        ))
+                    })?;
                 }
                 for window in &live_windows {
                     if let Err(e) = processor.register_stream(&window.stream_name) {
@@ -375,7 +391,6 @@ impl JanusApi {
                 let status_for_baseline = Arc::clone(&status);
                 let registry_for_baseline = Arc::clone(&self.registry);
                 let query_id_for_baseline = query_id.clone();
-                let query_defined_baselines_for_thread = Arc::clone(&query_defined_baselines);
                 let baseline_mode = effective_baseline_mode;
                 let baseline_window = effective_baseline_window.clone();
                 let (baseline_shutdown_tx, baseline_shutdown_rx) = mpsc::channel::<()>();
@@ -516,6 +531,7 @@ impl JanusApi {
             metadata,
             status,
             query_defined_baselines,
+            baseline_registry,
             primary_sender: result_tx,
             subscribers: vec![],
             historical_handles,
@@ -668,6 +684,203 @@ fn collect_query_baseline_statements(
     Ok(statements)
 }
 
+fn initialize_fixed_query_defined_baselines(
+    storage: &Arc<StreamingSegmentedStorage>,
+    parsed: &ParsedJanusQuery,
+    baseline_registry: &Arc<BaselineRegistry>,
+    latest_rows: &Arc<RwLock<HashMap<String, Vec<HashMap<String, String>>>>>,
+) -> Result<(), JanusApiError> {
+    for definition in &parsed.ast.baseline_definitions {
+        let source_window = find_baseline_source_window(parsed, definition)?;
+        if source_window.window_type != WindowType::HistoricalFixed {
+            continue;
+        }
+
+        let evaluation_time = source_window.end.unwrap_or_default();
+        let snapshot = load_or_compute_baseline_snapshot(
+            storage,
+            parsed,
+            definition,
+            evaluation_time,
+            baseline_registry,
+        )?;
+        store_latest_baseline_rows(latest_rows, &snapshot);
+    }
+
+    Ok(())
+}
+
+fn build_query_defined_baseline_provider(
+    storage: Arc<StreamingSegmentedStorage>,
+    parsed: ParsedJanusQuery,
+    baseline_registry: Arc<BaselineRegistry>,
+    latest_rows: Arc<RwLock<HashMap<String, Vec<HashMap<String, String>>>>>,
+) -> DynamicStaticQuadProvider {
+    Arc::new(move |evaluation_time| {
+        resolve_query_defined_baseline_quads_at(
+            &storage,
+            &parsed,
+            &baseline_registry,
+            &latest_rows,
+            evaluation_time,
+        )
+        .map_err(|err| LiveStreamProcessingError::from(err.to_string()))
+    })
+}
+
+fn resolve_query_defined_baseline_quads_at(
+    storage: &Arc<StreamingSegmentedStorage>,
+    parsed: &ParsedJanusQuery,
+    baseline_registry: &Arc<BaselineRegistry>,
+    latest_rows: &Arc<RwLock<HashMap<String, Vec<HashMap<String, String>>>>>,
+    evaluation_time: u64,
+) -> Result<Vec<Quad>, JanusApiError> {
+    let mut materialized = Vec::new();
+    let mut seen = HashSet::new();
+
+    for baseline_use in &parsed.ast.baseline_uses {
+        if !seen.insert(baseline_use.name.clone()) {
+            continue;
+        }
+
+        let definition = parsed
+            .ast
+            .baseline_definitions
+            .iter()
+            .find(|definition| definition.name == baseline_use.name)
+            .ok_or_else(|| {
+                JanusApiError::ExecutionError(format!(
+                    "USING BASELINE references missing baseline definition '{}'",
+                    baseline_use.name
+                ))
+            })?;
+        let template = parsed
+            .baseline_graph_templates
+            .iter()
+            .find(|template| template.baseline_name == baseline_use.name)
+            .ok_or_else(|| {
+                JanusApiError::ExecutionError(format!(
+                    "USING BASELINE '{}' requires a matching GRAPH reference in the live query",
+                    baseline_use.name
+                ))
+            })?;
+        let snapshot = load_or_compute_baseline_snapshot(
+            storage,
+            parsed,
+            definition,
+            evaluation_time,
+            baseline_registry,
+        )?;
+        store_latest_baseline_rows(latest_rows, &snapshot);
+        materialized
+            .extend(materialize_baseline_snapshot_as_quads(definition, template, &snapshot)?);
+    }
+
+    Ok(materialized)
+}
+
+fn load_or_compute_baseline_snapshot(
+    storage: &Arc<StreamingSegmentedStorage>,
+    parsed: &ParsedJanusQuery,
+    definition: &BaselineDefinition,
+    evaluation_time: u64,
+    baseline_registry: &Arc<BaselineRegistry>,
+) -> Result<BaselineSnapshot, JanusApiError> {
+    let source_window = find_baseline_source_window(parsed, definition)?;
+    let generated_query = parsed
+        .generated_baseline_queries
+        .iter()
+        .find(|generated| generated.name == definition.name)
+        .ok_or_else(|| {
+            JanusApiError::ExecutionError(format!(
+                "Missing generated baseline query for '{}'",
+                definition.name
+            ))
+        })?;
+
+    let resolved_valid_at = match source_window.window_type {
+        WindowType::HistoricalFixed => source_window.end.unwrap_or(evaluation_time),
+        WindowType::HistoricalSliding => evaluation_time,
+        WindowType::Live => {
+            return Err(JanusApiError::ExecutionError(format!(
+                "Baseline '{}' cannot use live window '{}'",
+                definition.name, source_window.window_name
+            )))
+        }
+    };
+
+    if let Some(snapshot) = baseline_registry.get_snapshot(&definition.name, resolved_valid_at) {
+        return Ok(snapshot);
+    }
+    if source_window.window_type == WindowType::HistoricalFixed {
+        if let Some(snapshot) = baseline_registry.get_latest_snapshot(&definition.name) {
+            return Ok(snapshot);
+        }
+    }
+
+    let (window_start, window_end) =
+        source_window.resolve_historical_bounds(evaluation_time).ok_or_else(|| {
+            JanusApiError::ExecutionError(format!(
+                "Failed to resolve historical bounds for baseline '{}' using window '{}'",
+                definition.name, source_window.window_name
+            ))
+        })?;
+
+    let executor = HistoricalExecutor::new(Arc::clone(storage), OxigraphAdapter::new());
+    let rows =
+        executor.execute_window_bounds(window_start, window_end, &generated_query.sparql_query)?;
+    let snapshot = BaselineSnapshot {
+        baseline_id: definition.name.clone(),
+        valid_at: resolved_valid_at,
+        source_window: definition.source_window.clone(),
+        window_start,
+        window_end,
+        variables: generated_query.output_variables.clone(),
+        rows,
+    };
+    baseline_registry.insert_snapshot(snapshot.clone());
+    Ok(snapshot)
+}
+
+fn find_baseline_source_window<'a>(
+    parsed: &'a ParsedJanusQuery,
+    definition: &BaselineDefinition,
+) -> Result<&'a crate::parsing::janusql_parser::WindowDefinition, JanusApiError> {
+    parsed
+        .historical_windows
+        .iter()
+        .find(|window| window.window_name == definition.source_window)
+        .ok_or_else(|| {
+            JanusApiError::ExecutionError(format!(
+                "Missing historical source window '{}' for baseline '{}'",
+                definition.source_window, definition.name
+            ))
+        })
+}
+
+fn store_latest_baseline_rows(
+    latest_rows: &Arc<RwLock<HashMap<String, Vec<HashMap<String, String>>>>>,
+    snapshot: &BaselineSnapshot,
+) {
+    if let Ok(mut stored) = latest_rows.write() {
+        stored.insert(snapshot.baseline_id.clone(), snapshot.rows.clone());
+    }
+}
+
+fn materialize_baseline_snapshot_as_quads(
+    baseline_definition: &BaselineDefinition,
+    baseline_graph_template: &BaselineGraphTemplate,
+    snapshot: &BaselineSnapshot,
+) -> Result<Vec<Quad>, JanusApiError> {
+    materialize_baseline_bindings_as_quads(
+        &snapshot.baseline_id,
+        baseline_definition,
+        baseline_graph_template,
+        &snapshot.rows,
+    )
+}
+
+#[allow(dead_code)]
 fn collect_query_defined_baseline_bindings(
     storage: &Arc<StreamingSegmentedStorage>,
     parsed: &crate::parsing::janusql_parser::ParsedJanusQuery,
@@ -704,6 +917,7 @@ fn collect_query_defined_baseline_bindings(
     Ok(baseline_results)
 }
 
+#[allow(dead_code)]
 fn evaluate_and_materialize_query_defined_baselines(
     storage: &Arc<StreamingSegmentedStorage>,
     parsed: &crate::parsing::janusql_parser::ParsedJanusQuery,
@@ -714,6 +928,7 @@ fn evaluate_and_materialize_query_defined_baselines(
     Ok((bindings_by_name, quads))
 }
 
+#[allow(dead_code)]
 fn execute_generated_baseline_query(
     executor: &HistoricalExecutor,
     window: &crate::parsing::janusql_parser::WindowDefinition,
@@ -772,6 +987,7 @@ fn collect_sliding_window_baseline_statements(
     Ok(baseline_statements_from_accumulator(&accumulator))
 }
 
+#[allow(dead_code)]
 fn materialize_query_defined_baseline_quads(
     parsed: &crate::parsing::janusql_parser::ParsedJanusQuery,
     bindings_by_name: &HashMap<String, Vec<HashMap<String, String>>>,
@@ -834,6 +1050,7 @@ fn materialize_bindings_as_static_baseline(
     materialize_static_baseline_statements(processor, &statements)
 }
 
+#[allow(dead_code)]
 fn materialize_static_quads(
     processor: &mut LiveStreamProcessing,
     quads: &[Quad],
@@ -1008,6 +1225,43 @@ fn validate_query_defined_baseline_access(
                 ))
             })?;
         validate_baseline_graph_template(definition, template)?;
+    }
+
+    Ok(())
+}
+
+fn validate_query_defined_baseline_step_alignment(
+    parsed: &crate::parsing::janusql_parser::ParsedJanusQuery,
+) -> Result<(), JanusApiError> {
+    if parsed.live_windows.is_empty() {
+        return Ok(());
+    }
+
+    let live_step = parsed.live_windows[0].slide;
+    if parsed.live_windows.iter().any(|window| window.slide != live_step) {
+        return Err(JanusApiError::ExecutionError(
+            "Queries with multiple live STEP values are not supported with USING BASELINE"
+                .to_string(),
+        ));
+    }
+
+    for definition in &parsed.ast.baseline_definitions {
+        let Some(source_window) = parsed
+            .historical_windows
+            .iter()
+            .find(|window| window.window_name == definition.source_window)
+        else {
+            continue;
+        };
+
+        if source_window.window_type == WindowType::HistoricalSliding
+            && source_window.slide != live_step
+        {
+            return Err(JanusApiError::ExecutionError(format!(
+                "Sliding historical baseline window '{}' STEP {} must match live STEP {}",
+                source_window.window_name, source_window.slide, live_step
+            )));
+        }
     }
 
     Ok(())
@@ -1344,17 +1598,24 @@ mod tests {
     };
     use crate::{
         core::RDFEvent,
+        execution::ResultConverter,
+        extensions::query_options::build_evaluator,
         parsing::janusql_parser::{
             BaselineDefinition, BaselineGraphTemplate, GraphTermTemplate, JanusQLParser,
             TripleTemplate,
         },
+        registry::baseline_registry::{BaselineRegistry, BaselineSnapshot},
         storage::{segmented_storage::StreamingSegmentedStorage, util::StreamingConfig},
         stream::live_stream_processing::LiveStreamProcessing,
     };
-    use oxigraph::model::{GraphName, Literal, NamedNode, NamedOrBlankNode, Quad, Term};
+    use oxigraph::{
+        model::{GraphName, Literal, NamedNode, NamedOrBlankNode, Quad, Term},
+        sparql::QueryResults,
+        store::Store,
+    };
     use std::{
         collections::HashMap,
-        sync::{mpsc, Arc},
+        sync::{mpsc, Arc, RwLock},
         thread,
         time::Duration,
     };
@@ -1995,5 +2256,257 @@ GROUP BY ?sensor
         let rendered = format!("{:?}", results);
         assert!(rendered.contains("dayAvgValue"));
         assert!(rendered.contains("difference"));
+    }
+
+    #[test]
+    fn test_sliding_query_defined_baseline_rejects_mismatched_step() {
+        let parser = JanusQLParser::new().expect("Failed to create parser");
+        let parsed = parser
+            .parse(
+                r#"
+PREFIX : <http://example.org/>
+FROM NAMED WINDOW :liveMinute ON STREAM :stream [RANGE 60000 STEP 1000]
+FROM NAMED WINDOW :sameMinuteYesterday ON LOG :stream [OFFSET 86400000 RANGE 60000 STEP 60000]
+DEFINE BASELINE :yesterdayBaseline ON WINDOW :sameMinuteYesterday AS
+SELECT ?sensor (AVG(?value) AS ?yesterdayAvgValue)
+WHERE {
+  ?sensor :hasValue ?value .
+}
+GROUP BY ?sensor
+REGISTER RStream :output AS
+USING BASELINE :yesterdayBaseline
+SELECT ?sensor ?yesterdayAvgValue
+WHERE {
+  WINDOW :liveMinute { ?sensor :hasValue ?value . }
+  GRAPH :yesterdayBaseline {
+    ?sensor :yesterdayAvgValue ?yesterdayAvgValue .
+  }
+}
+                "#,
+            )
+            .expect("query should parse");
+
+        let err = super::validate_query_defined_baseline_step_alignment(&parsed)
+            .expect_err("mismatched steps should be rejected");
+        assert!(err.to_string().contains("must match live STEP"));
+    }
+
+    #[test]
+    fn test_sliding_query_defined_baseline_snapshots_change_with_live_evaluation_time() {
+        let config = StreamingConfig {
+            segment_base_path: format!(
+                "./test_data/janus_api_sliding_baselines_{}",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_millis()
+            ),
+            ..StreamingConfig::default()
+        };
+        let storage = Arc::new(
+            StreamingSegmentedStorage::new(config).expect("Failed to create segmented storage"),
+        );
+
+        for (timestamp, value) in [(86_340_002, "10"), (86_400_000, "20")] {
+            storage
+                .write_rdf(
+                    timestamp,
+                    "http://example.org/sensor1",
+                    "http://example.org/hasValue",
+                    value,
+                    "http://example.org/history",
+                )
+                .expect("Failed to write historical RDF event");
+        }
+        storage.flush().expect("Failed to flush storage");
+        for (timestamp, value) in [(86_400_002, "30"), (86_460_000, "50")] {
+            storage
+                .write_rdf(
+                    timestamp,
+                    "http://example.org/sensor1",
+                    "http://example.org/hasValue",
+                    value,
+                    "http://example.org/history",
+                )
+                .expect("Failed to write historical RDF event");
+        }
+        storage.flush().expect("Failed to flush storage");
+
+        let parser = JanusQLParser::new().expect("Failed to create parser");
+        let parsed = parser
+            .parse(
+                r#"
+PREFIX : <http://example.org/>
+
+FROM NAMED WINDOW :liveMinute ON STREAM :stream [RANGE 60000 STEP 60000]
+FROM NAMED WINDOW :sameMinuteYesterday ON LOG :stream [OFFSET 86400000 RANGE 60000 STEP 60000]
+
+DEFINE BASELINE :yesterdayBaseline ON WINDOW :sameMinuteYesterday AS
+SELECT ?sensor
+       (AVG(?value) AS ?yesterdayAvgValue)
+WHERE {
+  ?sensor :hasValue ?value .
+}
+GROUP BY ?sensor
+
+REGISTER RStream :output AS
+USING BASELINE :yesterdayBaseline
+SELECT ?sensor
+       (AVG(?value) AS ?currentAvgValue)
+       ?yesterdayAvgValue
+       ((AVG(?value) - ?yesterdayAvgValue) AS ?difference)
+WHERE {
+  WINDOW :liveMinute {
+    ?sensor :hasValue ?value .
+  }
+  GRAPH :yesterdayBaseline {
+    ?sensor :yesterdayAvgValue ?yesterdayAvgValue .
+  }
+}
+GROUP BY ?sensor ?yesterdayAvgValue
+HAVING(AVG(?value) > ?yesterdayAvgValue)
+                "#,
+            )
+            .expect("Failed to parse JanusQL query");
+
+        let baseline_registry = Arc::new(BaselineRegistry::new());
+        let latest_rows = Arc::new(RwLock::new(HashMap::new()));
+        assert_eq!(
+            storage
+                .query_rdf(86_340_000, 86_400_000)
+                .expect("first historical range should query")
+                .len(),
+            2
+        );
+        assert_eq!(
+            storage
+                .query_rdf(86_400_001, 86_460_001)
+                .expect("second historical range should query")
+                .len(),
+            2
+        );
+        let definition = parsed
+            .ast
+            .baseline_definitions
+            .iter()
+            .find(|definition| definition.name == "http://example.org/yesterdayBaseline")
+            .expect("baseline definition should exist");
+        let template = parsed
+            .baseline_graph_templates
+            .iter()
+            .find(|template| template.baseline_name == "http://example.org/yesterdayBaseline")
+            .expect("baseline graph template should exist");
+        let first_snapshot = super::load_or_compute_baseline_snapshot(
+            &storage,
+            &parsed,
+            definition,
+            172_800_001,
+            &baseline_registry,
+        )
+        .expect("first baseline snapshot should resolve");
+        let second_snapshot = super::load_or_compute_baseline_snapshot(
+            &storage,
+            &parsed,
+            definition,
+            172_860_001,
+            &baseline_registry,
+        )
+        .expect("second baseline snapshot should resolve");
+
+        let live_query = r#"
+PREFIX : <http://example.org/>
+SELECT ?sensor
+       (AVG(?value) AS ?currentAvgValue)
+       ?yesterdayAvgValue
+       ((AVG(?value) - ?yesterdayAvgValue) AS ?difference)
+WHERE {
+  GRAPH :yesterdayBaseline {
+    ?sensor :yesterdayAvgValue ?yesterdayAvgValue .
+  }
+  GRAPH :liveMinute {
+    ?sensor :hasValue ?value .
+  }
+}
+GROUP BY ?sensor ?yesterdayAvgValue
+HAVING(AVG(?value) > ?yesterdayAvgValue)
+        "#;
+
+        let run_live_evaluation = |events: Vec<(u64, &str)>,
+                                   snapshot: &BaselineSnapshot|
+         -> HashMap<String, String> {
+            super::store_latest_baseline_rows(&latest_rows, snapshot);
+
+            let baseline_quads =
+                super::materialize_baseline_snapshot_as_quads(definition, template, snapshot)
+                    .expect("baseline quads should materialize");
+
+            let store = Store::new().expect("store should be created");
+            for (_timestamp, value) in events {
+                store
+                    .insert(&Quad::new(
+                        NamedNode::new("http://example.org/sensor1").unwrap(),
+                        NamedNode::new("http://example.org/hasValue").unwrap(),
+                        Literal::new_typed_literal(
+                            value,
+                            NamedNode::new("http://www.w3.org/2001/XMLSchema#decimal").unwrap(),
+                        ),
+                        GraphName::NamedNode(
+                            NamedNode::new("http://example.org/liveMinute").unwrap(),
+                        ),
+                    ))
+                    .expect("live quad should insert");
+            }
+            for quad in baseline_quads {
+                store.insert(&quad).expect("baseline quad should insert");
+            }
+
+            let parsed_query =
+                build_evaluator().parse_query(live_query).expect("live SPARQL should parse");
+            let results = parsed_query.on_store(&store).execute().expect("query should execute");
+
+            let QueryResults::Solutions(solutions) = results else {
+                panic!("expected SELECT solutions");
+            };
+            let solution = solutions
+                .collect::<Result<Vec<_>, _>>()
+                .expect("solutions should evaluate")
+                .into_iter()
+                .next()
+                .expect("expected live row joined with baseline snapshot");
+
+            let mut row = HashMap::new();
+            for (variable, term) in solution.iter() {
+                row.insert(
+                    variable.as_str().to_string(),
+                    normalize_binding_term(&term.to_string()),
+                );
+            }
+            row
+        };
+
+        let first =
+            run_live_evaluation(vec![(172_740_002, "25"), (172_800_000, "35")], &first_snapshot);
+        assert_eq!(first.get("yesterdayAvgValue"), Some(&"15".to_string()));
+        assert_eq!(first.get("difference"), Some(&"15".to_string()));
+        assert_eq!(first.get("currentAvgValue"), Some(&"30".to_string()));
+        assert_ne!(first.get("currentAvgValue"), Some(&"25".to_string()));
+
+        let second =
+            run_live_evaluation(vec![(172_800_002, "60"), (172_860_000, "80")], &second_snapshot);
+        assert_eq!(second.get("yesterdayAvgValue"), Some(&"40".to_string()));
+        assert_eq!(second.get("difference"), Some(&"30".to_string()));
+        assert_eq!(second.get("currentAvgValue"), Some(&"70".to_string()));
+        assert_ne!(second.get("yesterdayAvgValue"), Some(&"15".to_string()));
+
+        let first_snapshot = baseline_registry
+            .get_snapshot("http://example.org/yesterdayBaseline", 172_800_001)
+            .expect("expected snapshot at first evaluation time");
+        let second_snapshot = baseline_registry
+            .get_snapshot("http://example.org/yesterdayBaseline", 172_860_001)
+            .expect("expected snapshot at second evaluation time");
+        assert_eq!(first_snapshot.window_start, 86_340_001);
+        assert_eq!(first_snapshot.window_end, 86_400_001);
+        assert_eq!(second_snapshot.window_start, 86_400_001);
+        assert_eq!(second_snapshot.window_end, 86_460_001);
     }
 }
