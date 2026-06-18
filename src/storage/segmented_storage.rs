@@ -278,6 +278,18 @@ impl StreamingSegmentedStorage {
         data_file.flush()?;
         index_file.flush()?;
 
+        // Fix max_timestamps in index_directory to cover the sparse interval gaps and prevent missing query hits
+        if !index_directory.is_empty() {
+            let last_event_ts = events.last().unwrap().timestamp;
+            for i in 0..index_directory.len() {
+                if i + 1 < index_directory.len() {
+                    index_directory[i].max_timestamp = index_directory[i + 1].min_timestamp;
+                } else {
+                    index_directory[i].max_timestamp = last_event_ts;
+                }
+            }
+        }
+
         Ok(EnhancedSegmentMetadata {
             start_timstamp: events.first().unwrap().timestamp,
             end_timestamp: events.last().unwrap().timestamp,
