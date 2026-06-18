@@ -113,3 +113,38 @@ fn test_result_type() {
     assert!(returns_ok().is_ok());
     assert!(returns_err().is_err());
 }
+
+#[test]
+fn test_storage_point_lookup() {
+    let temp_dir = tempfile::TempDir::new().unwrap();
+    let config = StreamingConfig {
+        segment_base_path: temp_dir.path().to_string_lossy().into_owned(),
+        max_batch_events: 100000,
+        max_batch_age_seconds: 3600,
+        max_batch_bytes: 1_000_000_000,
+        sparse_interval: 64,
+        entries_per_index_block: 256,
+    };
+    let storage = StreamingSegmentedStorage::new(config).unwrap();
+    let base_ts = 1_800_500_000_000u64;
+
+    for index in 0..10000 {
+        let ts = base_ts + index as u64 * 60;
+        storage
+            .write_rdf(
+                ts,
+                &format!("http://example.org/junction/{}", index % 64),
+                "http://example.org/baselineFlow",
+                "40.0",
+                "http://example.org/citybench",
+            )
+            .unwrap();
+    }
+    storage.flush().unwrap();
+
+    let last_ts = base_ts + 9999 * 60;
+    println!("last_ts = {}", last_ts);
+    let results = storage.query_rdf(last_ts, last_ts + 59).unwrap();
+    println!("point lookup results len = {}", results.len());
+    assert_eq!(results.len(), 1);
+}
