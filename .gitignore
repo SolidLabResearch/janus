@@ -26,6 +26,9 @@ janus-dashboard/.vscode/
 .DS_Store
 .AppleDouble
 .LSOverride
+.venv/
+.claude/
+janus-dashboard/
 
 # Editor directories
 .vscode/
