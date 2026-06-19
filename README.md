@@ -94,6 +94,7 @@ Janus uses dictionary encoding and segmented storage for high-throughput ingesti
 - Read throughput: 2.7-2.77 million quads/sec
 - Point query latency: 0.235 ms at 1M quads
 - Space efficiency: about 40% smaller encoded events
+- Segment file IDs are process-monotonic, so rapid flushes cannot reuse the same millisecond timestamp and overwrite an earlier segment.
 
 Detailed benchmark data is in [docs/BENCHMARK_RESULTS.md](./docs/BENCHMARK_RESULTS.md).
 Current benchmark commands and scope are in [docs/BENCHMARKING.md](./docs/BENCHMARKING.md).

@@ -1,6 +1,7 @@
 use std::{
     collections::VecDeque,
     io::{BufWriter, Read, Seek, SeekFrom, Write},
+    sync::atomic::{AtomicU64, Ordering},
     sync::{Arc, Mutex, RwLock},
     thread::JoinHandle,
     time::{Duration, SystemTime, UNIX_EPOCH},
@@ -27,6 +28,8 @@ pub struct StreamingSegmentedStorage {
     background_flush_error: Arc<Mutex<Option<String>>>,
     config: StreamingConfig,
 }
+
+static NEXT_SEGMENT_ID: AtomicU64 = AtomicU64::new(0);
 
 // Implementation of the Segmented Storage System with Two-Level Indexing and Background Flushing to store the RDF Stream events.
 impl StreamingSegmentedStorage {
@@ -548,7 +551,7 @@ impl StreamingSegmentedStorage {
         };
 
         let flush_result = (|| -> std::io::Result<()> {
-            let segment_id = Self::current_timestamp();
+            let segment_id = Self::generate_segment_id();
             let data_path = format!("{}/segment-{}.log", config.segment_base_path, segment_id);
             let index_path = format!("{}/segment-{}.idx", config.segment_base_path, segment_id);
 
@@ -854,8 +857,24 @@ impl StreamingSegmentedStorage {
             entry_count: entries.len() as u32,
         })
     }
-    // Generate a unique segment ID based on the current timestamp
+    // Generate a process-monotonic segment ID.
+    // Millisecond timestamps alone are unsafe because two flushes can happen inside the same
+    // millisecond and would otherwise target the same file name, overwriting historical data.
     fn generate_segment_id() -> u64 {
-        SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64
+        let now_ms = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
+        let mut candidate = NEXT_SEGMENT_ID.load(Ordering::Relaxed);
+
+        loop {
+            let next = now_ms.max(candidate.saturating_add(1));
+            match NEXT_SEGMENT_ID.compare_exchange(
+                candidate,
+                next,
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => return next,
+                Err(observed) => candidate = observed,
+            }
+        }
     }
 }
