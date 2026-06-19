@@ -1,4 +1,4 @@
-# H1.2 Sustained Hybrid Window Execution Design
+# Hybrid Coordination Benchmark Sustained Window Execution Design
 
 Date: 2026-06-10
 
@@ -8,7 +8,7 @@ Accepted
 
 ## Context
 
-The H1.2 benchmark evaluates sustained query execution over continuous sliding windows. Unlike H1.1 which focuses on first-result latency, H1.2 must measure latency and data transfer over repeated windows during virtual event-time streaming.
+The Hybrid Coordination Benchmark sustained-window path evaluates sustained query execution over continuous sliding windows. Unlike the first-result hybrid run, the sustained benchmark must measure latency and data transfer over repeated windows during virtual event-time streaming.
 
 ## Decision
 

@@ -2,6 +2,8 @@
 
 Baseline support in Janus means the explicit `DEFINE BASELINE` / `USING BASELINE` syntax path used for hybrid anomaly-style queries where historical data initializes context for live scoring.
 
+For the paper-facing benchmark naming and artifact mapping, see [Paper Benchmarking](./PAPER_BENCHMARKING.md) and [Paper Artifact Map](./PAPER_ARTIFACT_MAP.md).
+
 It is not a full hybrid-state engine.
 
 Janus currently supports two baseline paths:

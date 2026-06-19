@@ -1,6 +1,6 @@
 # Nested Historical Subqueries
 
-This document explains the current Janus-QL support for historical materialized subqueries, the planning pipeline, and the small benchmark used to compare them with explicit `DEFINE BASELINE` syntax.
+This document explains the current Janus-QL support for historical materialized subqueries, the planning pipeline, and the Historical Materialized Subquery Benchmark used to compare them with explicit `DEFINE BASELINE` syntax.
 
 ## What A Nested Historical Subquery Is
 
@@ -262,7 +262,7 @@ No such execution path is implemented yet.
 
 ## Benchmark
 
-A small developer benchmark compares:
+The Historical Materialized Subquery Benchmark compares:
 
 1. explicit `DEFINE BASELINE`
 2. equivalent nested historical subquery
@@ -282,3 +282,5 @@ The runner reports:
 - first result latency when observable
 
 For a checked-in sample, see [NESTED_HISTORICAL_SUBQUERY_BENCHMARK_SAMPLE.md](./NESTED_HISTORICAL_SUBQUERY_BENCHMARK_SAMPLE.md).
+
+For the paper-facing result map, see [Paper Artifact Map](./PAPER_ARTIFACT_MAP.md).

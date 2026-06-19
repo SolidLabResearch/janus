@@ -18,6 +18,10 @@ This directory contains the current Janus documentation.
 
 - [BENCHMARK_RESULTS.md](./BENCHMARK_RESULTS.md): benchmark data
 - [BENCHMARKING.md](./BENCHMARKING.md): current benchmark harness and run commands
+- [PAPER_BENCHMARKING.md](./PAPER_BENCHMARKING.md): paper-facing benchmark harnesses and destinations
+- [PAPER_ARTIFACT_MAP.md](./PAPER_ARTIFACT_MAP.md): paper claim to artifact map
+- [PAPER_ARCHITECTURE.md](./PAPER_ARCHITECTURE.md): Mermaid architecture diagrams for the paper
+- [PAPER_SUBMISSION_PACKAGE.md](./PAPER_SUBMISSION_PACKAGE.md): include/exclude list for a submission bundle
 - [STREAM_BUS_CLI.md](./STREAM_BUS_CLI.md): replay and ingestion CLI
 
 ## Repo Boundary

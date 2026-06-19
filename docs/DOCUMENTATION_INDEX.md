@@ -14,6 +14,10 @@ This is the shortest path to understanding the current Janus implementation.
 8. [HTTP_API_CURRENT.md](./HTTP_API_CURRENT.md)
 9. [ANOMALY_DETECTION.md](./ANOMALY_DETECTION.md)
 10. [QUICK_REFERENCE.md](./QUICK_REFERENCE.md)
+11. [PAPER_BENCHMARKING.md](./PAPER_BENCHMARKING.md)
+12. [PAPER_ARTIFACT_MAP.md](./PAPER_ARTIFACT_MAP.md)
+13. [PAPER_ARCHITECTURE.md](./PAPER_ARCHITECTURE.md)
+14. [PAPER_SUBMISSION_PACKAGE.md](./PAPER_SUBMISSION_PACKAGE.md)
 
 ## What Each File Covers
 
@@ -53,6 +57,26 @@ This is the shortest path to understanding the current Janus implementation.
   - when extension functions are enough
   - when baseline state helps
   - recommended query patterns
+
+- [PAPER_BENCHMARKING.md](./PAPER_BENCHMARKING.md)
+  - paper-facing benchmark harnesses
+  - current paper claim destinations
+  - benchmark output filenames
+
+- [PAPER_ARTIFACT_MAP.md](./PAPER_ARTIFACT_MAP.md)
+  - claim to benchmark mapping
+  - output files and caveats
+  - figure and table destinations
+
+- [PAPER_ARCHITECTURE.md](./PAPER_ARCHITECTURE.md)
+  - unified execution diagram
+  - decomposed Oxigraph baseline diagram
+  - nested historical subquery lowering diagram
+
+- [PAPER_SUBMISSION_PACKAGE.md](./PAPER_SUBMISSION_PACKAGE.md)
+  - include and exclude lists
+  - benchmark artifacts to preserve
+  - benchmark artifacts to keep local only
 
 - [QUICK_REFERENCE.md](./QUICK_REFERENCE.md)
   - common local commands

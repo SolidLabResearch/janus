@@ -98,6 +98,7 @@ Janus uses dictionary encoding and segmented storage for high-throughput ingesti
 
 Detailed benchmark data is in [docs/BENCHMARK_RESULTS.md](./docs/BENCHMARK_RESULTS.md).
 Current benchmark commands and scope are in [docs/BENCHMARKING.md](./docs/BENCHMARKING.md).
+Paper-facing benchmark evidence is in [docs/PAPER_BENCHMARKING.md](./docs/PAPER_BENCHMARKING.md) and [docs/PAPER_ARTIFACT_MAP.md](./docs/PAPER_ARTIFACT_MAP.md).
 
 ## Quick Start
 
@@ -179,6 +180,10 @@ Start here:
 - [docs/DOCUMENTATION_INDEX.md](./docs/DOCUMENTATION_INDEX.md)
 - [docs/README.md](./docs/README.md)
 - [docs/HTTP_API_CURRENT.md](./docs/HTTP_API_CURRENT.md)
+- [docs/PAPER_BENCHMARKING.md](./docs/PAPER_BENCHMARKING.md)
+- [docs/PAPER_ARTIFACT_MAP.md](./docs/PAPER_ARTIFACT_MAP.md)
+- [docs/PAPER_ARCHITECTURE.md](./docs/PAPER_ARCHITECTURE.md)
+- [docs/PAPER_SUBMISSION_PACKAGE.md](./docs/PAPER_SUBMISSION_PACKAGE.md)
 
 ## Notes
 

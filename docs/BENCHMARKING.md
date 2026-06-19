@@ -10,7 +10,7 @@ The benchmark suite is split by engine path so regressions are easier to localiz
 - `historical_fixed`: fixed historical window execution
 - `historical_sliding`: sliding historical window execution
 - `live_injection`: live event ingestion to first emitted result
-- `hybrid_baseline`: live window plus static baseline join
+- `hybrid_baseline`: Hybrid Coordination Benchmark, live window plus static baseline join
 - `janusql_e2e`: HTTP/WebSocket Janus-QL first-result latency for historical queries
 - `janusql_live_mqtt_e2e`: HTTP/WebSocket Janus-QL first-result latency for broker-backed live and hybrid queries
 
@@ -61,9 +61,9 @@ result. The harness injects a sentinel event at the end to close remaining windo
 
 ### `hybrid_baseline`
 
-Measures a hybrid-style query where live window bindings join against static baseline data already
-materialized into the live engine. This isolates hybrid join cost without requiring an MQTT broker
-or the HTTP server.
+Measures the Hybrid Coordination Benchmark: live window bindings join against static baseline data
+already materialized into the live engine. This isolates hybrid join cost without requiring an MQTT
+broker or the HTTP server.
 
 ### `janusql_e2e`
 

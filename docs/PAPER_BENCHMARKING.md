@@ -1,9 +1,9 @@
 # Paper Benchmarking
 
-This document defines the paper-facing benchmark harnesses for the two current Janus hypotheses:
+This document defines the paper-facing benchmark harnesses for the two current Janus claims:
 
-- H1.1: unified Janus hybrid execution versus a decomposed Oxigraph-based baseline
-- H2: historical and hybrid query latency scaling with dataset size
+- Hybrid Coordination Benchmark: unified Janus hybrid execution versus a Decomposed Oxigraph Baseline
+- Historical Scaling Benchmark: historical query latency scaling with dataset size
 
 The comparison is intentionally limited to:
 
@@ -18,7 +18,7 @@ These harnesses are not Criterion microbenchmarks. They are paper-oriented runne
 
 - raw JSONL with one row per recorded run
 - summary CSV designed for paper tables
-- a scaling-fit CSV for H2
+- a scaling-fit CSV for the Historical Scaling Benchmark
 - reproducibility metadata on every raw row
 
 Default output roots:
@@ -52,7 +52,7 @@ Default mode:
 
 - `warm`
 
-### H1.1 `paper_hybrid_coordination`
+### Hybrid Coordination Benchmark
 
 `warm` mode:
 
@@ -67,7 +67,7 @@ Default mode:
 - rebuilds live event inputs per run
 - includes workload/store setup cost in end-to-end latency
 
-### H2 `paper_historical_scaling`
+### Historical Scaling Benchmark
 
 `warm` mode:
 
@@ -83,7 +83,7 @@ Default mode:
 
 The harness distinguishes direct timing/size observations from logical or derived values.
 
-### H1.1 Raw Metrics
+### Hybrid Coordination Benchmark Raw Metrics
 
 Directly recorded timestamps:
 
@@ -127,7 +127,7 @@ Result correctness:
 - `result_hash`
 - `equivalent_to_baseline`
 
-### H2 Raw Metrics
+### Historical Scaling Benchmark Raw Metrics
 
 Directly measured or observed:
 
@@ -146,9 +146,9 @@ Result correctness:
 
 - `result_hash`
 
-## H1.1 Hybrid Query Semantics
+## Hybrid Coordination Benchmark Semantics
 
-The H1.1 benchmark validates unified versus decomposed hybrid execution. The query model integrates three distinct elements:
+The Hybrid Coordination Benchmark validates unified versus decomposed hybrid execution. The query model integrates three distinct elements:
 - Historical component: Executes a query over historical events stored in a segmented storage backend (using a SPARQL engine to retrieve baseline bindings).
 - Live stream/window component: Processes real-time events through a sliding window stream operator ([RANGE 10000 STEP 1000]).
 - Hybrid result: Merges the live stream window output with the materialized historical baseline statements matching on the join key (sensor).
@@ -158,8 +158,8 @@ The H1.1 benchmark validates unified versus decomposed hybrid execution. The que
 #### Janus-QL Unified Execution
 Janus-QL compiles the historical and live stream elements into a single execution graph. The historical sub-query is executed once, and its results are materialized as internal static bindings. As live events stream into the engine, they are joined inline with the static bindings within the same process. No serialization or IPC boundaries are crossed to merge live stream and historical data.
 
-#### Decomposed Baseline
-The decomposed baseline, labeled "Oxigraph historical + Janus live window processor + external join", coordinates execution across separate stages:
+#### Decomposed Oxigraph Baseline
+The Decomposed Oxigraph Baseline coordinates execution across separate stages:
 1. Oxigraph historical query: An external Oxigraph engine queries the historical dataset to retrieve the baseline bindings. These are returned and materialized into memory in the client coordinate space.
 2. Janus live window processor: A separate instance of the Janus live processing engine executes a live-only RSP-QL query over the live events stream.
 3. External join/materialization: The client coordinate space collects the intermediate live window results and performs an external hash join against the materialized historical bindings on the matching sensor variable.
@@ -175,17 +175,17 @@ Each run emits `result_hash`, computed as a deterministic SHA-256 hash over cano
 - normalized string values
 - canonical rows serialized before hashing
 
-For H1.1:
+For the Hybrid Coordination Benchmark:
 
 - `janus_unified` is compared against `decomposed_oxigraph` for the same run workload
 - `equivalent_to_baseline` is set on the Janus row
-- the decomposed baseline row uses `equivalent_to_baseline: null`
+- the Decomposed Oxigraph Baseline row uses `equivalent_to_baseline: null`
 
-For H2:
+For the Historical Scaling Benchmark:
 
-- no baseline equivalence field is emitted because H2 is a scaling study across query classes, not a paired-system comparison
+- no baseline equivalence field is emitted because the Historical Scaling Benchmark is a scaling study across query classes, not a paired-system comparison
 
-## H1.1 Command
+## Hybrid Coordination Benchmark Command
 
 ```bash
 cargo run --release --bin paper_hybrid_coordination -- \
@@ -201,11 +201,11 @@ Outputs:
 - `paper_hybrid_coordination.raw.jsonl`
 - `paper_hybrid_coordination.summary.csv`
 
-## H1.2 Sustained Hybrid Window Execution
+## Sustained Hybrid Window Execution
 
-The H1.2 benchmark evaluates sustained hybrid query execution performance over repeated sliding windows. It supports both deterministic virtual event-time replay and slower wall-clock replay.
+The sustained hybrid benchmark evaluates hybrid query execution performance over repeated sliding windows. It supports both deterministic virtual event-time replay and slower wall-clock replay.
 
-While H1.1 focuses on the latency of registering and obtaining the very first hybrid query result (coordination overhead check), H1.2 models a continuous stream processor running over a logical stream duration (by default 180 or 240 logical seconds).
+While the Hybrid Coordination Benchmark focuses on the latency of registering and obtaining the very first hybrid query result, the sustained hybrid benchmark models a continuous stream processor running over a logical stream duration (by default 180 or 240 logical seconds).
 
 ### Execution Semantics
 
@@ -213,7 +213,7 @@ While H1.1 focuses on the latency of registering and obtaining the very first hy
 - Wall-Clock Replay (`--time-mode wall-clock`): Events are published according to real elapsed time. `event_rate_hz` determines the target spacing between events, so `event_rate_hz=4` means one event every 250 ms. Event timestamps still follow the logical schedule; only the publication timing changes. This mode is intended as a realism and sanity check for user-observed result timing, not as the main repeated performance matrix.
 - Watermark/Flush Behavior: To reliably finalize and evaluate the final window, a watermark sentinel event is published at the end of the stream (offset by +20 seconds past the logical duration bounds), forcing all remaining active windows to close and emit their results.
 - Wall-Clock Sentinel Timing: In wall-clock mode, the harness schedules normal events against a monotonic `Instant` and sends the sentinel only after the logical live duration has elapsed. This keeps replay duration approximately aligned with `logical_live_duration_seconds * 1000`, plus processing and synchronization overhead.
-- Decomposed Baseline coordination: For each completed window, the decomposed baseline performs:
+- Decomposed Oxigraph Baseline coordination: For each completed window, the Decomposed Oxigraph Baseline performs:
   1. Oxigraph historical retrieval (once).
   2. Janus live window processor execution (returns a live stream result for each slide).
   3. Client coordinate join (combining the window's live result and the materialized historical bindings).
@@ -221,7 +221,7 @@ While H1.1 focuses on the latency of registering and obtaining the very first hy
 
 ### Latency Interpretation
 
-- Processing latency: CPU/runtime cost after data and window readiness. In H1.2 this remains `first_hybrid_result_latency_ms` and the per-window hybrid latency fields.
+- Processing latency: CPU/runtime cost after data and window readiness. In the sustained hybrid benchmark this remains `first_hybrid_result_latency_ms` and the per-window hybrid latency fields.
 - Wall-clock result offset: When a user would actually observe a result since replay start. In wall-clock mode this is reported via `first_hybrid_result_wall_clock_ms` and per-window `window_result_wall_clock_offsets_ms`, with paper-facing summaries using the in-horizon p50/p95 offset fields.
 
 Virtual mode is still the recommended mode for final repeated measurements because it is fast, deterministic, and isolates engine/runtime overhead. Wall-clock mode is slower and more sensitive to OS scheduling jitter, so use it as a realism/sanity benchmark.
@@ -238,7 +238,7 @@ For logical_live_duration_seconds=240, window_size_seconds=120, and window_slide
   - flush_windows: The count of windows finalized only by the sentinel flush (2).
 - Latency, equivalence, result count, and transfer byte statistics are computed exclusively over completed_windows_in_horizon.
 
-## H1.2 Command
+## Sustained Hybrid Window Command
 
 ```bash
 cargo run --release --bin paper_sustained_hybrid -- \
@@ -272,7 +272,7 @@ cargo run --release --bin paper_sustained_hybrid -- \
   --mode warm \
   --time-mode wall-clock \
   --debug-equivalence \
-  --output-dir target/paper_benchmarks/pre_final_h1_2_wall_clock_short
+  --output-dir target/paper_benchmarks/validation_sustained_hybrid_wall_clock_short
 ```
 
 Optional longer paper sanity check:
@@ -289,10 +289,10 @@ cargo run --release --bin paper_sustained_hybrid -- \
   --mode warm \
   --time-mode wall-clock \
   --debug-equivalence \
-  --output-dir target/paper_benchmarks/h1_2_wall_clock_180s_4hz
+  --output-dir target/paper_benchmarks/paper_sustained_hybrid_wall_clock_180s_4hz
 ```
 
-## H2 Command
+## Historical Scaling Benchmark Command
 
 ```bash
 cargo run --release --bin paper_historical_scaling -- \
@@ -308,7 +308,7 @@ Outputs:
 - `paper_historical_scaling.summary.csv`
 - `paper_historical_scaling.fit.csv`
 
-## H2 Scaling Fit
+## Historical Scaling Fit
 
 For each `query_type`, the harness computes a simple linear model:
 
@@ -416,11 +416,11 @@ Note:
 ```bash
 cargo run --release --bin paper_hybrid_coordination -- \
   --warmup-runs 1 --runs 10 --historical-events 10000 --live-events 32 --mode warm \
-  --output-dir target/paper_benchmarks/paper_h1_final
+  --output-dir target/paper_benchmarks/paper_hybrid_coordination
 
 cargo run --release --bin paper_historical_scaling -- \
   --warmup-runs 1 --runs 5 --dataset-sizes 100000,500000,1000000,5000000 --mode warm \
-  --output-dir target/paper_benchmarks/paper_h2_final
+  --output-dir target/paper_benchmarks/paper_historical_scaling
 ```
 
 For final numbers:
