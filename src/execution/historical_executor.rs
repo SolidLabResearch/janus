@@ -102,6 +102,42 @@ impl HistoricalExecutor {
         self.execute_sparql_on_events(&events, sparql_query)
     }
 
+    /// Execute one historical subquery over one or more historical windows by loading each
+    /// window into a synthetic named graph keyed by the JanusQL window name.
+    pub fn execute_materialized_historical_subquery(
+        &self,
+        windows: &[&WindowDefinition],
+        sparql_query: &str,
+        evaluation_time: u64,
+    ) -> Result<Vec<HashMap<String, String>>, JanusApiError> {
+        let mut quads = Vec::new();
+        let mut timestamps = Vec::new();
+
+        for window in windows {
+            let (start, end) =
+                window.resolve_historical_bounds(evaluation_time).ok_or_else(|| {
+                    JanusApiError::ExecutionError(format!(
+                        "Failed to resolve historical bounds for window '{}'",
+                        window.window_name
+                    ))
+                })?;
+            let events = self.storage.query(start, end).map_err(|e| {
+                JanusApiError::StorageError(format!("Failed to query storage: {}", e))
+            })?;
+            timestamps.extend(events.iter().map(|event| event.timestamp));
+            let rdf_events = self.decode_events(&events)?;
+            quads.extend(
+                self.rdf_events_to_quads_for_window_graph(&rdf_events, &window.window_name)?,
+            );
+        }
+
+        let max_timestamp = timestamps.into_iter().max().unwrap_or(evaluation_time);
+        let container = self.build_quad_container_from_quads(quads, max_timestamp)?;
+        self.sparql_engine
+            .execute_query_bindings(sparql_query, &container)
+            .map_err(|e| JanusApiError::ExecutionError(format!("SPARQL execution failed: {}", e)))
+    }
+
     /// Execute a sliding window query that returns an iterator of results.
     ///
     /// # Arguments
@@ -286,6 +322,28 @@ impl HistoricalExecutor {
         Ok(quads)
     }
 
+    fn rdf_events_to_quads_for_window_graph(
+        &self,
+        rdf_events: &[RDFEvent],
+        window_graph: &str,
+    ) -> Result<Vec<Quad>, JanusApiError> {
+        let mut quads = Vec::with_capacity(rdf_events.len());
+        let graph_node = NamedNode::new(window_graph).map_err(|e| {
+            JanusApiError::ExecutionError(format!(
+                "Invalid synthetic historical window graph '{}': {}",
+                window_graph, e
+            ))
+        })?;
+
+        for rdf_event in rdf_events {
+            let mut quad = self.rdf_event_to_quad(rdf_event)?;
+            quad.graph_name = GraphName::NamedNode(graph_node.clone());
+            quads.push(quad);
+        }
+
+        Ok(quads)
+    }
+
     /// Converts a single RDFEvent to an Oxigraph Quad.
     ///
     /// # URI Handling
@@ -383,6 +441,15 @@ impl HistoricalExecutor {
         let quad_set: HashSet<Quad> = quads.into_iter().collect();
 
         // Create QuadContainer with the timestamp
+        Ok(QuadContainer::new(quad_set, max_timestamp.try_into().unwrap_or(0)))
+    }
+
+    fn build_quad_container_from_quads(
+        &self,
+        quads: Vec<Quad>,
+        max_timestamp: u64,
+    ) -> Result<QuadContainer, JanusApiError> {
+        let quad_set: HashSet<Quad> = quads.into_iter().collect();
         Ok(QuadContainer::new(quad_set, max_timestamp.try_into().unwrap_or(0)))
     }
 

@@ -4,8 +4,8 @@
 //! R2S operators, and query generation.
 
 use janus::parsing::janusql_parser::{
-    BaselineBootstrapMode, GraphTermTemplate, HistoricalWindowSpec, JanusQLParser, SourceKind,
-    WindowSpec,
+    BaselineBootstrapMode, GraphTermTemplate, HistoricalWindowSpec, JanusQLParser,
+    LogicalSubqueryPlan, PhysicalSubqueryPlan, SourceKind, SubqueryExecutionMode, WindowSpec,
 };
 
 #[test]
@@ -519,6 +519,227 @@ fn generated_baseline_query_wraps_where_body_in_log_graph() {
     assert!(generated.sparql_query.contains("GRAPH ?__janus_log_graph"));
     assert!(generated.sparql_query.contains("?sensor ex:hasValue ?value ."));
     assert!(generated.sparql_query.contains("GROUP BY ?sensor"));
+}
+
+#[test]
+fn nested_historical_subquery_is_lowered_to_historical_materialization() {
+    let parser = JanusQLParser::new().unwrap();
+    let query = r#"
+        PREFIX : <http://example.org/>
+        FROM NAMED WINDOW :liveMinute ON STREAM :stream [RANGE 60000 STEP 1000]
+        FROM NAMED WINDOW :historyDay ON LOG :stream [START 0 END 86400000]
+        REGISTER RStream :output AS
+        SELECT ?sensor
+               (AVG(?liveValue) AS ?minuteAvgValue)
+               ?dayAvgValue
+        WHERE {
+          WINDOW :liveMinute {
+            ?sensor :hasValue ?liveValue .
+          }
+          {
+            SELECT ?sensor (AVG(?histValue) AS ?dayAvgValue)
+            WHERE {
+              WINDOW :historyDay {
+                ?sensor :hasValue ?histValue .
+              }
+            }
+            GROUP BY ?sensor
+            HAVING(AVG(?histValue) > 0)
+          }
+        }
+        GROUP BY ?sensor ?dayAvgValue
+    "#;
+
+    let parsed = parser.parse(query).unwrap();
+    assert_eq!(parsed.historical_materialized_subqueries.len(), 1);
+    assert_eq!(parsed.planned_subqueries.len(), 1);
+    assert_eq!(parsed.ast.nested_subqueries.len(), 1);
+    assert_eq!(parsed.ast.baseline_definitions.len(), 1);
+    assert_eq!(parsed.ast.baseline_uses.len(), 1);
+    assert_eq!(parsed.generated_baseline_queries.len(), 1);
+    assert_eq!(parsed.planning_statistics.historical_materialized_subqueries, 1);
+    assert_eq!(parsed.planning_statistics.live_subqueries, 0);
+    assert_eq!(parsed.planning_statistics.live_historical_joins, 0);
+
+    let planned = &parsed.planned_subqueries[0];
+    assert_eq!(planned.execution_mode, SubqueryExecutionMode::HistoricalMaterializedOnce);
+    assert_eq!(planned.physical_plan, PhysicalSubqueryPlan::MaterializeHistoricalResult);
+    assert!(matches!(
+        &planned.logical_plan,
+        LogicalSubqueryPlan::HistoricalMaterialized { windows } if windows.len() == 1
+    ));
+    assert_eq!(parsed.subquery_planning_diagnostics.len(), 1);
+    let diag = &parsed.subquery_planning_diagnostics[0];
+    assert!(diag.summary.contains("Nested subquery #0"));
+    assert!(diag.summary.contains("Execution mode: HistoricalMaterializedOnce"));
+    assert!(diag.summary.contains("Logical plan:"));
+    assert!(diag.summary.contains("Physical plan:"));
+
+    let baseline = &parsed.ast.baseline_definitions[0];
+    assert_eq!(baseline.source_window, "http://example.org/historyDay");
+    assert_eq!(baseline.output_variables, vec!["?sensor", "?dayAvgValue"]);
+    assert_eq!(baseline.having_clause.as_deref(), Some("HAVING(AVG(?histValue) > 0)"));
+    assert_eq!(baseline.source_windows, vec!["http://example.org/historyDay".to_string()]);
+    assert!(baseline.name.contains("__hist_mat_subquery_0"));
+    assert!(parsed
+        .where_clause
+        .contains("GRAPH <https://janus.rs/materialized-history/__hist_mat_subquery_0>"));
+    assert!(parsed.generated_baseline_queries[0].sparql_query.contains("AVG(?histValue)"));
+    assert!(parsed.generated_baseline_queries[0].sparql_query.contains("GRAPH :historyDay"));
+    assert!(parsed.generated_baseline_queries[0]
+        .sparql_query
+        .contains("HAVING(AVG(?histValue) > 0)"));
+}
+
+#[test]
+fn nested_historical_subquery_must_reference_historical_log_window() {
+    let parser = JanusQLParser::new().unwrap();
+    let query = r#"
+        PREFIX : <http://example.org/>
+        FROM NAMED WINDOW :liveMinute ON STREAM :stream [RANGE 60000 STEP 1000]
+        REGISTER RStream :output AS
+        SELECT ?sensor
+        WHERE {
+          WINDOW :liveMinute {
+            ?sensor :hasValue ?liveValue .
+          }
+          {
+            SELECT ?sensor (AVG(?liveValue) AS ?minuteAvgValue)
+            WHERE {
+              WINDOW :liveMinute {
+                ?sensor :hasValue ?liveValue .
+              }
+            }
+            GROUP BY ?sensor
+          }
+        }
+    "#;
+
+    let err = parser.parse(query).unwrap_err().to_string();
+    assert!(err.contains("Live-only nested subqueries require LiveSubquery planning"));
+}
+
+#[test]
+fn nested_historical_subquery_supports_multiple_historical_windows() {
+    let parser = JanusQLParser::new().unwrap();
+    let query = r#"
+        PREFIX : <http://example.org/>
+        FROM NAMED WINDOW :liveMinute ON STREAM :stream [RANGE 60000 STEP 1000]
+        FROM NAMED WINDOW :historyDay ON LOG :stream [START 0 END 86400000]
+        FROM NAMED WINDOW :historyWeek ON LOG :stream [START 0 END 604800000]
+        REGISTER RStream :output AS
+        SELECT ?sensor ?dayAvgValue
+        WHERE {
+          WINDOW :liveMinute {
+            ?sensor :hasValue ?liveValue .
+          }
+          {
+            SELECT ?sensor (AVG(?histValue) AS ?dayAvgValue)
+            WHERE {
+              WINDOW :historyDay {
+                ?sensor :hasValue ?histValue .
+              }
+              WINDOW :historyWeek {
+                ?sensor :hasValue ?histValue .
+              }
+            }
+            GROUP BY ?sensor
+          }
+        }
+    "#;
+
+    let parsed = parser.parse(query).unwrap();
+    assert_eq!(parsed.historical_materialized_subqueries.len(), 1);
+    assert_eq!(parsed.planning_statistics.historical_materialized_subqueries, 1);
+    let materialized = &parsed.historical_materialized_subqueries[0];
+    assert_eq!(materialized.execution_mode, SubqueryExecutionMode::HistoricalMaterializedOnce);
+    assert_eq!(materialized.dependencies.historical_windows.len(), 2);
+    assert_eq!(
+        parsed.planned_subqueries[0].physical_plan,
+        PhysicalSubqueryPlan::MaterializeHistoricalResult
+    );
+    assert_eq!(parsed.ast.baseline_definitions.len(), 1);
+    let definition = &parsed.ast.baseline_definitions[0];
+    assert_eq!(definition.source_windows.len(), 2);
+    assert!(definition.source_windows.contains(&"http://example.org/historyDay".to_string()));
+    assert!(definition
+        .source_windows
+        .contains(&"http://example.org/historyWeek".to_string()));
+    assert!(parsed.generated_baseline_queries[0].sparql_query.contains("GRAPH :historyDay"));
+    assert!(parsed.generated_baseline_queries[0].sparql_query.contains("GRAPH :historyWeek"));
+}
+
+#[test]
+fn mixed_live_historical_nested_subquery_is_rejected_cleanly() {
+    let parser = JanusQLParser::new().unwrap();
+    let query = r#"
+        PREFIX : <http://example.org/>
+        FROM NAMED WINDOW :liveMinute ON STREAM :stream [RANGE 60000 STEP 1000]
+        FROM NAMED WINDOW :historyDay ON LOG :stream [START 0 END 86400000]
+        REGISTER RStream :output AS
+        SELECT ?sensor ?liveValue ?histAvg
+        WHERE {
+          {
+            SELECT ?sensor ?liveValue (AVG(?histValue) AS ?histAvg)
+            WHERE {
+              WINDOW :liveMinute {
+                ?sensor :hasValue ?liveValue .
+              }
+              WINDOW :historyDay {
+                ?sensor :hasValue ?histValue .
+              }
+            }
+            GROUP BY ?sensor ?liveValue
+          }
+        }
+    "#;
+
+    let err = parser.parse(query).unwrap_err().to_string();
+    assert!(err.contains("LiveHistoricalJoin planning"));
+}
+
+#[test]
+fn nested_subquery_without_window_reference_is_rejected_cleanly() {
+    let parser = JanusQLParser::new().unwrap();
+    let query = r#"
+        PREFIX : <http://example.org/>
+        REGISTER RStream :output AS
+        SELECT ?sensor
+        WHERE {
+          {
+            SELECT ?sensor
+            WHERE {
+              ?sensor :hasValue ?histValue .
+            }
+          }
+        }
+    "#;
+
+    let err = parser.parse(query).unwrap_err().to_string();
+    assert!(err.contains("must reference at least one known WINDOW block"));
+}
+
+#[test]
+fn unknown_window_reference_in_nested_subquery_is_rejected_cleanly() {
+    let parser = JanusQLParser::new().unwrap();
+    let query = r#"
+        PREFIX : <http://example.org/>
+        REGISTER RStream :output AS
+        SELECT ?sensor
+        WHERE {
+          {
+            SELECT ?sensor
+            WHERE {
+              WINDOW :missing {
+                ?sensor :hasValue ?histValue .
+              }
+            }
+          }
+        }
+    "#;
+
+    let err = parser.parse(query).unwrap_err().to_string();
+    assert!(err.contains("references unknown window"));
 }
 
 #[test]

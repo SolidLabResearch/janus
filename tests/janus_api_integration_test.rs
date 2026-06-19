@@ -836,3 +836,70 @@ GROUP BY ?sensor
     };
     assert!(err.to_string().contains("requires a matching GRAPH reference"));
 }
+
+#[test]
+fn test_nested_historical_subquery_starts_via_historical_materialization_lowering() {
+    let storage = create_test_storage_with_data().expect("Failed to create storage");
+    let parser = JanusQLParser::new().expect("Failed to create parser");
+    let registry = Arc::new(QueryRegistry::new());
+    let api = JanusApi::new(parser, registry, storage).expect("Failed to create API");
+
+    let janusql = r#"
+PREFIX ex: <http://example.org/>
+
+FROM NAMED WINDOW ex:liveMinute ON STREAM ex:stream [RANGE 60000 STEP 1000]
+FROM NAMED WINDOW ex:historyDay ON LOG ex:stream [START 0 END 86400000]
+
+REGISTER RStream ex:output AS
+SELECT ?sensor
+       (AVG(?value) AS ?minuteAvgValue)
+       ?dayAvgValue
+WHERE {
+  WINDOW ex:liveMinute {
+    ?sensor ex:temperature ?value .
+  }
+  {
+    SELECT ?sensor
+           (AVG(?histValue) AS ?dayAvgValue)
+    WHERE {
+      WINDOW ex:historyDay {
+        ?sensor ex:temperature ?histValue .
+      }
+    }
+    GROUP BY ?sensor
+  }
+}
+GROUP BY ?sensor ?dayAvgValue
+    "#;
+
+    let metadata = api
+        .register_query("historical_materialization_e2e".into(), janusql)
+        .expect("Failed to register query");
+
+    assert_eq!(metadata.parsed.historical_materialized_subqueries.len(), 1);
+    assert_eq!(metadata.parsed.planned_subqueries.len(), 1);
+    assert_eq!(metadata.parsed.ast.baseline_definitions.len(), 1);
+    assert_eq!(metadata.parsed.ast.baseline_uses.len(), 1);
+    assert_eq!(metadata.parsed.planning_statistics.historical_materialized_subqueries, 1);
+    assert!(metadata
+        .parsed
+        .where_clause
+        .contains("materialized-history/__hist_mat_subquery_0"));
+
+    let _handle = api
+        .start_query(&"historical_materialization_e2e".into())
+        .expect("historical materialization live query should start");
+
+    let bindings = api
+        .get_query_defined_baseline_bindings(&"historical_materialization_e2e".into())
+        .expect("historical materialization bindings should be available after start");
+    assert_eq!(bindings.len(), 1);
+    assert!(bindings
+        .keys()
+        .next()
+        .is_some_and(|name| name.contains("__hist_mat_subquery_0")));
+    assert_eq!(
+        api.get_query_status(&"historical_materialization_e2e".into()),
+        Some(ExecutionStatus::Running)
+    );
+}

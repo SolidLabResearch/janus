@@ -2,8 +2,8 @@ use crate::{
     core::RDFEvent,
     execution::{HistoricalExecutor, ResultConverter},
     parsing::janusql_parser::{
-        BaselineDefinition, BaselineGraphTemplate, GraphTermTemplate, JanusQLParser,
-        ParsedJanusQuery, TripleTemplate, WindowType,
+        BaselineDefinition, BaselineGraphTemplate, GraphTermTemplate,
+        HistoricalMaterializationKind, JanusQLParser, ParsedJanusQuery, TripleTemplate, WindowType,
     },
     querying::oxigraph_adapter::OxigraphAdapter,
     registry::{
@@ -691,12 +691,19 @@ fn initialize_fixed_query_defined_baselines(
     latest_rows: &Arc<RwLock<HashMap<String, Vec<HashMap<String, String>>>>>,
 ) -> Result<(), JanusApiError> {
     for definition in &parsed.ast.baseline_definitions {
-        let source_window = find_baseline_source_window(parsed, definition)?;
-        if source_window.window_type != WindowType::HistoricalFixed {
+        let source_windows = find_baseline_source_windows(parsed, definition)?;
+        if source_windows
+            .iter()
+            .any(|source_window| source_window.window_type != WindowType::HistoricalFixed)
+        {
             continue;
         }
 
-        let evaluation_time = source_window.end.unwrap_or_default();
+        let evaluation_time = source_windows
+            .iter()
+            .filter_map(|source_window| source_window.end)
+            .max()
+            .unwrap_or_default();
         let snapshot = load_or_compute_baseline_snapshot(
             storage,
             parsed,
@@ -786,7 +793,7 @@ fn load_or_compute_baseline_snapshot(
     evaluation_time: u64,
     baseline_registry: &Arc<BaselineRegistry>,
 ) -> Result<BaselineSnapshot, JanusApiError> {
-    let source_window = find_baseline_source_window(parsed, definition)?;
+    let source_windows = find_baseline_source_windows(parsed, definition)?;
     let generated_query = parsed
         .generated_baseline_queries
         .iter()
@@ -798,37 +805,63 @@ fn load_or_compute_baseline_snapshot(
             ))
         })?;
 
-    let resolved_valid_at = match source_window.window_type {
-        WindowType::HistoricalFixed => source_window.end.unwrap_or(evaluation_time),
-        WindowType::HistoricalSliding => evaluation_time,
-        WindowType::Live => {
-            return Err(JanusApiError::ExecutionError(format!(
-                "Baseline '{}' cannot use live window '{}'",
-                definition.name, source_window.window_name
-            )))
-        }
+    let resolved_valid_at = if source_windows
+        .iter()
+        .all(|source_window| source_window.window_type == WindowType::HistoricalFixed)
+    {
+        source_windows
+            .iter()
+            .filter_map(|source_window| source_window.end)
+            .max()
+            .unwrap_or(evaluation_time)
+    } else if source_windows
+        .iter()
+        .all(|source_window| source_window.window_type == WindowType::HistoricalSliding)
+    {
+        evaluation_time
+    } else {
+        return Err(JanusApiError::ExecutionError(format!(
+            "Historical materialization '{}' cannot mix fixed and sliding historical windows",
+            definition.name
+        )));
     };
 
     if let Some(snapshot) = baseline_registry.get_snapshot(&definition.name, resolved_valid_at) {
         return Ok(snapshot);
     }
-    if source_window.window_type == WindowType::HistoricalFixed {
+    if source_windows
+        .iter()
+        .all(|source_window| source_window.window_type == WindowType::HistoricalFixed)
+    {
         if let Some(snapshot) = baseline_registry.get_latest_snapshot(&definition.name) {
             return Ok(snapshot);
         }
     }
 
-    let (window_start, window_end) =
-        source_window.resolve_historical_bounds(evaluation_time).ok_or_else(|| {
-            JanusApiError::ExecutionError(format!(
-                "Failed to resolve historical bounds for baseline '{}' using window '{}'",
-                definition.name, source_window.window_name
-            ))
-        })?;
-
     let executor = HistoricalExecutor::new(Arc::clone(storage), OxigraphAdapter::new());
-    let rows =
-        executor.execute_window_bounds(window_start, window_end, &generated_query.sparql_query)?;
+    let rows = match definition.materialization_kind {
+        HistoricalMaterializationKind::ExplicitBaseline if source_windows.len() == 1 => {
+            let source_window = source_windows[0];
+            let (window_start, window_end) =
+                source_window.resolve_historical_bounds(evaluation_time).ok_or_else(|| {
+                    JanusApiError::ExecutionError(format!(
+                        "Failed to resolve historical bounds for baseline '{}' using window '{}'",
+                        definition.name, source_window.window_name
+                    ))
+                })?;
+            executor.execute_window_bounds(
+                window_start,
+                window_end,
+                &generated_query.sparql_query,
+            )?
+        }
+        _ => executor.execute_materialized_historical_subquery(
+            &source_windows,
+            &generated_query.sparql_query,
+            evaluation_time,
+        )?,
+    };
+    let (window_start, window_end) = aggregate_window_bounds(&source_windows, evaluation_time)?;
     let snapshot = BaselineSnapshot {
         baseline_id: definition.name.clone(),
         valid_at: resolved_valid_at,
@@ -842,20 +875,26 @@ fn load_or_compute_baseline_snapshot(
     Ok(snapshot)
 }
 
-fn find_baseline_source_window<'a>(
+fn find_baseline_source_windows<'a>(
     parsed: &'a ParsedJanusQuery,
     definition: &BaselineDefinition,
-) -> Result<&'a crate::parsing::janusql_parser::WindowDefinition, JanusApiError> {
-    parsed
-        .historical_windows
+) -> Result<Vec<&'a crate::parsing::janusql_parser::WindowDefinition>, JanusApiError> {
+    definition
+        .source_windows
         .iter()
-        .find(|window| window.window_name == definition.source_window)
-        .ok_or_else(|| {
-            JanusApiError::ExecutionError(format!(
-                "Missing historical source window '{}' for baseline '{}'",
-                definition.source_window, definition.name
-            ))
+        .map(|source_window_name| {
+            parsed
+                .historical_windows
+                .iter()
+                .find(|window| window.window_name == *source_window_name)
+                .ok_or_else(|| {
+                    JanusApiError::ExecutionError(format!(
+                        "Missing historical source window '{}' for materialization '{}'",
+                        source_window_name, definition.name
+                    ))
+                })
         })
+        .collect()
 }
 
 fn store_latest_baseline_rows(
@@ -865,6 +904,30 @@ fn store_latest_baseline_rows(
     if let Ok(mut stored) = latest_rows.write() {
         stored.insert(snapshot.baseline_id.clone(), snapshot.rows.clone());
     }
+}
+
+fn aggregate_window_bounds(
+    source_windows: &[&crate::parsing::janusql_parser::WindowDefinition],
+    evaluation_time: u64,
+) -> Result<(u64, u64), JanusApiError> {
+    let mut starts = Vec::new();
+    let mut ends = Vec::new();
+
+    for source_window in source_windows {
+        let (start, end) =
+            source_window.resolve_historical_bounds(evaluation_time).ok_or_else(|| {
+                JanusApiError::ExecutionError(format!(
+                    "Failed to resolve historical bounds for window '{}'",
+                    source_window.window_name
+                ))
+            })?;
+        starts.push(start);
+        ends.push(end);
+    }
+
+    let start = starts.into_iter().min().unwrap_or_default();
+    let end = ends.into_iter().max().unwrap_or_default();
+    Ok((start, end))
 }
 
 fn materialize_baseline_snapshot_as_quads(
@@ -894,20 +957,26 @@ fn collect_query_defined_baseline_bindings(
             return Ok(HashMap::new());
         }
 
-        let source_window = parsed
-            .historical_windows
+        let source_windows = generated
+            .source_windows
             .iter()
-            .find(|window| window.window_name == generated.source_window)
-            .ok_or_else(|| {
-                JanusApiError::ExecutionError(format!(
-                    "Missing historical source window '{}' for generated baseline '{}'",
-                    generated.source_window, generated.name
-                ))
-            })?;
+            .map(|source_window_name| {
+                parsed
+                    .historical_windows
+                    .iter()
+                    .find(|window| window.window_name == *source_window_name)
+                    .ok_or_else(|| {
+                        JanusApiError::ExecutionError(format!(
+                            "Missing historical source window '{}' for generated baseline '{}'",
+                            source_window_name, generated.name
+                        ))
+                    })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
 
         let bindings = execute_generated_baseline_query(
             &executor,
-            source_window,
+            &source_windows,
             &generated.sparql_query,
             shutdown_rx,
         )?;
@@ -931,10 +1000,33 @@ fn evaluate_and_materialize_query_defined_baselines(
 #[allow(dead_code)]
 fn execute_generated_baseline_query(
     executor: &HistoricalExecutor,
-    window: &crate::parsing::janusql_parser::WindowDefinition,
+    windows: &[&crate::parsing::janusql_parser::WindowDefinition],
     sparql_query: &str,
     shutdown_rx: &Receiver<()>,
 ) -> Result<Vec<HashMap<String, String>>, JanusApiError> {
+    if windows.is_empty() {
+        return Err(JanusApiError::ExecutionError(
+            "Generated historical materialization query requires at least one source window"
+                .to_string(),
+        ));
+    }
+
+    if windows.len() > 1 {
+        let evaluation_time =
+            windows.iter().filter_map(|window| window.end).max().unwrap_or_else(|| {
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis() as u64
+            });
+        return executor.execute_materialized_historical_subquery(
+            windows,
+            sparql_query,
+            evaluation_time,
+        );
+    }
+
+    let window = windows[0];
     match window.window_type {
         WindowType::HistoricalFixed => executor.execute_fixed_window(window, sparql_query),
         WindowType::HistoricalSliding => {
@@ -1246,21 +1338,23 @@ fn validate_query_defined_baseline_step_alignment(
     }
 
     for definition in &parsed.ast.baseline_definitions {
-        let Some(source_window) = parsed
-            .historical_windows
-            .iter()
-            .find(|window| window.window_name == definition.source_window)
-        else {
-            continue;
-        };
+        for source_window_name in &definition.source_windows {
+            let Some(source_window) = parsed
+                .historical_windows
+                .iter()
+                .find(|window| window.window_name == *source_window_name)
+            else {
+                continue;
+            };
 
-        if source_window.window_type == WindowType::HistoricalSliding
-            && source_window.slide != live_step
-        {
-            return Err(JanusApiError::ExecutionError(format!(
-                "Sliding historical baseline window '{}' STEP {} must match live STEP {}",
-                source_window.window_name, source_window.slide, live_step
-            )));
+            if source_window.window_type == WindowType::HistoricalSliding
+                && source_window.slide != live_step
+            {
+                return Err(JanusApiError::ExecutionError(format!(
+                    "Sliding historical baseline window '{}' STEP {} must match live STEP {}",
+                    source_window.window_name, source_window.slide, live_step
+                )));
+            }
         }
     }
 
@@ -1601,8 +1695,8 @@ mod tests {
         execution::ResultConverter,
         extensions::query_options::build_evaluator,
         parsing::janusql_parser::{
-            BaselineDefinition, BaselineGraphTemplate, GraphTermTemplate, JanusQLParser,
-            TripleTemplate,
+            BaselineDefinition, BaselineGraphTemplate, GraphTermTemplate,
+            HistoricalMaterializationKind, JanusQLParser, TripleTemplate,
         },
         registry::baseline_registry::{BaselineRegistry, BaselineSnapshot},
         storage::{segmented_storage::StreamingSegmentedStorage, util::StreamingConfig},
@@ -1619,6 +1713,19 @@ mod tests {
         thread,
         time::Duration,
     };
+    use tempfile::TempDir;
+
+    fn test_storage_config(prefix: &str) -> (TempDir, StreamingConfig) {
+        let temp_dir = tempfile::Builder::new()
+            .prefix(prefix)
+            .tempdir()
+            .expect("temporary test directory should be created");
+        let config = StreamingConfig {
+            segment_base_path: temp_dir.path().to_string_lossy().into_owned(),
+            ..StreamingConfig::default()
+        };
+        (temp_dir, config)
+    }
 
     #[test]
     fn test_parse_mqtt_uri_with_port() {
@@ -1678,11 +1785,14 @@ mod tests {
         let definition = BaselineDefinition {
             name: "http://example.org/dayBaseline".to_string(),
             source_window: "http://example.org/historyDay".to_string(),
+            source_windows: vec!["http://example.org/historyDay".to_string()],
             raw_query: String::new(),
             select_clause: "SELECT ?sensor (AVG(?value) AS ?dayAvgValue)".to_string(),
             where_clause: "WHERE { ?sensor <http://example.org/hasValue> ?value . }".to_string(),
             group_by_clause: Some("GROUP BY ?sensor".to_string()),
+            having_clause: None,
             output_variables: vec!["?sensor".to_string(), "?dayAvgValue".to_string()],
+            materialization_kind: HistoricalMaterializationKind::ExplicitBaseline,
         };
         let bindings = vec![HashMap::from([
             ("sensor".to_string(), "<http://example.org/s1>".to_string()),
@@ -1727,15 +1837,18 @@ mod tests {
         let definition = BaselineDefinition {
             name: "http://example.org/dayBaseline".to_string(),
             source_window: "http://example.org/historyDay".to_string(),
+            source_windows: vec!["http://example.org/historyDay".to_string()],
             raw_query: String::new(),
             select_clause: "SELECT ?sensor ?label ?note".to_string(),
             where_clause: "WHERE { ?sensor ?p ?o . }".to_string(),
             group_by_clause: None,
+            having_clause: None,
             output_variables: vec![
                 "?sensor".to_string(),
                 "?label".to_string(),
                 "?note".to_string(),
             ],
+            materialization_kind: HistoricalMaterializationKind::ExplicitBaseline,
         };
         let bindings = vec![HashMap::from([
             ("sensor".to_string(), "<http://example.org/s1>".to_string()),
@@ -1779,11 +1892,14 @@ mod tests {
         let definition = BaselineDefinition {
             name: "http://example.org/dayBaseline".to_string(),
             source_window: "http://example.org/historyDay".to_string(),
+            source_windows: vec!["http://example.org/historyDay".to_string()],
             raw_query: String::new(),
             select_clause: "SELECT ?sensor (AVG(?value) AS ?dayAvgValue)".to_string(),
             where_clause: "WHERE { ?sensor ?p ?value . }".to_string(),
             group_by_clause: None,
+            having_clause: None,
             output_variables: vec!["?sensor".to_string(), "?dayAvgValue".to_string()],
+            materialization_kind: HistoricalMaterializationKind::ExplicitBaseline,
         };
         let template = BaselineGraphTemplate {
             baseline_name: "http://example.org/dayBaseline".to_string(),
@@ -1817,11 +1933,14 @@ mod tests {
         let definition = BaselineDefinition {
             name: "http://example.org/dayBaseline".to_string(),
             source_window: "http://example.org/historyDay".to_string(),
+            source_windows: vec!["http://example.org/historyDay".to_string()],
             raw_query: String::new(),
             select_clause: "SELECT ?sensor (AVG(?value) AS ?dayAvgValue)".to_string(),
             where_clause: "WHERE { ?sensor ?p ?value . }".to_string(),
             group_by_clause: Some("GROUP BY ?sensor".to_string()),
+            having_clause: None,
             output_variables: vec!["?sensor".to_string(), "?dayAvgValue".to_string()],
+            materialization_kind: HistoricalMaterializationKind::ExplicitBaseline,
         };
         let template = BaselineGraphTemplate {
             baseline_name: "http://example.org/dayBaseline".to_string(),
@@ -1842,15 +1961,18 @@ mod tests {
         let definition = BaselineDefinition {
             name: "http://example.org/dayBaseline".to_string(),
             source_window: "http://example.org/historyDay".to_string(),
+            source_windows: vec!["http://example.org/historyDay".to_string()],
             raw_query: String::new(),
             select_clause: "SELECT ?sensor ?pred ?dayAvgValue".to_string(),
             where_clause: "WHERE { ?sensor ?pred ?dayAvgValue . }".to_string(),
             group_by_clause: None,
+            having_clause: None,
             output_variables: vec![
                 "?sensor".to_string(),
                 "?pred".to_string(),
                 "?dayAvgValue".to_string(),
             ],
+            materialization_kind: HistoricalMaterializationKind::ExplicitBaseline,
         };
         let template = BaselineGraphTemplate {
             baseline_name: "http://example.org/dayBaseline".to_string(),
@@ -1871,15 +1993,18 @@ mod tests {
         let definition = BaselineDefinition {
             name: "http://example.org/dayBaseline".to_string(),
             source_window: "http://example.org/historyDay".to_string(),
+            source_windows: vec!["http://example.org/historyDay".to_string()],
             raw_query: String::new(),
             select_clause: "SELECT ?sensor ?dayAvgValue ?dayCount".to_string(),
             where_clause: "WHERE { ?sensor ?p ?o . }".to_string(),
             group_by_clause: None,
+            having_clause: None,
             output_variables: vec![
                 "?sensor".to_string(),
                 "?dayAvgValue".to_string(),
                 "?dayCount".to_string(),
             ],
+            materialization_kind: HistoricalMaterializationKind::ExplicitBaseline,
         };
         let template = BaselineGraphTemplate {
             baseline_name: "http://example.org/dayBaseline".to_string(),
@@ -1930,11 +2055,14 @@ mod tests {
         let definition = BaselineDefinition {
             name: "http://example.org/dayBaseline".to_string(),
             source_window: "http://example.org/historyDay".to_string(),
+            source_windows: vec!["http://example.org/historyDay".to_string()],
             raw_query: String::new(),
             select_clause: "SELECT ?sensor ?dayAvgValue".to_string(),
             where_clause: "WHERE { ?sensor ?p ?o . }".to_string(),
             group_by_clause: None,
+            having_clause: None,
             output_variables: vec!["?sensor".to_string(), "?dayAvgValue".to_string()],
+            materialization_kind: HistoricalMaterializationKind::ExplicitBaseline,
         };
         let template = BaselineGraphTemplate {
             baseline_name: "http://example.org/dayBaseline".to_string(),
@@ -2095,16 +2223,7 @@ mod tests {
 
     #[test]
     fn test_query_defined_baselines_are_evaluated_over_historical_windows() {
-        let config = StreamingConfig {
-            segment_base_path: format!(
-                "./test_data/janus_api_query_defined_baselines_{}",
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_millis()
-            ),
-            ..StreamingConfig::default()
-        };
+        let (_temp_dir, config) = test_storage_config("janus_api_query_defined_baselines_");
         let storage =
             StreamingSegmentedStorage::new(config).expect("Failed to create segmented storage");
 
@@ -2190,11 +2309,14 @@ GROUP BY ?sensor
         let definition = BaselineDefinition {
             name: "http://example.org/dayBaseline".to_string(),
             source_window: "http://example.org/historyDay".to_string(),
+            source_windows: vec!["http://example.org/historyDay".to_string()],
             raw_query: String::new(),
             select_clause: "SELECT ?sensor (AVG(?value) AS ?dayAvgValue)".to_string(),
             where_clause: "WHERE { ?sensor :hasValue ?value . }".to_string(),
             group_by_clause: Some("GROUP BY ?sensor".to_string()),
+            having_clause: None,
             output_variables: vec!["?sensor".to_string(), "?dayAvgValue".to_string()],
+            materialization_kind: HistoricalMaterializationKind::ExplicitBaseline,
         };
         let template = BaselineGraphTemplate {
             baseline_name: "http://example.org/dayBaseline".to_string(),
@@ -2293,16 +2415,7 @@ WHERE {
 
     #[test]
     fn test_sliding_query_defined_baseline_snapshots_change_with_live_evaluation_time() {
-        let config = StreamingConfig {
-            segment_base_path: format!(
-                "./test_data/janus_api_sliding_baselines_{}",
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_millis()
-            ),
-            ..StreamingConfig::default()
-        };
+        let (_temp_dir, config) = test_storage_config("janus_api_sliding_baselines_");
         let storage = Arc::new(
             StreamingSegmentedStorage::new(config).expect("Failed to create segmented storage"),
         );
