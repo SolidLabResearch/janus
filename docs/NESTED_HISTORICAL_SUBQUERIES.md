@@ -1,6 +1,6 @@
 # Nested Historical Subqueries
 
-This document explains the current Janus-QL support for nested historical subqueries, the new planning pipeline, and the small benchmark used to compare them with explicit `DEFINE BASELINE`.
+This document explains the current Janus-QL support for historical materialized subqueries, the planning pipeline, and the small benchmark used to compare them with explicit `DEFINE BASELINE` syntax.
 
 ## What A Nested Historical Subquery Is
 
@@ -12,7 +12,7 @@ Current supported intent:
 - materialize the result into an internal named graph
 - rewrite the outer live query to join against that materialized result
 
-This is an internal planning feature. It is not a new end-user execution mode yet.
+This is a user-facing query shape whose runtime artifact is an internal materialized historical result. It is not a new end-user execution mode yet.
 
 ## Planning Pipeline
 
@@ -33,7 +33,7 @@ In implementation terms:
 2. Window dependency analysis classifies nested subquery window references as historical or live.
 3. The planner produces a `LogicalSubqueryPlan`.
 4. The planner maps that into a `PhysicalSubqueryPlan`.
-5. `MaterializeHistoricalResult` lowers the nested subquery into an internal baseline definition plus a rewritten graph join in the outer query.
+5. `MaterializeHistoricalResult` lowers the historical materialized subquery into a materialized historical result plus a rewritten graph join in the outer query.
 6. `JanusApi::start_query()` initializes the generated historical materialization and starts live execution.
 
 The main benefit is separation of concerns:
@@ -224,7 +224,7 @@ Nested historical subqueries are not exposed as named user baselines. They are:
 Key difference:
 
 - explicit `DEFINE BASELINE` lets the user name and reuse the baseline explicitly
-- nested historical subqueries keep the materialization internal to the planner and lowering path
+- historical materialized subqueries keep the materialization internal to the planner and lowering path
 
 ## Why Janus Uses Internal Historical Materialized Subqueries
 
@@ -239,8 +239,8 @@ Reasons:
 
 In short:
 
-- `DEFINE BASELINE` is a user-facing materialization feature
-- nested historical subqueries are a planner-owned lowering strategy
+- `DEFINE BASELINE` is the baseline syntax path
+- historical materialized subqueries are a planner-owned lowering strategy that materializes an internal historical result
 
 ## Future Placeholder
 

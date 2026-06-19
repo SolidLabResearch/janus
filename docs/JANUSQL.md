@@ -109,9 +109,10 @@ If the clause is absent, the HTTP/API registration-level `baseline_mode` is used
 
 ## Query-Defined Baselines
 
-Janus also supports query-defined baselines. They are evaluated over a historical `LOG` window and
-stored as named `SELECT`-result snapshots. During live evaluation, Janus resolves the snapshot
-that matches the current evaluation time and joins it into the live query.
+In Janus terminology, `baseline` refers to explicit `DEFINE BASELINE` / `USING BASELINE` syntax.
+Those query-defined baselines are evaluated over a historical `LOG` window and stored as named
+`SELECT`-result snapshots. During live evaluation, Janus resolves the snapshot that matches the
+current evaluation time and joins it into the live query.
 
 Canonical example:
 

@@ -2,12 +2,13 @@ use janus::parsing::janusql_parser::{SourceKind, WindowDefinition, WindowType};
 use janus::storage::segmented_storage::StreamingSegmentedStorage;
 use janus::storage::util::StreamingConfig;
 use janus::stream::operators::historical_sliding_window::HistoricalSlidingWindowOperator;
-use std::fs;
+use std::path::Path;
 use std::rc::Rc;
+use tempfile::TempDir;
 
-fn create_test_config(path: &str) -> StreamingConfig {
+fn create_test_config(path: &Path) -> StreamingConfig {
     StreamingConfig {
-        segment_base_path: path.to_string(),
+        segment_base_path: path.to_string_lossy().into_owned(),
         max_batch_events: 10,
         max_batch_bytes: 1024,
         max_batch_age_seconds: 1,
@@ -18,10 +19,8 @@ fn create_test_config(path: &str) -> StreamingConfig {
 
 #[test]
 fn test_historical_sliding_window_with_real_iris() {
-    let test_dir = "/tmp/janus_test_sliding_window_iris";
-    let _ = fs::remove_dir_all(test_dir);
-
-    let config = create_test_config(test_dir);
+    let temp_dir = TempDir::new().expect("failed to create temp dir");
+    let config = create_test_config(temp_dir.path());
     let storage = Rc::new(StreamingSegmentedStorage::new(config).unwrap());
 
     let now = std::time::SystemTime::now()
@@ -98,16 +97,12 @@ fn test_historical_sliding_window_with_real_iris() {
     // Window 3: [now-300, now-100]
     let w3 = operator.next().unwrap();
     assert!(w3.len() >= 2);
-
-    let _ = fs::remove_dir_all(test_dir);
 }
 
 #[test]
 fn test_historical_sliding_window_foaf_example() {
-    let test_dir = "/tmp/janus_test_sliding_window_foaf";
-    let _ = fs::remove_dir_all(test_dir);
-
-    let config = create_test_config(test_dir);
+    let temp_dir = TempDir::new().expect("failed to create temp dir");
+    let config = create_test_config(temp_dir.path());
     let storage = Rc::new(StreamingSegmentedStorage::new(config).unwrap());
 
     let now = std::time::SystemTime::now()
@@ -170,6 +165,4 @@ fn test_historical_sliding_window_foaf_example() {
     // Second window should have data
     let w2 = operator.next().unwrap();
     assert!(!w2.is_empty(), "Second window should contain events");
-
-    let _ = fs::remove_dir_all(test_dir);
 }

@@ -28,6 +28,7 @@ use janus::storage::indexing::sparse::{build_sparse_index, SparseReader};
 use std::fs::{self, File};
 use std::io::Write;
 use std::path::Path;
+use tempfile::TempDir;
 
 /// Simple log writer for test purposes (legacy indexing module was deleted)
 struct LogWriter {
@@ -198,11 +199,9 @@ fn test_dictionary_basic_operations() {
 
 #[test]
 fn test_dictionary_persistence() -> std::io::Result<()> {
-    let test_dir = "target/test_data/dict_persistence";
-    let _ = fs::remove_dir_all(test_dir);
-    fs::create_dir_all(test_dir)?;
+    let test_dir = TempDir::new()?;
 
-    let dict_path = Path::new(test_dir).join("test_dict.bin");
+    let dict_path = test_dir.path().join("test_dict.bin");
 
     // Create and populate dictionary
     let mut dict = Dictionary::new();

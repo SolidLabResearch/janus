@@ -11,17 +11,14 @@ use janus::storage::util::StreamingConfig;
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
+use tempfile::TempDir;
 
 /// Helper function to create a test storage with sample data
-fn create_test_storage_with_data() -> Result<Arc<StreamingSegmentedStorage>, std::io::Error> {
+fn create_test_storage_with_data(
+) -> Result<(TempDir, Arc<StreamingSegmentedStorage>), std::io::Error> {
+    let temp_dir = TempDir::new()?;
     let config = StreamingConfig {
-        segment_base_path: format!(
-            "./test_data/janus_api_test_{}",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_millis()
-        ),
+        segment_base_path: temp_dir.path().to_string_lossy().into_owned(),
         max_batch_events: 10, // Small batch to force frequent flushes
         max_batch_age_seconds: 1,
         max_batch_bytes: 1024,
@@ -45,7 +42,7 @@ fn create_test_storage_with_data() -> Result<Arc<StreamingSegmentedStorage>, std
 
     storage.flush()?;
 
-    Ok(Arc::new(storage))
+    Ok((temp_dir, Arc::new(storage)))
 }
 
 #[test]
@@ -127,7 +124,7 @@ fn test_start_query_not_registered() {
 
 #[test]
 fn test_historical_fixed_window_query() {
-    let storage = create_test_storage_with_data().expect("Failed to create storage");
+    let (_temp_dir, storage) = create_test_storage_with_data().expect("Failed to create storage");
     let parser = JanusQLParser::new().expect("Failed to create parser");
     let registry = Arc::new(QueryRegistry::new());
 
@@ -185,7 +182,7 @@ fn test_historical_fixed_window_query() {
 
 #[test]
 fn test_historical_sliding_window_query() {
-    let storage = create_test_storage_with_data().expect("Failed to create storage");
+    let (_temp_dir, storage) = create_test_storage_with_data().expect("Failed to create storage");
     let parser = JanusQLParser::new().expect("Failed to create parser");
     let registry = Arc::new(QueryRegistry::new());
 
@@ -225,14 +222,7 @@ fn test_historical_sliding_window_query() {
 
     println!("Total sliding window results: {}", results.len());
 
-    // Note: Historical queries may not return results if storage hasn't flushed yet
-    if results.is_empty() {
-        println!(
-            "WARNING: No sliding window results received - storage may not have flushed data yet"
-        );
-        println!("This test is expected to pass once storage flushing is more reliable");
-        return;
-    }
+    assert!(!results.is_empty(), "expected sliding window results after the storage warm-up");
 
     for result in &results {
         assert!(
@@ -397,7 +387,7 @@ fn test_execution_count_and_status_update_across_lifecycle() {
 
 #[test]
 fn test_multiple_queries_concurrent() {
-    let storage = create_test_storage_with_data().expect("Failed to create storage");
+    let (_temp_dir, storage) = create_test_storage_with_data().expect("Failed to create storage");
     let parser = JanusQLParser::new().expect("Failed to create parser");
     let registry = Arc::new(QueryRegistry::new());
 
@@ -443,7 +433,7 @@ fn test_multiple_queries_concurrent() {
 
 #[test]
 fn test_query_handle_receive() {
-    let storage = create_test_storage_with_data().expect("Failed to create storage");
+    let (_temp_dir, storage) = create_test_storage_with_data().expect("Failed to create storage");
     let parser = JanusQLParser::new().expect("Failed to create parser");
     let registry = Arc::new(QueryRegistry::new());
 
@@ -465,13 +455,13 @@ fn test_query_handle_receive() {
     thread::sleep(Duration::from_millis(100));
     let result = handle.try_receive();
 
-    // Should eventually get results or None
-    assert!(result.is_some() || result.is_none(), "try_receive should return Some or None");
+    // Non-blocking receive should simply return an option without panicking.
+    let _ = result;
 }
 
 #[test]
 fn test_only_historical_fixed_window() {
-    let storage = create_test_storage_with_data().expect("Failed to create storage");
+    let (_temp_dir, storage) = create_test_storage_with_data().expect("Failed to create storage");
     let parser = JanusQLParser::new().expect("Failed to create parser");
     let registry = Arc::new(QueryRegistry::new());
 
@@ -506,12 +496,11 @@ WHERE {
     assert_eq!(metadata.parsed.historical_windows.len(), 1);
     assert_eq!(metadata.parsed.live_windows.len(), 0);
 
-    // Parser should generate SPARQL for historical windows
-    if metadata.parsed.sparql_queries.is_empty() {
-        println!("WARNING: Parser did not generate SPARQL queries for historical windows");
-        println!("This may be a parser issue - skipping assertion");
-        return;
-    }
+    // Parser should generate SPARQL for historical windows.
+    assert!(
+        !metadata.parsed.sparql_queries.is_empty(),
+        "parser should generate SPARQL queries for historical windows"
+    );
 
     assert_eq!(metadata.parsed.sparql_queries.len(), 1);
 
@@ -575,7 +564,7 @@ WHERE {
 
 #[test]
 fn test_multiple_historical_windows() {
-    let storage = create_test_storage_with_data().expect("Failed to create storage");
+    let (_temp_dir, storage) = create_test_storage_with_data().expect("Failed to create storage");
     let parser = JanusQLParser::new().expect("Failed to create parser");
     let registry = Arc::new(QueryRegistry::new());
 
@@ -615,7 +604,7 @@ WHERE {
 
 #[test]
 fn test_historical_and_live_combined() {
-    let storage = create_test_storage_with_data().expect("Failed to create storage");
+    let (_temp_dir, storage) = create_test_storage_with_data().expect("Failed to create storage");
     let parser = JanusQLParser::new().expect("Failed to create parser");
     let registry = Arc::new(QueryRegistry::new());
 
@@ -744,7 +733,7 @@ HAVING(AVG(?value) > ?dayAvgValue)
 
 #[test]
 fn test_query_defined_baseline_live_query_starts_when_graph_is_present() {
-    let storage = create_test_storage_with_data().expect("Failed to create storage");
+    let (_temp_dir, storage) = create_test_storage_with_data().expect("Failed to create storage");
     let parser = JanusQLParser::new().expect("Failed to create parser");
     let registry = Arc::new(QueryRegistry::new());
     let api = JanusApi::new(parser, registry, storage).expect("Failed to create API");
@@ -796,7 +785,7 @@ GROUP BY ?sensor ?dayAvgValue
 
 #[test]
 fn test_query_defined_baseline_live_query_rejects_missing_graph_reference() {
-    let storage = create_test_storage_with_data().expect("Failed to create storage");
+    let (_temp_dir, storage) = create_test_storage_with_data().expect("Failed to create storage");
     let parser = JanusQLParser::new().expect("Failed to create parser");
     let registry = Arc::new(QueryRegistry::new());
     let api = JanusApi::new(parser, registry, storage).expect("Failed to create API");
@@ -839,7 +828,7 @@ GROUP BY ?sensor
 
 #[test]
 fn test_nested_historical_subquery_starts_via_historical_materialization_lowering() {
-    let storage = create_test_storage_with_data().expect("Failed to create storage");
+    let (_temp_dir, storage) = create_test_storage_with_data().expect("Failed to create storage");
     let parser = JanusQLParser::new().expect("Failed to create parser");
     let registry = Arc::new(QueryRegistry::new());
     let api = JanusApi::new(parser, registry, storage).expect("Failed to create API");

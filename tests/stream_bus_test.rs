@@ -13,29 +13,19 @@ use janus::storage::util::StreamingConfig;
 use janus::stream_bus::{BrokerType, StreamBus, StreamBusConfig};
 use std::fs::{self, File};
 use std::io::Write;
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
+use tempfile::TempDir;
 
-fn setup_test_environment(test_name: &str) -> std::io::Result<String> {
-    let test_dir = format!("test_data_stream_bus_{}", test_name);
-    let _ = fs::remove_dir_all(&test_dir);
-    fs::create_dir_all(&test_dir)?;
-    fs::create_dir_all(format!("{}/storage", &test_dir))?;
-    Ok(test_dir)
-}
-
-fn cleanup_test_environment(test_dir: &str) {
-    let _ = fs::remove_dir_all(test_dir);
-}
-
-fn create_test_storage(test_dir: &str) -> std::io::Result<Arc<StreamingSegmentedStorage>> {
+fn create_test_storage(storage_dir: &Path) -> std::io::Result<Arc<StreamingSegmentedStorage>> {
     let config = StreamingConfig {
         max_batch_events: 1000,
         max_batch_age_seconds: 1,
         max_batch_bytes: 1_000_000,
         sparse_interval: 100,
         entries_per_index_block: 10,
-        segment_base_path: format!("{}/storage", test_dir),
+        segment_base_path: storage_dir.to_string_lossy().into_owned(),
     };
 
     let mut storage = StreamingSegmentedStorage::new(config)?;
@@ -52,7 +42,9 @@ fn create_test_rdf_file(path: &str, content: &str) -> std::io::Result<()> {
 
 #[test]
 fn test_parse_ntriples_basic() {
-    let test_dir = setup_test_environment("parse_ntriples_basic").unwrap();
+    let test_dir = TempDir::new().expect("failed to create temp dir");
+    let storage_dir = test_dir.path().join("storage");
+    fs::create_dir_all(&storage_dir).expect("failed to create storage dir");
 
     let config = StreamBusConfig {
         input_file: "test.nt".to_string(),
@@ -64,25 +56,24 @@ fn test_parse_ntriples_basic() {
         mqtt_config: None,
     };
 
-    let storage = create_test_storage(&test_dir).unwrap();
+    let storage = create_test_storage(&storage_dir).unwrap();
     let _bus = StreamBus::new(config, storage);
 
     let line = "<http://example.org/sensor1> <http://example.org/temperature> \"23.5\" <http://example.org/graph1> .";
     let event = rdf_parser::parse_rdf_line(line, true);
 
-    assert!(event.is_ok());
-    let event = event.unwrap();
+    let event = event.expect("expected RDF parsing to succeed");
     assert_eq!(event.subject, "http://example.org/sensor1");
     assert_eq!(event.predicate, "http://example.org/temperature");
     assert_eq!(event.object, "23.5");
     assert_eq!(event.graph, "http://example.org/graph1");
-
-    cleanup_test_environment(&test_dir);
 }
 
 #[test]
 fn test_parse_ntriples_without_graph() {
-    let test_dir = setup_test_environment("parse_ntriples_without_graph").unwrap();
+    let test_dir = TempDir::new().expect("failed to create temp dir");
+    let storage_dir = test_dir.path().join("storage");
+    fs::create_dir_all(&storage_dir).expect("failed to create storage dir");
 
     let config = StreamBusConfig {
         input_file: "test.nt".to_string(),
@@ -94,25 +85,24 @@ fn test_parse_ntriples_without_graph() {
         mqtt_config: None,
     };
 
-    let storage = create_test_storage(&test_dir).unwrap();
+    let storage = create_test_storage(&storage_dir).unwrap();
     let _bus = StreamBus::new(config, storage);
 
     let line = "<http://example.org/alice> <http://example.org/knows> <http://example.org/bob> .";
     let event = rdf_parser::parse_rdf_line(line, true);
 
-    assert!(event.is_ok());
-    let event = event.unwrap();
+    let event = event.expect("expected RDF parsing to succeed");
     assert_eq!(event.subject, "http://example.org/alice");
     assert_eq!(event.predicate, "http://example.org/knows");
     assert_eq!(event.object, "http://example.org/bob");
     assert_eq!(event.graph, "");
-
-    cleanup_test_environment(&test_dir);
 }
 
 #[test]
 fn test_parse_invalid_rdf_line() {
-    let test_dir = setup_test_environment("parse_invalid_rdf_line").unwrap();
+    let test_dir = TempDir::new().expect("failed to create temp dir");
+    let storage_dir = test_dir.path().join("storage");
+    fs::create_dir_all(&storage_dir).expect("failed to create storage dir");
 
     let config = StreamBusConfig {
         input_file: "test.nt".to_string(),
@@ -124,7 +114,7 @@ fn test_parse_invalid_rdf_line() {
         mqtt_config: None,
     };
 
-    let storage = create_test_storage(&test_dir).unwrap();
+    let storage = create_test_storage(&storage_dir).unwrap();
     let _bus = StreamBus::new(config, storage);
 
     let invalid_line = "<http://example.org/subject> <http://example.org/predicate>";
@@ -132,24 +122,24 @@ fn test_parse_invalid_rdf_line() {
 
     assert!(result.is_err());
     assert!(result.unwrap_err().contains("Invalid object format"));
-
-    cleanup_test_environment(&test_dir);
 }
 
 #[test]
 fn test_storage_only_mode() {
-    let test_dir = setup_test_environment("storage_only_mode").unwrap();
+    let test_dir = TempDir::new().expect("failed to create temp dir");
+    let storage_dir = test_dir.path().join("storage");
+    fs::create_dir_all(&storage_dir).expect("failed to create storage dir");
 
-    let test_file = format!("{}/test_storage.nq", &test_dir);
+    let test_file = test_dir.path().join("test_storage.nq");
     let rdf_data = r#"<http://example.org/sensor1> <http://example.org/temperature> "20.5" <http://example.org/graph1> .
 <http://example.org/sensor2> <http://example.org/temperature> "21.3" <http://example.org/graph1> .
 <http://example.org/sensor3> <http://example.org/temperature> "22.1" <http://example.org/graph1> .
 "#;
 
-    create_test_rdf_file(&test_file, rdf_data).unwrap();
+    create_test_rdf_file(&test_file.to_string_lossy(), rdf_data).unwrap();
 
     let config = StreamBusConfig {
-        input_file: test_file.clone(),
+        input_file: test_file.to_string_lossy().into_owned(),
         broker_type: BrokerType::None,
         topics: vec![],
         rate_of_publishing: 0,
@@ -158,7 +148,7 @@ fn test_storage_only_mode() {
         mqtt_config: None,
     };
 
-    let storage = create_test_storage(&test_dir).unwrap();
+    let storage = create_test_storage(&storage_dir).unwrap();
 
     let bus = StreamBus::new(config, Arc::clone(&storage));
     let metrics = bus.start().unwrap();
@@ -171,14 +161,15 @@ fn test_storage_only_mode() {
 
     let query_results = storage.query_rdf(0, u64::MAX).unwrap();
     assert_eq!(query_results.len(), 3);
-    cleanup_test_environment(&test_dir);
 }
 
 #[test]
 fn test_empty_lines_and_comments_skipped() {
-    let test_dir = setup_test_environment("empty_lines_comments").unwrap();
+    let test_dir = TempDir::new().expect("failed to create temp dir");
+    let storage_dir = test_dir.path().join("storage");
+    fs::create_dir_all(&storage_dir).expect("failed to create storage dir");
 
-    let test_file = format!("{}/test_comments.nq", &test_dir);
+    let test_file = test_dir.path().join("test_comments.nq");
     let rdf_data = r#"# This is a comment
 <http://example.org/sensor1> <http://example.org/temperature> "20.5" <http://example.org/graph1> .
 
@@ -187,10 +178,10 @@ fn test_empty_lines_and_comments_skipped() {
 
 "#;
 
-    create_test_rdf_file(&test_file, rdf_data).unwrap();
+    create_test_rdf_file(&test_file.to_string_lossy(), rdf_data).unwrap();
 
     let config = StreamBusConfig {
-        input_file: test_file.clone(),
+        input_file: test_file.to_string_lossy().into_owned(),
         broker_type: BrokerType::None,
         topics: vec![],
         rate_of_publishing: 0,
@@ -199,21 +190,21 @@ fn test_empty_lines_and_comments_skipped() {
         mqtt_config: None,
     };
 
-    let storage = create_test_storage(&test_dir).unwrap();
+    let storage = create_test_storage(&storage_dir).unwrap();
     let bus = StreamBus::new(config, Arc::clone(&storage));
     let metrics = bus.start().unwrap();
 
     assert_eq!(metrics.events_read, 2);
     assert_eq!(metrics.events_stored, 2);
-
-    cleanup_test_environment(&test_dir);
 }
 
 #[test]
 fn test_rate_limiting() {
-    let test_dir = setup_test_environment("rate_limiting").unwrap();
+    let test_dir = TempDir::new().expect("failed to create temp dir");
+    let storage_dir = test_dir.path().join("storage");
+    fs::create_dir_all(&storage_dir).expect("failed to create storage dir");
 
-    let test_file = format!("{}/test_rate.nq", &test_dir);
+    let test_file = test_dir.path().join("test_rate.nq");
     let mut rdf_data = String::new();
     for i in 0..20 {
         rdf_data.push_str(&format!(
@@ -222,10 +213,10 @@ fn test_rate_limiting() {
         ));
     }
 
-    create_test_rdf_file(&test_file, &rdf_data).unwrap();
+    create_test_rdf_file(&test_file.to_string_lossy(), &rdf_data).unwrap();
 
     let config = StreamBusConfig {
-        input_file: test_file.clone(),
+        input_file: test_file.to_string_lossy().into_owned(),
         broker_type: BrokerType::None,
         topics: vec![],
         rate_of_publishing: 100,
@@ -234,7 +225,7 @@ fn test_rate_limiting() {
         mqtt_config: None,
     };
 
-    let storage = create_test_storage(&test_dir).unwrap();
+    let storage = create_test_storage(&storage_dir).unwrap();
     let bus = StreamBus::new(config, Arc::clone(&storage));
 
     let start = std::time::Instant::now();
@@ -243,8 +234,6 @@ fn test_rate_limiting() {
 
     assert_eq!(metrics.events_read, 20);
     assert!(elapsed.as_millis() >= 150);
-
-    cleanup_test_environment(&test_dir);
 }
 
 #[test]
@@ -281,9 +270,11 @@ fn test_metrics_zero_events() {
 
 #[test]
 fn test_stop_signal() {
-    let test_dir = setup_test_environment("stop_signal").unwrap();
+    let test_dir = TempDir::new().expect("failed to create temp dir");
+    let storage_dir = test_dir.path().join("storage");
+    fs::create_dir_all(&storage_dir).expect("failed to create storage dir");
 
-    let test_file = format!("{}/test_stop.nq", &test_dir);
+    let test_file = test_dir.path().join("test_stop.nq");
     let mut rdf_data = String::new();
     for i in 0..1000 {
         rdf_data.push_str(&format!(
@@ -292,10 +283,10 @@ fn test_stop_signal() {
         ));
     }
 
-    create_test_rdf_file(&test_file, &rdf_data).unwrap();
+    create_test_rdf_file(&test_file.to_string_lossy(), &rdf_data).unwrap();
 
     let config = StreamBusConfig {
-        input_file: test_file.clone(),
+        input_file: test_file.to_string_lossy().into_owned(),
         broker_type: BrokerType::None,
         topics: vec![],
         rate_of_publishing: 50,
@@ -304,7 +295,7 @@ fn test_stop_signal() {
         mqtt_config: None,
     };
 
-    let storage = create_test_storage(&test_dir).unwrap();
+    let storage = create_test_storage(&storage_dir).unwrap();
     let bus = StreamBus::new(config, Arc::clone(&storage));
 
     let handle = bus.start_async();
@@ -316,23 +307,23 @@ fn test_stop_signal() {
 
     assert!(metrics.events_read < 1000);
     assert!(metrics.events_read > 0);
-
-    cleanup_test_environment(&test_dir);
 }
 
 #[test]
 fn test_file_loop_mode() {
-    let test_dir = setup_test_environment("file_loop_mode").unwrap();
+    let test_dir = TempDir::new().expect("failed to create temp dir");
+    let storage_dir = test_dir.path().join("storage");
+    fs::create_dir_all(&storage_dir).expect("failed to create storage dir");
 
-    let test_file = format!("{}/test_loop.nq", &test_dir);
+    let test_file = test_dir.path().join("test_loop.nq");
     let rdf_data = r#"<http://example.org/sensor1> <http://example.org/temperature> "20.5" <http://example.org/graph1> .
 <http://example.org/sensor2> <http://example.org/temperature> "21.3" <http://example.org/graph1> .
 "#;
 
-    create_test_rdf_file(&test_file, rdf_data).unwrap();
+    create_test_rdf_file(&test_file.to_string_lossy(), rdf_data).unwrap();
 
     let config = StreamBusConfig {
-        input_file: test_file.clone(),
+        input_file: test_file.to_string_lossy().into_owned(),
         broker_type: BrokerType::None,
         topics: vec![],
         rate_of_publishing: 100,
@@ -341,7 +332,7 @@ fn test_file_loop_mode() {
         mqtt_config: None,
     };
 
-    let storage = create_test_storage(&test_dir).unwrap();
+    let storage = create_test_storage(&storage_dir).unwrap();
     let bus = StreamBus::new(config, Arc::clone(&storage));
 
     let handle = bus.start_async();
@@ -352,13 +343,13 @@ fn test_file_loop_mode() {
     let metrics = handle.join().unwrap().unwrap();
 
     assert!(metrics.events_read > 2);
-
-    cleanup_test_environment(&test_dir);
 }
 
 #[test]
 fn test_timestamp_parsing() {
-    let test_dir = setup_test_environment("timestamp_parsing").unwrap();
+    let test_dir = TempDir::new().expect("failed to create temp dir");
+    let storage_dir = test_dir.path().join("storage");
+    fs::create_dir_all(&storage_dir).expect("failed to create storage dir");
 
     let config_with_timestamps = StreamBusConfig {
         input_file: "test.nq".to_string(),
@@ -370,7 +361,7 @@ fn test_timestamp_parsing() {
         mqtt_config: None,
     };
 
-    let storage = create_test_storage(&test_dir).unwrap();
+    let storage = create_test_storage(&storage_dir).unwrap();
     let _bus_with_ts = StreamBus::new(config_with_timestamps, Arc::clone(&storage));
 
     let line = "<http://example.org/sensor1> <http://example.org/temperature> \"23.5\" <http://example.org/graph1> .";
@@ -392,8 +383,6 @@ fn test_timestamp_parsing() {
     let line_with_ts = "1234567890 <http://example.org/sensor1> <http://example.org/ts> \"value\" <http://example.org/graph1> .";
     let event = rdf_parser::parse_rdf_line(line_with_ts, false).unwrap();
     assert_eq!(event.timestamp, 1234567890);
-
-    cleanup_test_environment(&test_dir);
 }
 
 #[test]
@@ -434,15 +423,17 @@ fn test_error_display() {
 
 #[test]
 fn test_malformed_rdf_lines_handling() {
-    let test_dir = setup_test_environment("malformed_rdf_lines").unwrap();
+    let test_dir = TempDir::new().expect("failed to create temp dir");
+    let storage_dir = test_dir.path().join("storage");
+    fs::create_dir_all(&storage_dir).expect("failed to create storage dir");
 
-    let test_file = format!("{}/test_malformed.nq", &test_dir);
+    let test_file = test_dir.path().join("test_malformed.nq");
     let rdf_data = "<http://example.org/sensor1> <http://example.org/temperature> \"20.5\" <http://example.org/graph1> .\nthis is not valid rdf\n<http://example.org/sensor2> <http://example.org/temperature> \"21.3\" <http://example.org/graph1> .\n<incomplete line\n<http://example.org/sensor3> <http://example.org/temperature> \"22.1\" <http://example.org/graph1> .\n<http://example.org/sensor4> <http://example.org/temperature> \"23.7\" <http://example.org/graph1> .";
 
-    create_test_rdf_file(&test_file, rdf_data).unwrap();
+    create_test_rdf_file(&test_file.to_string_lossy(), rdf_data).unwrap();
 
     let config = StreamBusConfig {
-        input_file: test_file.clone(),
+        input_file: test_file.to_string_lossy().into_owned(),
         broker_type: BrokerType::None,
         topics: vec![],
         rate_of_publishing: 0,
@@ -451,21 +442,21 @@ fn test_malformed_rdf_lines_handling() {
         mqtt_config: None,
     };
 
-    let storage = create_test_storage(&test_dir).unwrap();
+    let storage = create_test_storage(&storage_dir).unwrap();
     let bus = StreamBus::new(config, Arc::clone(&storage));
     let metrics = bus.start().unwrap();
 
     assert_eq!(metrics.events_read, 4);
     assert_eq!(metrics.events_stored, 4);
-
-    cleanup_test_environment(&test_dir);
 }
 
 #[test]
 fn test_large_file_processing() {
-    let test_dir = setup_test_environment("large_file_processing").unwrap();
+    let test_dir = TempDir::new().expect("failed to create temp dir");
+    let storage_dir = test_dir.path().join("storage");
+    fs::create_dir_all(&storage_dir).expect("failed to create storage dir");
 
-    let test_file = format!("{}/test_large.nq", &test_dir);
+    let test_file = test_dir.path().join("test_large.nq");
     let mut rdf_data = String::new();
 
     for i in 0..500 {
@@ -475,10 +466,10 @@ fn test_large_file_processing() {
         ));
     }
 
-    create_test_rdf_file(&test_file, &rdf_data).unwrap();
+    create_test_rdf_file(&test_file.to_string_lossy(), &rdf_data).unwrap();
 
     let config = StreamBusConfig {
-        input_file: test_file.clone(),
+        input_file: test_file.to_string_lossy().into_owned(),
         broker_type: BrokerType::None,
         topics: vec![],
         rate_of_publishing: 0,
@@ -487,7 +478,7 @@ fn test_large_file_processing() {
         mqtt_config: None,
     };
 
-    let storage = create_test_storage(&test_dir).unwrap();
+    let storage = create_test_storage(&storage_dir).unwrap();
 
     let bus = StreamBus::new(config, Arc::clone(&storage));
     let metrics = bus.start().unwrap();
@@ -500,5 +491,4 @@ fn test_large_file_processing() {
 
     let query_results = storage.query_rdf(0, u64::MAX).unwrap();
     assert_eq!(query_results.len(), 500);
-    cleanup_test_environment(&test_dir);
 }

@@ -7,19 +7,7 @@ use std::fs::{self, File};
 use std::io::Write;
 use std::path::Path;
 use std::process::Command;
-
-const TEST_DATA_DIR: &str = "test_data_cli";
-
-fn setup_test_environment(test_name: &str) -> std::io::Result<String> {
-    let test_dir = format!("{}_{}", TEST_DATA_DIR, test_name);
-    let _ = fs::remove_dir_all(&test_dir);
-    fs::create_dir_all(&test_dir)?;
-    Ok(test_dir)
-}
-
-fn cleanup_test_environment(test_dir: &str) {
-    let _ = fs::remove_dir_all(test_dir);
-}
+use tempfile::TempDir;
 
 fn create_test_rdf_file(path: &str, num_events: usize) -> std::io::Result<()> {
     let mut file = File::create(path)?;
@@ -80,11 +68,12 @@ fn test_cli_help_flag() {
 
 #[test]
 fn test_cli_storage_only_mode() {
-    let test_dir = setup_test_environment("storage_only").unwrap();
-    let input_file = format!("{}/input.nq", test_dir);
-    let storage_path = format!("{}/storage", test_dir);
+    let test_dir = TempDir::new().expect("failed to create temp dir");
+    let input_file = test_dir.path().join("input.nq");
+    let storage_path = test_dir.path().join("storage");
+    fs::create_dir_all(&storage_path).expect("failed to create storage dir");
 
-    create_test_rdf_file(&input_file, 10).unwrap();
+    create_test_rdf_file(&input_file.to_string_lossy(), 10).unwrap();
 
     let output = Command::new(get_cli_binary())
         .arg("--input")
@@ -107,17 +96,16 @@ fn test_cli_storage_only_mode() {
     assert!(stdout.contains("Storage errors:   0"));
 
     assert!(Path::new(&storage_path).exists());
-
-    cleanup_test_environment(&test_dir);
 }
 
 #[test]
 fn test_cli_with_rate_limiting() {
-    let test_dir = setup_test_environment("rate_limiting").unwrap();
-    let input_file = format!("{}/input.nq", test_dir);
-    let storage_path = format!("{}/storage", test_dir);
+    let test_dir = TempDir::new().expect("failed to create temp dir");
+    let input_file = test_dir.path().join("input.nq");
+    let storage_path = test_dir.path().join("storage");
+    fs::create_dir_all(&storage_path).expect("failed to create storage dir");
 
-    create_test_rdf_file(&input_file, 20).unwrap();
+    create_test_rdf_file(&input_file.to_string_lossy(), 20).unwrap();
 
     let start = std::time::Instant::now();
 
@@ -142,15 +130,14 @@ fn test_cli_with_rate_limiting() {
     assert!(stdout.contains("Events read:      20"));
 
     assert!(elapsed.as_millis() >= 300);
-
-    cleanup_test_environment(&test_dir);
 }
 
 #[test]
 fn test_cli_missing_input_file() {
-    let test_dir = setup_test_environment("missing_file").unwrap();
-    let input_file = format!("{}/nonexistent.nq", test_dir);
-    let storage_path = format!("{}/storage", test_dir);
+    let test_dir = TempDir::new().expect("failed to create temp dir");
+    let input_file = test_dir.path().join("nonexistent.nq");
+    let storage_path = test_dir.path().join("storage");
+    fs::create_dir_all(&storage_path).expect("failed to create storage dir");
 
     let output = Command::new(get_cli_binary())
         .arg("--input")
@@ -172,17 +159,16 @@ fn test_cli_missing_input_file() {
             || combined.contains("No such file")
             || combined.contains("File Error")
     );
-
-    cleanup_test_environment(&test_dir);
 }
 
 #[test]
 fn test_cli_invalid_broker_type() {
-    let test_dir = setup_test_environment("invalid_broker").unwrap();
-    let input_file = format!("{}/input.nq", test_dir);
-    let storage_path = format!("{}/storage", test_dir);
+    let test_dir = TempDir::new().expect("failed to create temp dir");
+    let input_file = test_dir.path().join("input.nq");
+    let storage_path = test_dir.path().join("storage");
+    fs::create_dir_all(&storage_path).expect("failed to create storage dir");
 
-    create_test_rdf_file(&input_file, 5).unwrap();
+    create_test_rdf_file(&input_file.to_string_lossy(), 5).unwrap();
 
     let output = Command::new(get_cli_binary())
         .arg("--input")
@@ -198,17 +184,16 @@ fn test_cli_invalid_broker_type() {
 
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("Unknown broker type") || stderr.contains("invalid_broker"));
-
-    cleanup_test_environment(&test_dir);
 }
 
 #[test]
 fn test_cli_multiple_topics() {
-    let test_dir = setup_test_environment("multiple_topics").unwrap();
-    let input_file = format!("{}/input.nq", test_dir);
-    let storage_path = format!("{}/storage", test_dir);
+    let test_dir = TempDir::new().expect("failed to create temp dir");
+    let input_file = test_dir.path().join("input.nq");
+    let storage_path = test_dir.path().join("storage");
+    fs::create_dir_all(&storage_path).expect("failed to create storage dir");
 
-    create_test_rdf_file(&input_file, 5).unwrap();
+    create_test_rdf_file(&input_file.to_string_lossy(), 5).unwrap();
 
     let output = Command::new(get_cli_binary())
         .arg("--input")
@@ -228,17 +213,15 @@ fn test_cli_multiple_topics() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("[\"sensors\", \"devices\", \"readings\"]"));
     assert!(stdout.contains("Events read:      5"));
-
-    cleanup_test_environment(&test_dir);
 }
 
 #[test]
 fn test_cli_custom_storage_path() {
-    let test_dir = setup_test_environment("custom_storage").unwrap();
-    let input_file = format!("{}/input.nq", test_dir);
-    let storage_path = format!("{}/my_custom_storage", test_dir);
+    let test_dir = TempDir::new().expect("failed to create temp dir");
+    let input_file = test_dir.path().join("input.nq");
+    let storage_path = test_dir.path().join("my_custom_storage");
 
-    create_test_rdf_file(&input_file, 5).unwrap();
+    create_test_rdf_file(&input_file.to_string_lossy(), 5).unwrap();
 
     let output = Command::new(get_cli_binary())
         .arg("--input")
@@ -253,17 +236,16 @@ fn test_cli_custom_storage_path() {
 
     assert!(output.status.success());
     assert!(Path::new(&storage_path).exists());
-
-    cleanup_test_environment(&test_dir);
 }
 
 #[test]
 fn test_cli_with_timestamps_flag() {
-    let test_dir = setup_test_environment("with_timestamps").unwrap();
-    let input_file = format!("{}/input.nq", test_dir);
-    let storage_path = format!("{}/storage", test_dir);
+    let test_dir = TempDir::new().expect("failed to create temp dir");
+    let input_file = test_dir.path().join("input.nq");
+    let storage_path = test_dir.path().join("storage");
+    fs::create_dir_all(&storage_path).expect("failed to create storage dir");
 
-    create_test_rdf_file(&input_file, 5).unwrap();
+    create_test_rdf_file(&input_file.to_string_lossy(), 5).unwrap();
 
     let output = Command::new(get_cli_binary())
         .arg("--input")
@@ -280,17 +262,16 @@ fn test_cli_with_timestamps_flag() {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("Add timestamps: true"));
-
-    cleanup_test_environment(&test_dir);
 }
 
 #[test]
 fn test_cli_throughput_calculation() {
-    let test_dir = setup_test_environment("throughput").unwrap();
-    let input_file = format!("{}/input.nq", test_dir);
-    let storage_path = format!("{}/storage", test_dir);
+    let test_dir = TempDir::new().expect("failed to create temp dir");
+    let input_file = test_dir.path().join("input.nq");
+    let storage_path = test_dir.path().join("storage");
+    fs::create_dir_all(&storage_path).expect("failed to create storage dir");
 
-    create_test_rdf_file(&input_file, 100).unwrap();
+    create_test_rdf_file(&input_file.to_string_lossy(), 100).unwrap();
 
     let output = Command::new(get_cli_binary())
         .arg("--input")
@@ -310,17 +291,16 @@ fn test_cli_throughput_calculation() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("Throughput:"));
     assert!(stdout.contains("events/sec"));
-
-    cleanup_test_environment(&test_dir);
 }
 
 #[test]
 fn test_cli_configuration_display() {
-    let test_dir = setup_test_environment("config_display").unwrap();
-    let input_file = format!("{}/input.nq", test_dir);
-    let storage_path = format!("{}/storage", test_dir);
+    let test_dir = TempDir::new().expect("failed to create temp dir");
+    let input_file = test_dir.path().join("input.nq");
+    let storage_path = test_dir.path().join("storage");
+    fs::create_dir_all(&storage_path).expect("failed to create storage dir");
 
-    create_test_rdf_file(&input_file, 3).unwrap();
+    create_test_rdf_file(&input_file.to_string_lossy(), 3).unwrap();
 
     let output = Command::new(get_cli_binary())
         .arg("--input")
@@ -341,11 +321,9 @@ fn test_cli_configuration_display() {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("Configuration:"));
-    assert!(stdout.contains(&format!("Input file: {}", input_file)));
+    assert!(stdout.contains(&format!("Input file: {}", input_file.display())));
     assert!(stdout.contains("Broker: None"));
     assert!(stdout.contains("[\"test_topic\"]"));
     assert!(stdout.contains("Rate: 100 Hz"));
-    assert!(stdout.contains(&format!("Storage: {}", storage_path)));
-
-    cleanup_test_environment(&test_dir);
+    assert!(stdout.contains(&format!("Storage: {}", storage_path.display())));
 }

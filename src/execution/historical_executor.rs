@@ -102,8 +102,8 @@ impl HistoricalExecutor {
         self.execute_sparql_on_events(&events, sparql_query)
     }
 
-    /// Execute one historical subquery over one or more historical windows by loading each
-    /// window into a synthetic named graph keyed by the JanusQL window name.
+    /// Execute one historical materialized result over one or more historical windows by
+    /// loading each window into a synthetic named graph keyed by the JanusQL window name.
     pub fn execute_materialized_historical_subquery(
         &self,
         windows: &[&WindowDefinition],

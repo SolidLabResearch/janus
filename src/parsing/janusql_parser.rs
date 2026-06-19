@@ -320,7 +320,7 @@ pub struct ParsedJanusQuery {
     pub sparql_queries: Vec<String>,
     /// Query-defined baseline SPARQL queries
     pub generated_baseline_queries: Vec<GeneratedBaselineQuery>,
-    /// Historical nested subqueries detected and lowered into historical materializations.
+    /// Historical materialized subqueries detected and lowered into materialized historical results.
     pub historical_materialized_subqueries: Vec<HistoricalMaterializedSubquery>,
     /// Structured nested subquery planning output for diagnostics and future execution modes.
     pub planned_subqueries: Vec<PlannedSubquery>,

@@ -1,6 +1,6 @@
 # Baselines
 
-Baseline support in Janus is meant for hybrid anomaly-style queries where historical data initializes context for live scoring.
+Baseline support in Janus means the explicit `DEFINE BASELINE` / `USING BASELINE` syntax path used for hybrid anomaly-style queries where historical data initializes context for live scoring.
 
 It is not a full hybrid-state engine.
 
