@@ -10,9 +10,10 @@ This is the shortest path to understanding the current Janus implementation.
 4. [JANUSQL.md](./JANUSQL.md)
 5. [QUERY_EXECUTION.md](./QUERY_EXECUTION.md)
 6. [BASELINES.md](./BASELINES.md)
-7. [HTTP_API_CURRENT.md](./HTTP_API_CURRENT.md)
-8. [ANOMALY_DETECTION.md](./ANOMALY_DETECTION.md)
-9. [QUICK_REFERENCE.md](./QUICK_REFERENCE.md)
+7. [NESTED_HISTORICAL_SUBQUERIES.md](./NESTED_HISTORICAL_SUBQUERIES.md)
+8. [HTTP_API_CURRENT.md](./HTTP_API_CURRENT.md)
+9. [ANOMALY_DETECTION.md](./ANOMALY_DETECTION.md)
+10. [QUICK_REFERENCE.md](./QUICK_REFERENCE.md)
 
 ## What Each File Covers
 
@@ -34,6 +35,13 @@ This is the shortest path to understanding the current Janus implementation.
   - `LAST` vs `AGGREGATE`
   - async warm-up behavior
   - what state is and is not retained
+
+- [NESTED_HISTORICAL_SUBQUERIES.md](./NESTED_HISTORICAL_SUBQUERIES.md)
+  - nested historical subquery syntax
+  - planning pipeline and diagnostics
+  - supported and rejected shapes
+  - comparison with explicit `DEFINE BASELINE`
+  - microbenchmark runner
 
 - [HTTP_API_CURRENT.md](./HTTP_API_CURRENT.md)
   - current REST endpoints
