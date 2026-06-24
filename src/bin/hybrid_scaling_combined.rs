@@ -1,5 +1,6 @@
 use clap::Parser;
 use janus::core::RDFEvent;
+use janus::execution::result_converter::parse_rsprs_binding_string;
 use janus::execution::HistoricalExecutor;
 use janus::extensions::query_options::build_evaluator;
 use janus::paper_bench::cli_output::{
@@ -416,50 +417,6 @@ fn materialized_baseline_rows_from_bindings(
             HashMap::from([("sensor".to_string(), subject), (variable_name, object)])
         })
         .collect()
-}
-
-fn parse_rsprs_binding_string(binding_str: &str) -> HashMap<String, String> {
-    let mut result = HashMap::new();
-    let bindings_str = binding_str.trim_matches(|ch| ch == '{' || ch == '}').trim();
-    let parts = bindings_str.split(", Variable").collect::<Vec<_>>();
-
-    for (index, part) in parts.iter().enumerate() {
-        let binding = if index == 0 {
-            part.trim_start_matches("Variable")
-        } else {
-            part
-        };
-        let Some(name_start) = binding.find("name: \"") else {
-            continue;
-        };
-        let name_offset = name_start + 7;
-        let Some(name_end) = binding[name_offset..].find('"') else {
-            continue;
-        };
-        let variable = &binding[name_offset..name_offset + name_end];
-        let value = if binding.contains("TypedLiteral") {
-            extract_between(binding, "value: \"", "\"")
-        } else if binding.contains("NamedNode") {
-            extract_between(binding, "iri: \"", "\"")
-        } else if binding.contains("Literal(Literal(String(\"") {
-            extract_between(binding, "String(\"", "\")")
-        } else if binding.contains("Literal(Literal(") {
-            extract_between(binding, "Literal(Literal(", "))")
-        } else {
-            None
-        };
-        if let Some(value) = value {
-            result.insert(variable.to_string(), value);
-        }
-    }
-
-    result
-}
-
-fn extract_between(input: &str, start: &str, end: &str) -> Option<String> {
-    let start_index = input.find(start)? + start.len();
-    let end_index = input[start_index..].find(end)?;
-    Some(input[start_index..start_index + end_index].to_string())
 }
 
 fn join_live_with_baseline_with_filter(
