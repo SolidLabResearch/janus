@@ -40,4 +40,5 @@ pub mod result_converter;
 
 // Re-export main types for convenience
 pub use historical_executor::HistoricalExecutor;
+pub use rdf_conversion::rdf_event_to_quad;
 pub use result_converter::ResultConverter;
