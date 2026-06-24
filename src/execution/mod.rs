@@ -35,6 +35,7 @@
 //! ```
 
 pub mod historical_executor;
+pub mod rdf_conversion;
 pub mod result_converter;
 
 // Re-export main types for convenience

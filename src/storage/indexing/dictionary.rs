@@ -11,6 +11,13 @@ use crate::core::Event;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 static TEMP_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
+const OBJECT_TERM_PREFIX: &str = "__JANUS_TERM_V1__";
+
+#[derive(Debug, Serialize, Deserialize)]
+struct EncodedObjectTerm {
+    value: String,
+    datatype: Option<String>,
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Dictionary {
@@ -20,6 +27,59 @@ pub struct Dictionary {
 }
 
 impl Dictionary {
+    pub fn looks_like_iri(s: &str) -> bool {
+        if s.is_empty() || s.contains(' ') || s.contains('"') {
+            return false;
+        }
+        let mut chars = s.chars();
+        if let Some(first) = chars.next() {
+            if !first.is_ascii_alphabetic() {
+                return false;
+            }
+        } else {
+            return false;
+        }
+
+        let mut has_colon = false;
+        for c in chars {
+            if c == ':' {
+                has_colon = true;
+                break;
+            }
+            if !c.is_ascii_alphanumeric() && c != '+' && c != '-' && c != '.' {
+                return false;
+            }
+        }
+        has_colon
+    }
+
+    pub fn encode_object_term(value: &str, is_literal: bool, datatype: Option<&str>) -> String {
+        if is_literal {
+            let payload = EncodedObjectTerm {
+                value: value.to_string(),
+                datatype: datatype.map(std::string::ToString::to_string),
+            };
+            let encoded = serde_json::to_string(&payload)
+                .expect("object-term JSON serialization should not fail");
+            return format!("{OBJECT_TERM_PREFIX}{encoded}");
+        }
+
+        value.to_string()
+    }
+
+    pub fn decode_object_term(encoded: &str) -> (String, bool, Option<String>) {
+        if let Some(payload) = encoded.strip_prefix(OBJECT_TERM_PREFIX) {
+            if let Ok(term) = serde_json::from_str::<EncodedObjectTerm>(payload) {
+                return (term.value, true, term.datatype);
+            }
+        }
+
+        // Legacy dictionary values never stored explicit literal metadata.
+        // For those older entries we can only infer IRI-vs-literal heuristically.
+        let is_literal = !Self::looks_like_iri(encoded);
+        (encoded.to_string(), is_literal, None)
+    }
+
     pub fn new() -> Self {
         Dictionary { string_to_id: HashMap::new(), id_to_uri: HashMap::new(), next_id: 0 }
     }

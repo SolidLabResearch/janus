@@ -37,11 +37,16 @@ pub fn decode_record(buffer: &[u8; RECORD_SIZE]) -> (u64, u32, u32, u32, u32) {
 impl RDFEvent {
     /// Encode this RDF event to an internal Event using a dictionary
     pub fn encode(&self, dict: &mut Dictionary) -> Event {
+        let object_term = Dictionary::encode_object_term(
+            &self.object,
+            self.object_is_literal,
+            self.object_datatype.as_deref(),
+        );
         Event {
             timestamp: self.timestamp,
             subject: dict.encode(&self.subject),
             predicate: dict.encode(&self.predicate),
-            object: dict.encode(&self.object),
+            object: dict.encode(&object_term),
             graph: dict.encode(&self.graph),
         }
     }
@@ -51,12 +56,18 @@ impl RDFEvent {
 impl Event {
     /// Decode this internal Event to an RDFEvent using a dictionary
     pub fn decode(&self, dict: &Dictionary) -> RDFEvent {
+        let object_term = dict.decode(self.object).unwrap_or("UNKNOWN");
+        let (object_value, object_is_literal, object_datatype) =
+            Dictionary::decode_object_term(object_term);
+
         RDFEvent {
             timestamp: self.timestamp,
             subject: dict.decode(self.subject).unwrap_or("UNKNOWN").to_string(),
             predicate: dict.decode(self.predicate).unwrap_or("UNKNOWN").to_string(),
-            object: dict.decode(self.object).unwrap_or("UNKNOWN").to_string(),
+            object: object_value,
             graph: dict.decode(self.graph).unwrap_or("UNKNOWN").to_string(),
+            object_is_literal,
+            object_datatype,
         }
     }
 

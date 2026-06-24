@@ -23,7 +23,7 @@ pub fn parse_rdf_line(line: &str, add_timestamps: bool) -> Result<RDFEvent, Stri
     let (predicate, remaining) = parse_uri(remaining, "predicate")?;
 
     // Parse object (can be URI, plain literal, or typed literal)
-    let (object, remaining) = parse_object(remaining)?;
+    let (object, object_is_literal, object_datatype, remaining) = parse_object(remaining)?;
 
     // Parse optional graph (URI in angle brackets)
     let (graph, _) = if !remaining.trim().is_empty() {
@@ -35,7 +35,19 @@ pub fn parse_rdf_line(line: &str, add_timestamps: bool) -> Result<RDFEvent, Stri
         (String::new(), remaining)
     };
 
-    Ok(RDFEvent::new(timestamp, &subject, &predicate, &object, &graph))
+    let event = if object_is_literal {
+        if let Some(datatype) = object_datatype.as_deref() {
+            RDFEvent::new_typed_literal_object(
+                timestamp, &subject, &predicate, &object, datatype, &graph,
+            )
+        } else {
+            RDFEvent::new_literal_object(timestamp, &subject, &predicate, &object, &graph)
+        }
+    } else {
+        RDFEvent::new_iri_object(timestamp, &subject, &predicate, &object, &graph)
+    };
+
+    Ok(event)
 }
 
 /// Parse optional timestamp at the beginning of the line
@@ -83,24 +95,26 @@ fn parse_uri<'a>(input: &'a str, field_name: &str) -> Result<(String, &'a str), 
 /// - Plain literal: "some text"
 /// - Typed literal: "23.5"^^<http://www.w3.org/2001/XMLSchema#decimal>
 /// - Language-tagged literal: "hello"@en
-fn parse_object(input: &str) -> Result<(String, &str), String> {
+fn parse_object(input: &str) -> Result<(String, bool, Option<String>, &str), String> {
     let input = input.trim_start();
 
     if input.starts_with('<') {
         // It's a URI
-        return parse_uri(input, "object");
+        let (uri, remaining) = parse_uri(input, "object")?;
+        return Ok((uri, false, None, remaining));
     }
 
     if input.starts_with('"') {
         // It's a literal (plain, typed, or language-tagged)
-        return parse_literal(input);
+        let (value, datatype, remaining) = parse_literal(input)?;
+        return Ok((value, true, datatype, remaining));
     }
 
     Err(format!("Invalid object format: {}", input))
 }
 
 /// Parse a literal with optional datatype or language tag
-fn parse_literal(input: &str) -> Result<(String, &str), String> {
+fn parse_literal(input: &str) -> Result<(String, Option<String>, &str), String> {
     let input = input.trim_start();
 
     if !input.starts_with('"') {
@@ -127,30 +141,16 @@ fn parse_literal(input: &str) -> Result<(String, &str), String> {
     let after_quote = &input[end_idx + 1..];
 
     // Check for datatype (^^<URI>) or language tag (@lang)
-    let (final_value, remaining) = if after_quote.trim_start().starts_with("^^") {
+    let (final_value, datatype, remaining) = if after_quote.trim_start().starts_with("^^") {
         // Typed literal - extract just the base value without the datatype annotation
-        // The datatype is for SPARQL semantics, but we store just the numeric value
         let after_caret = after_quote.trim_start()[2..].trim_start();
 
         if after_caret.starts_with('<') {
             // Parse the datatype URI
             let (datatype_uri, rest) = parse_uri(after_caret, "datatype")?;
-
-            // For numeric datatypes, store just the numeric value
-            // SPARQL engines will interpret these as numbers for aggregation
-            if datatype_uri.contains("XMLSchema#decimal")
-                || datatype_uri.contains("XMLSchema#integer")
-                || datatype_uri.contains("XMLSchema#double")
-                || datatype_uri.contains("XMLSchema#float")
-            {
-                (literal_value, rest)
-            } else {
-                // For other datatypes, could append type info, but for now just store value
-                (literal_value, rest)
-            }
+            (literal_value, Some(datatype_uri), rest)
         } else {
-            // Malformed datatype
-            (literal_value, after_quote)
+            return Err("Malformed datatype annotation".to_string());
         }
     } else if after_quote.trim_start().starts_with('@') {
         // Language-tagged literal
@@ -158,13 +158,13 @@ fn parse_literal(input: &str) -> Result<(String, &str), String> {
         let lang_end =
             after_at.find(|c: char| c.is_whitespace() || c == '.').unwrap_or(after_at.len());
         let remaining = after_at[lang_end..].trim_start();
-        (literal_value, remaining)
+        (literal_value, None, remaining)
     } else {
         // Plain literal
-        (literal_value, after_quote.trim_start())
+        (literal_value, None, after_quote.trim_start())
     };
 
-    Ok((final_value, remaining))
+    Ok((final_value, datatype, remaining))
 }
 
 #[cfg(test)]
@@ -180,6 +180,11 @@ mod tests {
         assert_eq!(result.predicate, "http://example.org/temperature");
         assert_eq!(result.object, "23.5");
         assert_eq!(result.graph, "http://example.org/sensorStream");
+        assert!(result.object_is_literal);
+        assert_eq!(
+            result.object_datatype.as_deref(),
+            Some("http://www.w3.org/2001/XMLSchema#decimal")
+        );
     }
 
     #[test]
@@ -188,6 +193,8 @@ mod tests {
         let result = parse_rdf_line(line, false).unwrap();
 
         assert_eq!(result.object, "Temperature Sensor");
+        assert!(result.object_is_literal);
+        assert_eq!(result.object_datatype, None);
     }
 
     #[test]
@@ -196,6 +203,8 @@ mod tests {
         let result = parse_rdf_line(line, false).unwrap();
 
         assert_eq!(result.object, "http://example.org/Sensor");
+        assert!(!result.object_is_literal);
+        assert_eq!(result.object_datatype, None);
     }
 
     #[test]
@@ -213,5 +222,67 @@ mod tests {
         let result = parse_rdf_line(line, false).unwrap();
 
         assert_eq!(result.graph, "");
+    }
+
+    #[test]
+    fn test_parse_typed_numeric_literal_variants() {
+        let cases = [
+            (
+                r#"<sensor1> <hasValue> "23"^^<http://www.w3.org/2001/XMLSchema#integer> ."#,
+                "23",
+                "http://www.w3.org/2001/XMLSchema#integer",
+            ),
+            (
+                r#"<sensor1> <hasValue> "23.1"^^<http://www.w3.org/2001/XMLSchema#decimal> ."#,
+                "23.1",
+                "http://www.w3.org/2001/XMLSchema#decimal",
+            ),
+            (
+                r#"<sensor1> <hasValue> "23e0"^^<http://www.w3.org/2001/XMLSchema#double> ."#,
+                "23e0",
+                "http://www.w3.org/2001/XMLSchema#double",
+            ),
+            (
+                r#"<sensor1> <hasValue> "23.0"^^<http://www.w3.org/2001/XMLSchema#float> ."#,
+                "23.0",
+                "http://www.w3.org/2001/XMLSchema#float",
+            ),
+        ];
+
+        for (line, value, datatype) in cases {
+            let result = parse_rdf_line(line, false).unwrap();
+            assert_eq!(result.object, value);
+            assert!(result.object_is_literal);
+            assert_eq!(result.object_datatype.as_deref(), Some(datatype));
+        }
+    }
+
+    #[test]
+    fn test_parse_distinguishes_literal_and_iri_forms() {
+        let plain = parse_rdf_line(r#"<s> <p> "23" ."#, false).unwrap();
+        assert_eq!(plain.object, "23");
+        assert!(plain.object_is_literal);
+        assert_eq!(plain.object_datatype, None);
+
+        let typed =
+            parse_rdf_line(r#"<s> <p> "23"^^<http://www.w3.org/2001/XMLSchema#integer> ."#, false)
+                .unwrap();
+        assert!(typed.object_is_literal);
+        assert_eq!(
+            typed.object_datatype.as_deref(),
+            Some("http://www.w3.org/2001/XMLSchema#integer")
+        );
+
+        let iri = parse_rdf_line(r#"<s> <p> <http://example.org/object> ."#, false).unwrap();
+        assert!(!iri.object_is_literal);
+
+        let urn = parse_rdf_line(r#"<s> <p> <urn:patient:123> ."#, false).unwrap();
+        assert_eq!(urn.object, "urn:patient:123");
+        assert!(!urn.object_is_literal);
+
+        let url_like_literal = parse_rdf_line(r#"<s> <p> "http://example.org" ."#, false).unwrap();
+        assert_eq!(url_like_literal.object, "http://example.org");
+        assert!(url_like_literal.object_is_literal);
+        assert_eq!(url_like_literal.object_datatype, None);
     }
 }

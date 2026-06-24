@@ -14,12 +14,13 @@
 
 use crate::api::janus_api::JanusApiError;
 use crate::core::{Event, RDFEvent};
+use crate::execution::rdf_conversion::rdf_event_to_quad;
 use crate::parsing::janusql_parser::WindowDefinition;
 use crate::querying::oxigraph_adapter::OxigraphAdapter;
 use crate::storage::segmented_storage::StreamingSegmentedStorage;
 use crate::stream::operators::historical_fixed_window::HistoricalFixedWindowOperator;
 use crate::stream::operators::historical_sliding_window::HistoricalSlidingWindowOperator;
-use oxigraph::model::{GraphName, NamedNode, Quad, Term};
+use oxigraph::model::{GraphName, NamedNode, Quad};
 use rsp_rs::QuadContainer;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
@@ -250,49 +251,32 @@ impl HistoricalExecutor {
         let mut rdf_events = Vec::with_capacity(events.len());
 
         for event in events {
-            // Decode each field individually
-            let subject = dictionary
-                .decode(event.subject)
-                .ok_or_else(|| {
-                    JanusApiError::ExecutionError(format!(
-                        "Failed to decode subject ID: {}",
-                        event.subject
-                    ))
-                })?
-                .to_string();
+            if dictionary.decode(event.subject).is_none() {
+                return Err(JanusApiError::ExecutionError(format!(
+                    "Failed to decode subject ID: {}",
+                    event.subject
+                )));
+            }
+            if dictionary.decode(event.predicate).is_none() {
+                return Err(JanusApiError::ExecutionError(format!(
+                    "Failed to decode predicate ID: {}",
+                    event.predicate
+                )));
+            }
+            if dictionary.decode(event.object).is_none() {
+                return Err(JanusApiError::ExecutionError(format!(
+                    "Failed to decode object ID: {}",
+                    event.object
+                )));
+            }
+            if dictionary.decode(event.graph).is_none() {
+                return Err(JanusApiError::ExecutionError(format!(
+                    "Failed to decode graph ID: {}",
+                    event.graph
+                )));
+            }
 
-            let predicate = dictionary
-                .decode(event.predicate)
-                .ok_or_else(|| {
-                    JanusApiError::ExecutionError(format!(
-                        "Failed to decode predicate ID: {}",
-                        event.predicate
-                    ))
-                })?
-                .to_string();
-
-            let object = dictionary
-                .decode(event.object)
-                .ok_or_else(|| {
-                    JanusApiError::ExecutionError(format!(
-                        "Failed to decode object ID: {}",
-                        event.object
-                    ))
-                })?
-                .to_string();
-
-            let graph = dictionary
-                .decode(event.graph)
-                .ok_or_else(|| {
-                    JanusApiError::ExecutionError(format!(
-                        "Failed to decode graph ID: {}",
-                        event.graph
-                    ))
-                })?
-                .to_string();
-
-            let rdf_event = RDFEvent::new(event.timestamp, &subject, &predicate, &object, &graph);
-            rdf_events.push(rdf_event);
+            rdf_events.push(event.decode(&dictionary));
         }
 
         Ok(rdf_events)
@@ -361,62 +345,7 @@ impl HistoricalExecutor {
     ///
     /// Oxigraph Quad ready for SPARQL processing
     fn rdf_event_to_quad(&self, event: &RDFEvent) -> Result<Quad, JanusApiError> {
-        // Parse subject as NamedNode
-        let subject = NamedNode::new(&event.subject).map_err(|e| {
-            JanusApiError::ExecutionError(format!("Invalid subject URI '{}': {}", event.subject, e))
-        })?;
-
-        // Parse predicate as NamedNode
-        let predicate = NamedNode::new(&event.predicate).map_err(|e| {
-            JanusApiError::ExecutionError(format!(
-                "Invalid predicate URI '{}': {}",
-                event.predicate, e
-            ))
-        })?;
-
-        // Parse object - can be URI or literal
-        let object = if event.object.starts_with("http://") || event.object.starts_with("https://")
-        {
-            // Object is a URI
-            let object_node = NamedNode::new(&event.object).map_err(|e| {
-                JanusApiError::ExecutionError(format!(
-                    "Invalid object URI '{}': {}",
-                    event.object, e
-                ))
-            })?;
-            Term::NamedNode(object_node)
-        } else {
-            // Object is a literal value - check if it's numeric for SPARQL aggregations
-            let literal = if let Ok(_) = event.object.parse::<f64>() {
-                // It's a decimal number - create typed literal for SPARQL aggregations
-                oxigraph::model::Literal::new_typed_literal(
-                    &event.object,
-                    NamedNode::new("http://www.w3.org/2001/XMLSchema#decimal").unwrap(),
-                )
-            } else if let Ok(_) = event.object.parse::<i64>() {
-                // It's an integer
-                oxigraph::model::Literal::new_typed_literal(
-                    &event.object,
-                    NamedNode::new("http://www.w3.org/2001/XMLSchema#integer").unwrap(),
-                )
-            } else {
-                // Plain string literal
-                oxigraph::model::Literal::new_simple_literal(&event.object)
-            };
-            Term::Literal(literal)
-        };
-
-        // Parse graph - default or named
-        let graph = if event.graph.is_empty() || event.graph == "default" {
-            GraphName::DefaultGraph
-        } else {
-            let graph_node = NamedNode::new(&event.graph).map_err(|e| {
-                JanusApiError::ExecutionError(format!("Invalid graph URI '{}': {}", event.graph, e))
-            })?;
-            GraphName::NamedNode(graph_node)
-        };
-
-        Ok(Quad::new(subject, predicate, object, graph))
+        rdf_event_to_quad(event).map_err(JanusApiError::ExecutionError)
     }
 
     /// Builds a QuadContainer for SPARQL execution.
@@ -536,6 +465,7 @@ impl<'a> Iterator for SlidingWindowIterator<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use oxigraph::model::Term;
 
     #[test]
     fn test_historical_executor_creation() {
