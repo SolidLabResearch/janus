@@ -25,10 +25,7 @@ use crate::{
 };
 use std::{
     collections::HashMap,
-    sync::{
-        mpsc,
-        Arc, Mutex, RwLock,
-    },
+    sync::{mpsc, Arc, Mutex, RwLock},
     thread,
 };
 

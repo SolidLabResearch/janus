@@ -9,10 +9,7 @@ use crate::{
 };
 use axum::{extract::State, Json};
 use std::{
-    sync::{
-        atomic::Ordering,
-        Arc,
-    },
+    sync::{atomic::Ordering, Arc},
     time::Instant,
 };
 

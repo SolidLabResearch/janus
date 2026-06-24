@@ -1,8 +1,8 @@
 use super::helpers::{
-    canonical_result_rows, canonical_window_hash, event_payload_rows,
+    canonical_result_rows, canonical_window_hash, collect_live_results, event_payload_rows,
     historical_baseline_sparql_query, join_live_with_baseline_detailed, live_only_rspql,
     materialize_bindings_as_static_baseline, materialized_baseline_rows_from_bindings,
-    publish_live_events, collect_live_results,
+    publish_live_events,
 };
 use super::types::{
     CoordinationRow, CoordinationRunConfig, CoordinationSummaryRow, EquivalenceReport,
@@ -127,7 +127,10 @@ pub fn write_scaling_fit_csv(path: &Path, rows: &[ScalingFitRow]) -> std::io::Re
     Ok(())
 }
 
-pub fn write_trig_events(path: &Path, events: &[RDFEvent]) -> Result<(), Box<dyn std::error::Error>> {
+pub fn write_trig_events(
+    path: &Path,
+    events: &[RDFEvent],
+) -> Result<(), Box<dyn std::error::Error>> {
     let mut file = File::create(path)?;
     let mut grouped = HashMap::<String, Vec<&RDFEvent>>::new();
     for event in events {

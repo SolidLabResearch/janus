@@ -1,10 +1,10 @@
-use std::collections::{HashMap, HashSet};
-use crate::parsing::janusql_parser::JanusQLParser;
 use crate::parsing::janusql_parser::ast::{
-    PrefixDeclaration, WindowClause, SourceKind, WindowSpec, WindowDefinition, WindowType,
-    BaselineClause, BaselineBootstrapMode, BaselineUse, BaselineDefinition,
-    HistoricalMaterializationKind, RegisterClause, NestedSubquery
+    BaselineBootstrapMode, BaselineClause, BaselineDefinition, BaselineUse,
+    HistoricalMaterializationKind, NestedSubquery, PrefixDeclaration, RegisterClause, SourceKind,
+    WindowClause, WindowDefinition, WindowSpec, WindowType,
 };
+use crate::parsing::janusql_parser::JanusQLParser;
+use std::collections::{HashMap, HashSet};
 
 impl JanusQLParser {
     pub(crate) fn parse_prefix_declaration(
@@ -84,7 +84,10 @@ impl JanusQLParser {
         Ok(WindowClause { window_name, source_kind, source_name, spec })
     }
 
-    pub(crate) fn parse_source_kind(&self, raw: &str) -> Result<SourceKind, Box<dyn std::error::Error>> {
+    pub(crate) fn parse_source_kind(
+        &self,
+        raw: &str,
+    ) -> Result<SourceKind, Box<dyn std::error::Error>> {
         match raw {
             "STREAM" => Ok(SourceKind::Stream),
             "LOG" => Ok(SourceKind::Log),
@@ -334,7 +337,11 @@ impl JanusQLParser {
         })
     }
 
-    pub(crate) fn filter_select_clause(&self, select_clause: &str, allowed_vars: &HashSet<String>) -> String {
+    pub(crate) fn filter_select_clause(
+        &self,
+        select_clause: &str,
+        allowed_vars: &HashSet<String>,
+    ) -> String {
         if allowed_vars.is_empty() {
             return select_clause.to_string();
         }

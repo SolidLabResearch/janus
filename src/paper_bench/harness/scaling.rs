@@ -14,7 +14,11 @@ use crate::{
     storage::segmented_storage::StreamingSegmentedStorage,
     stream::live_stream_processing::LiveStreamProcessing,
 };
-use std::{collections::HashMap, sync::Arc, time::{Duration, Instant}};
+use std::{
+    collections::HashMap,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 pub fn run_scaling_query(
     config: ScalingRunConfig<'_>,
@@ -135,7 +139,11 @@ pub fn run_hybrid_baseline_lookup(
             ?sensor baseline:baselineFlow ?baselineFlow .
         }}
         "#,
-        super::types::BASELINE_NS, GRAPH_URI, dataset.start_ts, dataset.end_ts, LIVE_STREAM_URI
+        super::types::BASELINE_NS,
+        GRAPH_URI,
+        dataset.start_ts,
+        dataset.end_ts,
+        LIVE_STREAM_URI
     );
     let parser = JanusQLParser::new()?;
     let parsed = parser.parse(&query)?;

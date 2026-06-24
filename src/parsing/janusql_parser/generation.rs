@@ -1,11 +1,14 @@
-use crate::parsing::janusql_parser::JanusQLParser;
 use crate::parsing::janusql_parser::ast::{
-    ParsedJanusQuery, GeneratedBaselineQuery, BaselineDefinition,
-    HistoricalMaterializationKind
+    BaselineDefinition, GeneratedBaselineQuery, HistoricalMaterializationKind, ParsedJanusQuery,
 };
+use crate::parsing::janusql_parser::JanusQLParser;
 
 impl JanusQLParser {
-    pub(crate) fn generate_rspql_query(&self, parsed: &ParsedJanusQuery, prefix_lines: &[String]) -> String {
+    pub(crate) fn generate_rspql_query(
+        &self,
+        parsed: &ParsedJanusQuery,
+        prefix_lines: &[String],
+    ) -> String {
         let mut lines: Vec<String> = Vec::new();
 
         for prefix in prefix_lines {

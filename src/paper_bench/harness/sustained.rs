@@ -1,8 +1,8 @@
 use super::data_gen::prepare_sustained_workload;
 use super::helpers::{
     baseline_statements_from_bindings, canonical_result_hash_sustained, canonical_window_hash,
-    join_live_with_baseline, live_only_rspql_sustained, materialized_baseline_rows_from_bindings,
-    materialize_bindings_as_static_baseline, now_ms, parse_rsprs_binding_string, parse_window_id,
+    join_live_with_baseline, live_only_rspql_sustained, materialize_bindings_as_static_baseline,
+    materialized_baseline_rows_from_bindings, now_ms, parse_rsprs_binding_string, parse_window_id,
     wait_for_sustained_event_schedule, wait_for_sustained_replay_flush,
 };
 use super::io::write_h1_2_debug_artifacts;
@@ -504,4 +504,3 @@ pub fn sustained_event_interval_ms(event_rate_hz: usize) -> f64 {
 pub fn sustained_expected_wall_clock_duration_ms(live_duration_seconds: usize) -> u64 {
     (live_duration_seconds as u64) * 1000
 }
-

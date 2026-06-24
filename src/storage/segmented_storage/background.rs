@@ -21,6 +21,7 @@ impl StreamingSegmentedStorage {
         background_flush_error: Arc<Mutex<Option<String>>>,
         config: StreamingConfig,
         dictionary: Arc<RwLock<Dictionary>>,
+        flush_lock: Arc<Mutex<()>>,
     ) {
         while !*shutdown_signal.lock().unwrap() {
             std::thread::sleep(Duration::from_millis(100));
@@ -43,6 +44,7 @@ impl StreamingSegmentedStorage {
                     segments.clone(),
                     config.clone(),
                     dictionary.clone(),
+                    flush_lock.clone(),
                 ) {
                     let message = format!("Background flush failed: {}", e);
                     eprintln!("{}", message);
@@ -58,7 +60,10 @@ impl StreamingSegmentedStorage {
         segments: Arc<RwLock<Vec<EnhancedSegmentMetadata>>>,
         config: StreamingConfig,
         dictionary: Arc<RwLock<Dictionary>>,
+        flush_lock: Arc<Mutex<()>>,
     ) -> std::io::Result<()> {
+        let _lock_guard = flush_lock.lock().unwrap();
+
         let mut events_to_flush = {
             let mut batch_buffer = batch_buffer.write().unwrap();
             if batch_buffer.events.is_empty() {

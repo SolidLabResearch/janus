@@ -21,6 +21,7 @@ pub struct StreamingSegmentedStorage {
     pub(super) batch_buffer: Arc<RwLock<BatchBuffer>>,
     pub(super) segments: Arc<RwLock<Vec<EnhancedSegmentMetadata>>>,
     pub(super) dictionary: Arc<RwLock<Dictionary>>,
+    pub(super) flush_lock: Arc<Mutex<()>>,
     pub(super) flush_handle: Option<JoinHandle<()>>,
     pub(super) shutdown_signal: Arc<Mutex<bool>>,
     pub(super) background_flush_error: Arc<Mutex<Option<String>>>,
@@ -55,6 +56,7 @@ impl StreamingSegmentedStorage {
             })),
             segments: Arc::new(RwLock::new(Vec::new())),
             dictionary: Arc::new(RwLock::new(dictionary)),
+            flush_lock: Arc::new(Mutex::new(())),
             flush_handle: None,
             shutdown_signal: Arc::new(Mutex::new(false)),
             background_flush_error: Arc::new(Mutex::new(None)),
@@ -72,6 +74,7 @@ impl StreamingSegmentedStorage {
         let background_error_clone = Arc::clone(&self.background_flush_error);
         let config_clone = self.config.clone();
         let dictionary_clone = Arc::clone(&self.dictionary);
+        let flush_lock_clone = Arc::clone(&self.flush_lock);
 
         let handle = std::thread::spawn(move || {
             Self::background_flush_loop(
@@ -81,6 +84,7 @@ impl StreamingSegmentedStorage {
                 background_error_clone,
                 config_clone,
                 dictionary_clone,
+                flush_lock_clone,
             );
         });
 
@@ -164,13 +168,13 @@ impl StreamingSegmentedStorage {
         let background_error = self.ensure_background_flush_healthy().err();
         *self.shutdown_signal.lock().unwrap() = true;
 
-        // Final Flush
-        if background_error.is_none() {
-            self.flush_batch_buffer_to_segment()?;
-        }
-
         if let Some(handle) = self.flush_handle.take() {
             handle.join().unwrap();
+        }
+
+        // Final Flush after background thread has stopped
+        if background_error.is_none() {
+            self.flush_batch_buffer_to_segment()?;
         }
 
         if let Some(err) = background_error {

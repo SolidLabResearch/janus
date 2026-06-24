@@ -5,8 +5,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 
 use crate::{
-    core::RDFEvent,
-    paper_bench::harness::ReproMetadata,
+    core::RDFEvent, paper_bench::harness::ReproMetadata,
     storage::segmented_storage::StreamingSegmentedStorage,
 };
 

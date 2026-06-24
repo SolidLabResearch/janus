@@ -533,7 +533,11 @@ pub fn parse_rsprs_binding_string(binding_str: &str) -> HashMap<String, String> 
     let parts = bindings_str.split(", Variable").collect::<Vec<_>>();
 
     for (index, part) in parts.iter().enumerate() {
-        let binding = if index == 0 { part.trim_start_matches("Variable") } else { part };
+        let binding = if index == 0 {
+            part.trim_start_matches("Variable")
+        } else {
+            part
+        };
         let Some(name_start) = binding.find("name: \"") else {
             continue;
         };

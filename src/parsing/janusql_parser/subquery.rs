@@ -1,12 +1,11 @@
-use std::collections::HashMap;
-use crate::parsing::janusql_parser::{JanusQLParser, JANUS_HISTORICAL_MATERIALIZED_SUBQUERY_NS};
 use crate::parsing::janusql_parser::ast::{
-    JanusQueryAst, NestedSubquery, PlannedSubquery, SubqueryPlanningDiagnostics,
-    QueryPlanningStatistics, SubqueryWindowDependencies, SubqueryExecutionMode,
-    LogicalSubqueryPlan, PhysicalSubqueryPlan, HistoricalMaterializedSubquery,
-    BaselineDefinition, BaselineUse, HistoricalMaterializationKind, NamedWindowRef,
-    WindowClause, SourceKind, WindowType
+    BaselineDefinition, BaselineUse, HistoricalMaterializationKind, HistoricalMaterializedSubquery,
+    JanusQueryAst, LogicalSubqueryPlan, NamedWindowRef, NestedSubquery, PhysicalSubqueryPlan,
+    PlannedSubquery, QueryPlanningStatistics, SourceKind, SubqueryExecutionMode,
+    SubqueryPlanningDiagnostics, SubqueryWindowDependencies, WindowClause, WindowType,
 };
+use crate::parsing::janusql_parser::{JanusQLParser, JANUS_HISTORICAL_MATERIALIZED_SUBQUERY_NS};
+use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
 pub(crate) struct NestedSubqueryPlanningResult {
@@ -319,12 +318,10 @@ impl JanusQLParser {
             SubqueryExecutionMode::LiveOnly => {
                 LogicalSubqueryPlan::LiveSubquery { windows: dependencies.live_windows.clone() }
             }
-            SubqueryExecutionMode::LiveHistoricalJoin => {
-                LogicalSubqueryPlan::LiveHistoricalJoin {
-                    live_windows: dependencies.live_windows.clone(),
-                    historical_windows: dependencies.historical_windows.clone(),
-                }
-            }
+            SubqueryExecutionMode::LiveHistoricalJoin => LogicalSubqueryPlan::LiveHistoricalJoin {
+                live_windows: dependencies.live_windows.clone(),
+                historical_windows: dependencies.historical_windows.clone(),
+            },
             SubqueryExecutionMode::Unsupported => {
                 LogicalSubqueryPlan::LiveSubquery { windows: Vec::new() }
             }
@@ -525,4 +522,3 @@ impl JanusQLParser {
         Ok(nested)
     }
 }
-

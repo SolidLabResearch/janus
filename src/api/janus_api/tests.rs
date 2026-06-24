@@ -160,11 +160,7 @@ fn test_materialize_query_defined_baseline_preserves_string_and_language_literal
         where_clause: "WHERE { ?sensor ?p ?o . }".to_string(),
         group_by_clause: None,
         having_clause: None,
-        output_variables: vec![
-            "?sensor".to_string(),
-            "?label".to_string(),
-            "?note".to_string(),
-        ],
+        output_variables: vec!["?sensor".to_string(), "?label".to_string(), "?note".to_string()],
         materialization_kind: HistoricalMaterializationKind::ExplicitBaseline,
     };
     let bindings = vec![HashMap::from([
@@ -385,9 +381,7 @@ fn test_materialize_query_defined_baseline_uses_template_predicate_not_variable_
         baseline_name: "http://example.org/dayBaseline".to_string(),
         triples: vec![TripleTemplate {
             subject: GraphTermTemplate::Variable("sensor".to_string()),
-            predicate: GraphTermTemplate::Iri(
-                "http://example.org/customBaselineValue".to_string(),
-            ),
+            predicate: GraphTermTemplate::Iri("http://example.org/customBaselineValue".to_string()),
             object: GraphTermTemplate::Variable("dayAvgValue".to_string()),
         }],
     };
@@ -669,20 +663,8 @@ fn test_query_defined_baseline_static_graph_can_drive_live_group_by_having() {
         .add_events(
             "http://example.org/stream",
             vec![
-                RDFEvent::new(
-                    1,
-                    "http://example.org/s1",
-                    "http://example.org/hasValue",
-                    "30",
-                    "",
-                ),
-                RDFEvent::new(
-                    2,
-                    "http://example.org/s1",
-                    "http://example.org/hasValue",
-                    "32",
-                    "",
-                ),
+                RDFEvent::new(1, "http://example.org/s1", "http://example.org/hasValue", "30", ""),
+                RDFEvent::new(2, "http://example.org/s1", "http://example.org/hasValue", "32", ""),
             ],
         )
         .unwrap();
@@ -879,9 +861,7 @@ HAVING(AVG(?value) > ?yesterdayAvgValue)
                         value,
                         NamedNode::new("http://www.w3.org/2001/XMLSchema#decimal").unwrap(),
                     ),
-                    GraphName::NamedNode(
-                        NamedNode::new("http://example.org/liveMinute").unwrap(),
-                    ),
+                    GraphName::NamedNode(NamedNode::new("http://example.org/liveMinute").unwrap()),
                 ))
                 .expect("live quad should insert");
         }
@@ -905,10 +885,7 @@ HAVING(AVG(?value) > ?yesterdayAvgValue)
 
         let mut row = HashMap::new();
         for (variable, term) in solution.iter() {
-            row.insert(
-                variable.as_str().to_string(),
-                normalize_binding_term(&term.to_string()),
-            );
+            row.insert(variable.as_str().to_string(), normalize_binding_term(&term.to_string()));
         }
         row
     };

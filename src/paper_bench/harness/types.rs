@@ -1,6 +1,5 @@
 use crate::{
-    core::RDFEvent,
-    paper_bench::external::ExternalHistoricalAdapter,
+    core::RDFEvent, paper_bench::external::ExternalHistoricalAdapter,
     storage::segmented_storage::StreamingSegmentedStorage,
 };
 use clap::ValueEnum;
@@ -495,11 +494,6 @@ pub struct BaselineAccumulator {
 
 impl BaselineAccumulator {
     pub fn new() -> Self {
-        Self {
-            last_value: String::new(),
-            numeric_sum: 0.0,
-            numeric_count: 0,
-            all_numeric: true,
-        }
+        Self { last_value: String::new(), numeric_sum: 0.0, numeric_count: 0, all_numeric: true }
     }
 }

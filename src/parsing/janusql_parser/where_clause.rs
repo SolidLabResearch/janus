@@ -1,6 +1,6 @@
-use std::collections::{HashMap, HashSet};
+use crate::parsing::janusql_parser::ast::{SourceKind, WhereWindowClause, WindowDefinition};
 use crate::parsing::janusql_parser::JanusQLParser;
-use crate::parsing::janusql_parser::ast::{WhereWindowClause, WindowDefinition, SourceKind};
+use std::collections::{HashMap, HashSet};
 
 impl JanusQLParser {
     pub(crate) fn adapt_where_clause_for_live(

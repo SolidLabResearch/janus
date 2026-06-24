@@ -1,17 +1,17 @@
+use std::convert::TryFrom;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use std::convert::TryFrom;
 
-use crate::{
-    core::RDFEvent,
-    parsing::janusql_parser::{SourceKind, WindowDefinition, WindowType},
-    storage::{segmented_storage::StreamingSegmentedStorage, util::StreamingConfig},
-};
 use super::types::{
     HistoricalWriteStats, LiveReplayMode, PreparedStorage, QueryDefinedBaselineProfile,
     ResolvedLiveReplayConfig,
 };
 use super::PREFIX;
+use crate::{
+    core::RDFEvent,
+    parsing::janusql_parser::{SourceKind, WindowDefinition, WindowType},
+    storage::{segmented_storage::StreamingSegmentedStorage, util::StreamingConfig},
+};
 
 pub fn sensor_iri(sensor_idx: usize) -> String {
     format!("{PREFIX}sensor{sensor_idx}")

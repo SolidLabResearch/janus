@@ -1,11 +1,11 @@
 use std::collections::{BTreeMap, HashMap};
 
-use crate::{core::RDFEvent, execution::ResultConverter};
+use super::rdf::{normalize_binding_term, parse_numeric};
 use super::types::{
     LiveReplayMode, ObservedWindowSummary, QueryDefinedBaselineCorrectnessDiagnostics,
     QueryDefinedBaselineObservedRow, ResolvedLiveReplayConfig, TimedBinding,
 };
-use super::rdf::{normalize_binding_term, parse_numeric};
+use crate::{core::RDFEvent, execution::ResultConverter};
 
 pub fn expected_live_averages(live_events: &[RDFEvent]) -> HashMap<String, f64> {
     let mut by_sensor: HashMap<String, (f64, usize)> = HashMap::new();
@@ -254,7 +254,8 @@ pub fn parse_live_rows(
 pub fn summarize_observed_windows(
     rows: &[QueryDefinedBaselineObservedRow],
 ) -> Vec<ObservedWindowSummary> {
-    let mut by_window: BTreeMap<(i64, i64), Vec<&QueryDefinedBaselineObservedRow>> = BTreeMap::new();
+    let mut by_window: BTreeMap<(i64, i64), Vec<&QueryDefinedBaselineObservedRow>> =
+        BTreeMap::new();
 
     for row in rows {
         by_window.entry((row.timestamp_from, row.timestamp_to)).or_default().push(row);

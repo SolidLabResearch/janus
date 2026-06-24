@@ -382,7 +382,11 @@ pub fn linear_fit_row(query_type: &str, mode: &str, points: &[(f64, f64)]) -> Sc
     let mean_y = points.iter().map(|(_, y)| y).sum::<f64>() / n;
     let numerator = points.iter().map(|(x, y)| (x - mean_x) * (y - mean_y)).sum::<f64>();
     let denominator = points.iter().map(|(x, _)| (x - mean_x).powi(2)).sum::<f64>();
-    let slope = if denominator == 0.0 { 0.0 } else { numerator / denominator };
+    let slope = if denominator == 0.0 {
+        0.0
+    } else {
+        numerator / denominator
+    };
     let intercept = mean_y - slope * mean_x;
 
     let ss_tot = points.iter().map(|(_, y)| (y - mean_y).powi(2)).sum::<f64>();
@@ -393,7 +397,11 @@ pub fn linear_fit_row(query_type: &str, mode: &str, points: &[(f64, f64)]) -> Sc
             (y - predicted).powi(2)
         })
         .sum::<f64>();
-    let r_squared = if ss_tot == 0.0 { 1.0 } else { 1.0 - (ss_res / ss_tot) };
+    let r_squared = if ss_tot == 0.0 {
+        1.0
+    } else {
+        1.0 - (ss_res / ss_tot)
+    };
 
     ScalingFitRow {
         query_type: query_type.to_string(),

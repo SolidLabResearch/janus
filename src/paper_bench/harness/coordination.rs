@@ -1,8 +1,9 @@
 use super::data_gen::prepare_coordination_workload;
 use super::helpers::{
     canonical_result_hash, collect_live_results, event_payloads, historical_input_hash,
-    live_input_hash, live_only_rspql, materialize_bindings_as_static_baseline,
-    materialized_baseline_rows_from_bindings, publish_live_events, join_live_with_baseline, now_ms,
+    join_live_with_baseline, live_input_hash, live_only_rspql,
+    materialize_bindings_as_static_baseline, materialized_baseline_rows_from_bindings, now_ms,
+    publish_live_events,
 };
 use super::io::write_h1_debug_artifacts;
 use super::types::{

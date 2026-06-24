@@ -4,8 +4,8 @@ use std::thread;
 use std::time::{Duration, Instant};
 use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
 
-use super::types::{ResourceSample, ResourceSampler, ResourceSummary};
 use super::reporting::summarize_resource_samples;
+use super::types::{ResourceSample, ResourceSampler, ResourceSummary};
 
 impl ResourceSampler {
     pub fn start(interval: Duration) -> Self {

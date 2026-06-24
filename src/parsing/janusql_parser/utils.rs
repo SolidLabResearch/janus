@@ -1,8 +1,12 @@
-use std::collections::HashMap;
 use crate::parsing::janusql_parser::JanusQLParser;
+use std::collections::HashMap;
 
 impl JanusQLParser {
-    pub(crate) fn find_matching_brace(&self, input: &str, open_brace_index: usize) -> Option<usize> {
+    pub(crate) fn find_matching_brace(
+        &self,
+        input: &str,
+        open_brace_index: usize,
+    ) -> Option<usize> {
         let mut depth = 0usize;
         for (relative_index, ch) in input[open_brace_index..].char_indices() {
             match ch {
@@ -123,7 +127,10 @@ impl JanusQLParser {
             .collect()
     }
 
-    pub(crate) fn select_baseline_anchor_variable(&self, output_variables: &[String]) -> Option<String> {
+    pub(crate) fn select_baseline_anchor_variable(
+        &self,
+        output_variables: &[String],
+    ) -> Option<String> {
         for preferred in ["?sensor", "?subject", "?entity", "?s"] {
             if output_variables.iter().any(|variable| variable == preferred) {
                 return Some(preferred.to_string());
@@ -141,7 +148,11 @@ impl JanusQLParser {
         Box::new(std::io::Error::new(std::io::ErrorKind::InvalidInput, message.into()))
     }
 
-    pub(crate) fn unwrap_iri(&self, prefixed_iri: &str, prefix_mapper: &HashMap<String, String>) -> String {
+    pub(crate) fn unwrap_iri(
+        &self,
+        prefixed_iri: &str,
+        prefix_mapper: &HashMap<String, String>,
+    ) -> String {
         let trimmed = prefixed_iri.trim();
 
         if trimmed.starts_with('<') && trimmed.ends_with('>') {
