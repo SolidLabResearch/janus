@@ -5,7 +5,10 @@
 //! - Live result streaming
 //! - Stream bus replay control
 
+pub mod error;
+pub mod handlers;
 pub mod server;
+pub mod types;
 
 pub use server::{
     create_server, create_server_with_state, start_server, AppState, ErrorResponse,
