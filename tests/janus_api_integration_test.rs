@@ -108,6 +108,37 @@ fn test_register_invalid_query() {
 }
 
 #[test]
+fn test_register_rejects_historical_sliding_window_when_range_exceeds_offset() {
+    let parser = JanusQLParser::new().expect("Failed to create parser");
+    let registry = Arc::new(QueryRegistry::new());
+    let storage = Arc::new(
+        StreamingSegmentedStorage::new(StreamingConfig::default())
+            .expect("Failed to create storage"),
+    );
+
+    let api = JanusApi::new(parser, registry, storage).expect("Failed to create API");
+
+    let janusql = r#"
+        PREFIX ex: <http://example.org/>
+
+        SELECT ?sensor ?temp
+
+        FROM NAMED WINDOW ex:invalid ON LOG ex:sensors
+            [OFFSET 1000 RANGE 1500 STEP 500]
+
+        WHERE {
+            WINDOW ex:invalid { ?sensor ex:temperature ?temp }
+        }
+    "#;
+
+    let err = api
+        .register_query("invalid_hist_sliding".into(), janusql)
+        .expect_err("historical sliding window should be rejected during registration");
+
+    assert!(err.to_string().contains("first window would extend beyond the evaluation time"));
+}
+
+#[test]
 fn test_start_query_not_registered() {
     let parser = JanusQLParser::new().expect("Failed to create parser");
     let registry = Arc::new(QueryRegistry::new());

@@ -221,6 +221,8 @@ impl JanusQLParser {
             }
         }
 
+        self.validate_historical_windows(&historical_windows)?;
+
         let r2s = ast
             .register
             .clone()
@@ -326,5 +328,31 @@ impl JanusQLParser {
 impl Default for JanusQLParser {
     fn default() -> Self {
         Self::new().expect("Failed to create JanusQLParser")
+    }
+}
+
+impl JanusQLParser {
+    fn validate_historical_windows(
+        &self,
+        windows: &[WindowDefinition],
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        for window in windows {
+            if window.window_type == WindowType::HistoricalSliding {
+                let offset = window.offset.ok_or_else(|| {
+                    self.parse_error(format!(
+                        "Historical sliding window '{}' is missing OFFSET",
+                        window.window_name
+                    ))
+                })?;
+                if window.width > offset {
+                    return Err(self.parse_error(format!(
+                        "Historical sliding window '{}' has RANGE {} greater than OFFSET {}; the first window would extend beyond the evaluation time",
+                        window.window_name, window.width, offset
+                    )));
+                }
+            }
+        }
+
+        Ok(())
     }
 }

@@ -166,7 +166,6 @@ impl HistoricalExecutor {
         window: &WindowDefinition,
         sparql_query: &'a str,
     ) -> impl Iterator<Item = Result<Vec<HashMap<String, String>>, JanusApiError>> + 'a {
-        // Calculate sliding windows and query storage directly
         let offset = window.offset.unwrap_or(0);
         let width = window.width;
         let slide = window.slide;
@@ -177,13 +176,11 @@ impl HistoricalExecutor {
             .as_millis() as u64;
 
         let start_time = now.saturating_sub(offset);
-        let end_bound = now;
 
-        // Create an iterator that generates windows
         SlidingWindowIterator {
             executor: self,
             current_start: start_time,
-            end_bound,
+            evaluation_time: now,
             width,
             slide,
             sparql_query: sparql_query.to_string(),
@@ -427,7 +424,7 @@ impl HistoricalExecutor {
 struct SlidingWindowIterator<'a> {
     executor: &'a HistoricalExecutor,
     current_start: u64,
-    end_bound: u64,
+    evaluation_time: u64,
     width: u64,
     slide: u64,
     sparql_query: String,
@@ -437,12 +434,15 @@ impl<'a> Iterator for SlidingWindowIterator<'a> {
     type Item = Result<Vec<HashMap<String, String>>, JanusApiError>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.current_start > self.end_bound {
+        let window_start = self.current_start;
+        let window_end = match window_start.checked_add(self.width) {
+            Some(window_end) => window_end,
+            None => return None,
+        };
+
+        if window_end > self.evaluation_time {
             return None;
         }
-
-        let window_start = self.current_start;
-        let window_end = (window_start + self.width).min(self.end_bound);
 
         // Query storage
         let events = match self.executor.storage.query(window_start, window_end) {
@@ -533,6 +533,64 @@ mod tests {
         let (start, end) = result.unwrap();
         assert!(start > 0);
         assert_eq!(end - start, 1000);
+    }
+
+    #[test]
+    fn test_execute_sliding_windows_skips_future_crossing_windows() {
+        let storage = Arc::new(
+            StreamingSegmentedStorage::new(crate::storage::util::StreamingConfig::default())
+                .expect("Failed to create storage"),
+        );
+        let engine = OxigraphAdapter::new();
+        let executor = HistoricalExecutor::new(storage, engine);
+
+        let window = WindowDefinition {
+            window_name: "test_window".to_string(),
+            source_kind: crate::parsing::janusql_parser::SourceKind::Log,
+            stream_name: "test_stream".to_string(),
+            width: 100,
+            slide: 50,
+            offset: Some(250),
+            start: None,
+            end: None,
+            window_type: crate::parsing::janusql_parser::WindowType::HistoricalSliding,
+        };
+
+        let results = executor
+            .execute_sliding_windows(&window, "SELECT ?s WHERE { ?s ?p ?o }")
+            .collect::<Vec<_>>();
+
+        assert_eq!(results.len(), 4);
+        assert!(results.iter().all(|result| result.is_ok()));
+    }
+
+    #[test]
+    fn test_execute_tumbling_historical_windows_stops_before_evaluation_time() {
+        let storage = Arc::new(
+            StreamingSegmentedStorage::new(crate::storage::util::StreamingConfig::default())
+                .expect("Failed to create storage"),
+        );
+        let engine = OxigraphAdapter::new();
+        let executor = HistoricalExecutor::new(storage, engine);
+
+        let window = WindowDefinition {
+            window_name: "test_tumbling_window".to_string(),
+            source_kind: crate::parsing::janusql_parser::SourceKind::Log,
+            stream_name: "test_stream".to_string(),
+            width: 100,
+            slide: 100,
+            offset: Some(250),
+            start: None,
+            end: None,
+            window_type: crate::parsing::janusql_parser::WindowType::HistoricalSliding,
+        };
+
+        let results = executor
+            .execute_sliding_windows(&window, "SELECT ?s WHERE { ?s ?p ?o }")
+            .collect::<Vec<_>>();
+
+        assert_eq!(results.len(), 2);
+        assert!(results.iter().all(|result| result.is_ok()));
     }
 
     #[test]

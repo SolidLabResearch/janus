@@ -81,7 +81,7 @@ fn test_on_log_historical_windows_are_parsed_as_logs() {
         PREFIX sensor: <https://rsp.js/sensors/>
         SELECT ?temperature
         FROM NAMED WINDOW sensor:histWindow ON LOG sensor:historicalStore [START 1000 END 2000]
-        FROM NAMED WINDOW sensor:histSlideWindow ON LOG sensor:historicalStore [OFFSET 500 RANGE 1000 STEP 100]
+        FROM NAMED WINDOW sensor:histSlideWindow ON LOG sensor:historicalStore [OFFSET 1000 RANGE 1000 STEP 100]
         WHERE {
             WINDOW sensor:histWindow {
                 ?event sensor:value ?temperature .
@@ -237,6 +237,22 @@ fn test_sliding_historical_log_window_parses_to_sliding_spec() {
 }
 
 #[test]
+fn test_sliding_historical_log_window_rejects_range_greater_than_offset() {
+    let parser = JanusQLParser::new().unwrap();
+    let query = r#"
+        PREFIX : <http://example.org/>
+        SELECT ?sensor
+        FROM NAMED WINDOW :futureCrossing ON LOG :stream [OFFSET 1000 RANGE 1001 STEP 250]
+        WHERE {
+            WINDOW :futureCrossing { ?sensor :hasValue ?value . }
+        }
+    "#;
+
+    let err = parser.parse(query).expect_err("range greater than offset should be rejected");
+    assert!(err.to_string().contains("first window would extend beyond the evaluation time"));
+}
+
+#[test]
 fn test_parse_ast_extracts_window_body_with_nested_braces() {
     let parser = JanusQLParser::new().unwrap();
     let query = r#"
@@ -338,7 +354,7 @@ fn parse_define_baseline_with_avg_count() {
     let query = r#"
         PREFIX ex: <http://example.org/>
         FROM NAMED WINDOW ex:liveMinute ON STREAM ex:stream [RANGE 60 STEP 5]
-        FROM NAMED WINDOW ex:historyDay ON LOG ex:stream [OFFSET 0 RANGE 86400 STEP 5]
+        FROM NAMED WINDOW ex:historyDay ON LOG ex:stream [OFFSET 86400 RANGE 86400 STEP 5]
         DEFINE BASELINE ex:dayBaseline ON WINDOW ex:historyDay AS
         SELECT ?sensor
                (AVG(?value) AS ?dayAvgValue)
@@ -433,7 +449,7 @@ fn baseline_select_does_not_override_main_select() {
     let query = r#"
         PREFIX ex: <http://example.org/>
         FROM NAMED WINDOW ex:liveMinute ON STREAM ex:stream [RANGE 60 STEP 5]
-        FROM NAMED WINDOW ex:historyDay ON LOG ex:stream [OFFSET 0 RANGE 86400 STEP 5]
+        FROM NAMED WINDOW ex:historyDay ON LOG ex:stream [OFFSET 86400 RANGE 86400 STEP 5]
         DEFINE BASELINE ex:dayBaseline ON WINDOW ex:historyDay AS
         SELECT ?sensor (AVG(?value) AS ?dayAvgValue)
         WHERE {
@@ -466,7 +482,7 @@ fn using_baseline_is_parsed_after_register() {
     let query = r#"
         PREFIX ex: <http://example.org/>
         FROM NAMED WINDOW ex:liveMinute ON STREAM ex:stream [RANGE 60 STEP 5]
-        FROM NAMED WINDOW ex:historyDay ON LOG ex:stream [OFFSET 0 RANGE 86400 STEP 5]
+        FROM NAMED WINDOW ex:historyDay ON LOG ex:stream [OFFSET 86400 RANGE 86400 STEP 5]
         DEFINE BASELINE ex:dayBaseline ON WINDOW ex:historyDay AS
         SELECT ?sensor
         WHERE {
@@ -502,7 +518,7 @@ fn generated_baseline_query_wraps_where_body_in_log_graph() {
     let parser = JanusQLParser::new().unwrap();
     let query = r#"
         PREFIX ex: <http://example.org/>
-        FROM NAMED WINDOW ex:historyDay ON LOG ex:stream [OFFSET 0 RANGE 86400 STEP 5]
+        FROM NAMED WINDOW ex:historyDay ON LOG ex:stream [OFFSET 86400 RANGE 86400 STEP 5]
         DEFINE BASELINE ex:dayBaseline ON WINDOW ex:historyDay AS
         SELECT ?sensor (AVG(?value) AS ?dayAvgValue) (COUNT(?value) AS ?dayCount)
         WHERE {
@@ -790,7 +806,7 @@ fn using_baseline_must_reference_defined_baseline() {
     let query = r#"
         PREFIX ex: <http://example.org/>
         FROM NAMED WINDOW ex:liveMinute ON STREAM ex:stream [RANGE 60 STEP 5]
-        FROM NAMED WINDOW ex:historyDay ON LOG ex:stream [OFFSET 0 RANGE 86400 STEP 5]
+        FROM NAMED WINDOW ex:historyDay ON LOG ex:stream [OFFSET 86400 RANGE 86400 STEP 5]
         REGISTER RStream ex:output AS
         USING BASELINE ex:dayBaseline
         SELECT ?sensor
@@ -828,7 +844,7 @@ fn main_select_can_compute_difference_between_live_avg_and_baseline_avg() {
     let query = r#"
         PREFIX ex: <http://example.org/>
         FROM NAMED WINDOW ex:liveMinute ON STREAM ex:stream [RANGE 60000 STEP 1000]
-        FROM NAMED WINDOW ex:historyDay ON LOG ex:stream [OFFSET 0 RANGE 86400000 STEP 1000]
+        FROM NAMED WINDOW ex:historyDay ON LOG ex:stream [OFFSET 86400000 RANGE 86400000 STEP 1000]
         DEFINE BASELINE ex:dayBaseline ON WINDOW ex:historyDay AS
         SELECT ?sensor
                (AVG(?value) AS ?dayAvgValue)
@@ -867,7 +883,7 @@ fn query_defined_baseline_graph_template_is_extracted_structurally() {
     let query = r#"
         PREFIX ex: <http://example.org/>
         FROM NAMED WINDOW ex:liveMinute ON STREAM ex:stream [RANGE 60 STEP 5]
-        FROM NAMED WINDOW ex:historyDay ON LOG ex:stream [OFFSET 0 RANGE 86400 STEP 5]
+        FROM NAMED WINDOW ex:historyDay ON LOG ex:stream [OFFSET 86400 RANGE 86400 STEP 5]
         DEFINE BASELINE ex:dayBaseline ON WINDOW ex:historyDay AS
         SELECT ?sensor (AVG(?value) AS ?dayAvgValue) (COUNT(?value) AS ?dayCount)
         WHERE {

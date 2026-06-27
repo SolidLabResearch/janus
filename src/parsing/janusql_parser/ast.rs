@@ -70,8 +70,12 @@ impl WindowDefinition {
         match self.historical_window_spec()? {
             HistoricalWindowSpec::Fixed { start, end } => Some((start, end)),
             HistoricalWindowSpec::Sliding { offset, range, .. } => {
-                let historical_end = evaluation_time.saturating_sub(offset);
-                let historical_start = historical_end.saturating_sub(range);
+                if range > offset {
+                    return None;
+                }
+
+                let historical_start = evaluation_time.saturating_sub(offset);
+                let historical_end = historical_start.checked_add(range)?;
                 Some((historical_start, historical_end))
             }
         }
