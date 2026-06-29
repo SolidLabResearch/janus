@@ -13,7 +13,8 @@ use std::{
 pub const BASELINE_NS: &str = "https://janus.rs/baseline#";
 pub const GRAPH_URI: &str = "http://example.org/citybench";
 pub const LIVE_STREAM_URI: &str = "http://example.org/live";
-pub const TRAFFIC_PREDICATE: &str = "http://example.org/trafficFlow";
+pub const CONGESTION_PREDICATE: &str = "http://example.org/congestionLevel";
+pub const TRAFFIC_PREDICATE: &str = CONGESTION_PREDICATE;
 pub const BASELINE_PREDICATE: &str = "http://example.org/baselineFlow";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, ValueEnum)]

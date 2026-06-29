@@ -152,7 +152,10 @@ pub fn run_sustained_system(
             historical_baseline = baseline_statements_from_bindings(&baseline_bindings)
                 .into_iter()
                 .map(|(s, _, o)| {
-                    HashMap::from([("sensor".to_string(), s), ("baselineFlow".to_string(), o)])
+                    HashMap::from([
+                        ("sensor".to_string(), s),
+                        ("historicalAvgCongestion".to_string(), o),
+                    ])
                 })
                 .collect();
             estimated_external_transfer_bytes_total = 0;
@@ -228,8 +231,10 @@ pub fn run_sustained_system(
                 &workload.historical_sparql_query,
                 &workload.historical_rdf_events,
             )?;
-            let materialized_baseline_rows =
-                materialized_baseline_rows_from_bindings(&external_bindings, "baselineFlow");
+            let materialized_baseline_rows = materialized_baseline_rows_from_bindings(
+                &external_bindings,
+                "historicalAvgCongestion",
+            );
             let historical_done = now_ms();
 
             historical_baseline = materialized_baseline_rows.clone();

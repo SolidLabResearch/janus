@@ -184,8 +184,10 @@ pub fn write_h1_debug_artifacts(
         &workload.historical_sparql_query,
         &workload.historical_rdf_events,
     )?;
-    let oxigraph_materialized_baseline =
-        materialized_baseline_rows_from_bindings(&oxigraph_historical_results, "baselineFlow");
+    let oxigraph_materialized_baseline = materialized_baseline_rows_from_bindings(
+        &oxigraph_historical_results,
+        "historicalAvgCongestion",
+    );
 
     let mut live_processor = LiveStreamProcessing::new(live_only_rspql())?;
     live_processor.register_stream(LIVE_STREAM_URI)?;

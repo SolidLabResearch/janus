@@ -2,11 +2,16 @@ use super::helpers::{
     historical_baseline_sparql_query, hybrid_query, sustained_hybrid_query, unique_config,
 };
 use super::types::{
-    CoordinationWorkload, DatasetSpec, HistoricalDataset, SustainedWorkload, BASELINE_PREDICATE,
-    GRAPH_URI, TRAFFIC_PREDICATE,
+    CoordinationWorkload, DatasetSpec, HistoricalDataset, SustainedWorkload, CONGESTION_PREDICATE,
+    GRAPH_URI,
 };
 use crate::{core::RDFEvent, storage::segmented_storage::StreamingSegmentedStorage};
 use std::{fs, fs::File, io::Write, path::Path, sync::Arc};
+
+const XSD_DECIMAL: &str = "http://www.w3.org/2001/XMLSchema#decimal";
+const SENSOR_COUNT: usize = 8;
+const HISTORICAL_INTERVAL_MS: u64 = 60;
+const LIVE_EVENT_INTERVAL_MS: u64 = 250;
 
 pub fn generate_citybench_dataset(
     size_quads: usize,
@@ -24,7 +29,7 @@ pub fn generate_citybench_dataset(
     let range_50 = (size_quads / 2).max(1);
     let midpoint = size_quads / 2;
     let point_ts = start_ts + midpoint as u64;
-    let point_subject = format!("http://example.org/junction/{}", midpoint % 256);
+    let point_subject = format!("http://example.org/junction/{}", midpoint % SENSOR_COUNT);
 
     for index in 0..size_quads {
         let event = citybench_event(start_ts + index as u64, index);
@@ -56,13 +61,14 @@ pub fn generate_citybench_dataset(
 }
 
 pub fn citybench_event(timestamp: u64, index: usize) -> RDFEvent {
-    let junction = index % 256;
-    let flow = 20 + (index % 80);
-    RDFEvent::new(
+    let junction = index % SENSOR_COUNT;
+    let flow = congestion_value_for_historical(index);
+    RDFEvent::new_typed_literal_object(
         timestamp,
         &format!("http://example.org/junction/{junction}"),
-        TRAFFIC_PREDICATE,
-        &flow.to_string(),
+        CONGESTION_PREDICATE,
+        &format!("{flow:.3}"),
+        XSD_DECIMAL,
         GRAPH_URI,
     )
 }
@@ -73,21 +79,17 @@ pub fn prepare_coordination_workload(
 ) -> Result<CoordinationWorkload, Box<dyn std::error::Error>> {
     let historical_start_ts = 1_800_000_000_000;
     let historical_storage = build_historical_storage(historical_events, historical_start_ts)?;
-    let historical_rdf_events = historical_storage.query_rdf(
-        historical_start_ts,
-        historical_start_ts + historical_events.saturating_sub(1) as u64,
-    )?;
+    let historical_end_ts = historical_end_timestamp(historical_start_ts, historical_events);
+    let historical_rdf_events =
+        historical_storage.query_rdf(historical_start_ts, historical_end_ts)?;
     Ok(CoordinationWorkload {
         historical_storage,
         historical_rdf_events,
         live_events: build_live_events(live_events, 1_900_000_000_000),
         historical_start_ts,
-        historical_end_ts: historical_start_ts + historical_events.saturating_sub(1) as u64,
+        historical_end_ts,
         historical_sparql_query: historical_baseline_sparql_query()?,
-        hybrid_query: hybrid_query(
-            historical_start_ts,
-            historical_start_ts + historical_events.saturating_sub(1) as u64,
-        ),
+        hybrid_query: hybrid_query(historical_start_ts, historical_end_ts),
     })
 }
 
@@ -97,11 +99,12 @@ pub fn build_historical_storage(
 ) -> Result<Arc<StreamingSegmentedStorage>, Box<dyn std::error::Error>> {
     let storage = Arc::new(StreamingSegmentedStorage::new(unique_config("paper_h1"))?);
     for index in 0..events {
-        let event = RDFEvent::new(
-            start_ts + index as u64,
-            &format!("http://example.org/junction/{}", index % 64),
-            BASELINE_PREDICATE,
-            &(40 + (index % 17)).to_string(),
+        let event = RDFEvent::new_typed_literal_object(
+            start_ts + index as u64 * HISTORICAL_INTERVAL_MS,
+            &sensor_uri(index),
+            CONGESTION_PREDICATE,
+            &format!("{:.3}", congestion_value_for_historical(index)),
+            XSD_DECIMAL,
             GRAPH_URI,
         );
         storage.write_rdf_event(event)?;
@@ -113,11 +116,12 @@ pub fn build_historical_storage(
 pub fn build_live_events(events: usize, start_ts: u64) -> Vec<RDFEvent> {
     (0..events)
         .map(|index| {
-            RDFEvent::new(
-                start_ts + index as u64,
-                &format!("http://example.org/junction/{}", index % 64),
-                TRAFFIC_PREDICATE,
-                &(70 + (index % 11)).to_string(),
+            RDFEvent::new_typed_literal_object(
+                start_ts + index as u64 * LIVE_EVENT_INTERVAL_MS,
+                &sensor_uri(index),
+                CONGESTION_PREDICATE,
+                &format!("{:.3}", congestion_value_for_live(index)),
+                XSD_DECIMAL,
                 GRAPH_URI,
             )
         })
@@ -133,10 +137,9 @@ pub fn prepare_sustained_workload(
 ) -> Result<SustainedWorkload, Box<dyn std::error::Error>> {
     let historical_start_ts = 1_800_000_000_000;
     let historical_storage = build_historical_storage(historical_events, historical_start_ts)?;
-    let historical_rdf_events = historical_storage.query_rdf(
-        historical_start_ts,
-        historical_start_ts + historical_events.saturating_sub(1) as u64,
-    )?;
+    let historical_end_ts = historical_end_timestamp(historical_start_ts, historical_events);
+    let historical_rdf_events =
+        historical_storage.query_rdf(historical_start_ts, historical_end_ts)?;
     let live_events =
         build_sustained_live_events(live_duration_seconds, event_rate_hz, 1_900_000_000_000);
     let window_size_ms = window_size_seconds * 1000;
@@ -147,11 +150,11 @@ pub fn prepare_sustained_workload(
         historical_rdf_events,
         live_events,
         historical_start_ts,
-        historical_end_ts: historical_start_ts + historical_events.saturating_sub(1) as u64,
+        historical_end_ts,
         historical_sparql_query: historical_baseline_sparql_query()?,
         hybrid_query: sustained_hybrid_query(
             historical_start_ts,
-            historical_start_ts + historical_events.saturating_sub(1) as u64,
+            historical_end_ts,
             window_size_ms,
             window_slide_ms,
         ),
@@ -170,13 +173,41 @@ pub fn build_sustained_live_events(
     let interval_ms = 1000 / rate_hz;
     (0..total_events)
         .map(|index| {
-            RDFEvent::new(
+            RDFEvent::new_typed_literal_object(
                 start_ts + (index * interval_ms) as u64,
-                &format!("http://example.org/junction/{}", index % 64),
-                TRAFFIC_PREDICATE,
-                &(70 + (index % 11)).to_string(),
+                &sensor_uri(index),
+                CONGESTION_PREDICATE,
+                &format!("{:.3}", congestion_value_for_live(index)),
+                XSD_DECIMAL,
                 GRAPH_URI,
             )
         })
         .collect()
+}
+
+fn sensor_uri(index: usize) -> String {
+    format!("http://example.org/junction/{}", index % SENSOR_COUNT)
+}
+
+fn historical_sensor_base(sensor_idx: usize) -> f64 {
+    30.0 + sensor_idx as f64 * 5.0
+}
+
+fn congestion_value_for_historical(index: usize) -> f64 {
+    let sensor_idx = index % SENSOR_COUNT;
+    let sample_idx = index / SENSOR_COUNT;
+    let seasonal = ((sample_idx * 7 + sensor_idx * 3) % 9) as f64 - 4.0;
+    historical_sensor_base(sensor_idx) + seasonal
+}
+
+fn congestion_value_for_live(index: usize) -> f64 {
+    let sensor_idx = index % SENSOR_COUNT;
+    let sample_idx = index / SENSOR_COUNT;
+    let bias = if sensor_idx % 2 == 0 { 8.0 } else { -8.0 };
+    let oscillation = ((sample_idx * 5 + sensor_idx) % 5) as f64 - 2.0;
+    historical_sensor_base(sensor_idx) + bias + oscillation
+}
+
+fn historical_end_timestamp(start_ts: u64, events: usize) -> u64 {
+    start_ts + events.saturating_sub(1) as u64 * HISTORICAL_INTERVAL_MS
 }

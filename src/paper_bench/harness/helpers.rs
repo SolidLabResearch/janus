@@ -1,9 +1,9 @@
 use super::types::{
-    SustainedRunConfig, TimeMode, BASELINE_NS, GRAPH_URI, LIVE_STREAM_URI, TRAFFIC_PREDICATE,
+    SustainedRunConfig, TimeMode, BASELINE_NS, CONGESTION_PREDICATE, GRAPH_URI, LIVE_STREAM_URI,
 };
 use crate::{
-    api::janus_api::JanusApiError, core::RDFEvent, parsing::janusql_parser::JanusQLParser,
-    storage::util::StreamingConfig, stream::live_stream_processing::LiveStreamProcessing,
+    api::janus_api::JanusApiError, core::RDFEvent, storage::util::StreamingConfig,
+    stream::live_stream_processing::LiveStreamProcessing,
 };
 use sha2::{Digest, Sha256};
 use std::{
@@ -190,43 +190,43 @@ pub fn hybrid_query(start_ts: u64, end_ts: u64) -> String {
         PREFIX baseline: <{BASELINE_NS}>
 
         REGISTER RStream <output> AS
-        SELECT ?sensor ?liveFlow ?baselineFlow
+        SELECT ?sensor
+               (AVG(?liveCongestion) AS ?liveAvgCongestion)
+               ?historicalAvgCongestion
+               ((AVG(?liveCongestion) - ?historicalAvgCongestion) AS ?congestionDelta)
         FROM NAMED WINDOW ex:hist ON STREAM <{GRAPH_URI}> [START {start_ts} END {end_ts}]
         FROM NAMED WINDOW ex:live ON STREAM <{LIVE_STREAM_URI}> [RANGE 10000 STEP 1000]
         USING BASELINE ex:hist AGGREGATE
         WHERE {{
             WINDOW ex:hist {{
-                ?sensor ex:baselineFlow ?baselineFlow .
+                ?sensor ex:congestionLevel ?historicalCongestion .
             }}
             WINDOW ex:live {{
-                ?sensor ex:trafficFlow ?liveFlow .
+                ?sensor ex:congestionLevel ?liveCongestion .
             }}
-            ?sensor baseline:baselineFlow ?baselineFlow .
+            ?sensor baseline:historicalAvgCongestion ?historicalAvgCongestion .
         }}
+        GROUP BY ?sensor ?historicalAvgCongestion
+        HAVING(AVG(?liveCongestion) > ?historicalAvgCongestion)
         "#
     )
 }
 
 pub fn historical_baseline_sparql_query() -> Result<String, Box<dyn std::error::Error>> {
-    let parser = JanusQLParser::new()?;
-    let parsed = parser.parse(&format!(
+    Ok(format!(
         r#"
         PREFIX ex: <http://example.org/>
 
-        SELECT ?sensor ?baselineFlow
-        FROM NAMED WINDOW ex:hist ON STREAM <{GRAPH_URI}> [START 1 END 2]
+        SELECT ?sensor
+               (AVG(?historicalCongestion) AS ?historicalAvgCongestion)
         WHERE {{
-            WINDOW ex:hist {{
-                ?sensor ex:baselineFlow ?baselineFlow .
+            GRAPH ex:citybench {{
+                ?sensor ex:congestionLevel ?historicalCongestion .
             }}
         }}
+        GROUP BY ?sensor
         "#
-    ))?;
-    Ok(parsed
-        .sparql_queries
-        .first()
-        .cloned()
-        .ok_or("missing generated historical SPARQL query")?)
+    ))
 }
 
 pub fn live_only_rspql() -> String {
@@ -235,21 +235,23 @@ pub fn live_only_rspql() -> String {
         PREFIX ex: <http://example.org/>
 
         REGISTER RStream <output> AS
-        SELECT ?sensor ?liveFlow
+        SELECT ?sensor
+               (AVG(?liveCongestion) AS ?liveAvgCongestion)
         FROM NAMED WINDOW ex:live ON STREAM <{LIVE_STREAM_URI}> [RANGE 10000 STEP 1000]
         WHERE {{
             WINDOW ex:live {{
-                ?sensor ex:trafficFlow ?liveFlow .
+                ?sensor ex:congestionLevel ?liveCongestion .
             }}
         }}
+        GROUP BY ?sensor
         "#
     )
 }
 
 pub fn historical_lookup_query(start: u64, end: u64, subject_filter: Option<&str>) -> String {
     let subject_clause = subject_filter
-        .map(|subject| format!("<{subject}> ex:trafficFlow ?trafficFlow ."))
-        .unwrap_or_else(|| "?sensor ex:trafficFlow ?trafficFlow .".to_string());
+        .map(|subject| format!("<{subject}> <{CONGESTION_PREDICATE}> ?trafficFlow ."))
+        .unwrap_or_else(|| format!("?sensor <{CONGESTION_PREDICATE}> ?trafficFlow ."));
     format!(
         r#"
         PREFIX ex: <http://example.org/>
@@ -277,19 +279,24 @@ pub fn sustained_hybrid_query(
         PREFIX baseline: <{BASELINE_NS}>
 
         REGISTER RStream <output> AS
-        SELECT ?sensor ?liveFlow ?baselineFlow
+        SELECT ?sensor
+               (AVG(?liveCongestion) AS ?liveAvgCongestion)
+               ?historicalAvgCongestion
+               ((AVG(?liveCongestion) - ?historicalAvgCongestion) AS ?congestionDelta)
         FROM NAMED WINDOW ex:hist ON STREAM <{GRAPH_URI}> [START {start_ts} END {end_ts}]
         FROM NAMED WINDOW ex:live ON STREAM <{LIVE_STREAM_URI}> [RANGE {window_size_ms} STEP {window_slide_ms}]
         USING BASELINE ex:hist AGGREGATE
         WHERE {{
             WINDOW ex:hist {{
-                ?sensor ex:baselineFlow ?baselineFlow .
+                ?sensor ex:congestionLevel ?historicalCongestion .
             }}
             WINDOW ex:live {{
-                ?sensor ex:trafficFlow ?liveFlow .
+                ?sensor ex:congestionLevel ?liveCongestion .
             }}
-            ?sensor baseline:baselineFlow ?baselineFlow .
+            ?sensor baseline:historicalAvgCongestion ?historicalAvgCongestion .
         }}
+        GROUP BY ?sensor ?historicalAvgCongestion
+        HAVING(AVG(?liveCongestion) > ?historicalAvgCongestion)
         "#
     )
 }
@@ -300,13 +307,15 @@ pub fn live_only_rspql_sustained(window_size_ms: usize, window_slide_ms: usize) 
         PREFIX ex: <http://example.org/>
 
         REGISTER RStream <output> AS
-        SELECT ?sensor ?liveFlow
+        SELECT ?sensor
+               (AVG(?liveCongestion) AS ?liveAvgCongestion)
         FROM NAMED WINDOW ex:live ON STREAM <{LIVE_STREAM_URI}> [RANGE {window_size_ms} STEP {window_slide_ms}]
         WHERE {{
             WINDOW ex:live {{
-                ?sensor ex:trafficFlow ?liveFlow .
+                ?sensor ex:congestionLevel ?liveCongestion .
             }}
         }}
+        GROUP BY ?sensor
         "#
     )
 }
@@ -451,16 +460,38 @@ pub fn join_live_with_baseline_detailed(
             for (key, value) in live_row {
                 merged.insert(key.clone(), value.clone());
             }
+            let live_avg = merged
+                .get("liveAvgCongestion")
+                .and_then(|value| normalize_binding_term(value).parse::<f64>().ok());
+            let historical_avg = merged
+                .get("historicalAvgCongestion")
+                .and_then(|value| normalize_binding_term(value).parse::<f64>().ok());
+            if let (Some(live_avg), Some(historical_avg)) = (live_avg, historical_avg) {
+                merged.insert(
+                    "congestionDelta".to_string(),
+                    format!("{}", live_avg - historical_avg),
+                );
+            }
+            let accepted = matches!(
+                (live_avg, historical_avg),
+                (Some(live_avg), Some(historical_avg)) if live_avg > historical_avg
+            );
             trace.push(super::types::JoinTraceRow {
                 historical_join_key: Some(subject.clone()),
                 live_join_key: Some(subject),
-                accepted: true,
-                rejection_reason: None,
+                accepted,
+                rejection_reason: if accepted {
+                    None
+                } else {
+                    Some("live_average_not_above_historical_average".to_string())
+                },
                 historical_row: Some(canonicalize_row(baseline_row)),
                 live_row: canonicalize_row(live_row),
-                joined_row: Some(canonicalize_row(&merged)),
+                joined_row: accepted.then(|| canonicalize_row(&merged)),
             });
-            joined.push(merged);
+            if accepted {
+                joined.push(merged);
+            }
         } else {
             trace.push(super::types::JoinTraceRow {
                 historical_join_key: None,

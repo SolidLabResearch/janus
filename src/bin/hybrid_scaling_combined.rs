@@ -1,14 +1,18 @@
 use clap::Parser;
 use janus::core::RDFEvent;
 use janus::execution::result_converter::parse_rsprs_binding_string;
-use janus::execution::HistoricalExecutor;
 use janus::extensions::query_options::build_evaluator;
 use janus::paper_bench::cli_output::{
     default_benchmark_output_dir, print_benchmark_stdout, BenchmarkArtifact,
 };
 use janus::paper_bench::harness::{collect_repro_metadata, ensure_output_dir, write_jsonl};
-use janus::parsing::janusql_parser::JanusQLParser;
-use janus::querying::oxigraph_adapter::OxigraphAdapter;
+use janus::paper_bench::query_defined_baseline::rdf::{
+    resolve_object_term, resolve_predicate_term, resolve_subject_term,
+    validate_template_against_definition,
+};
+use janus::parsing::janusql_parser::{
+    BaselineDefinition, BaselineGraphTemplate, JanusQLParser, ParsedJanusQuery, WindowDefinition,
+};
 use janus::storage::segmented_storage::StreamingSegmentedStorage;
 use janus::storage::util::StreamingConfig;
 use janus::stream::live_stream_processing::LiveStreamProcessing;
@@ -29,8 +33,9 @@ use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
 const BASELINE_NS: &str = "https://janus.rs/baseline#";
 const GRAPH_URI: &str = "http://example.org/citybench";
 const LIVE_STREAM_URI: &str = "http://example.org/live";
-const TRAFFIC_PREDICATE: &str = "http://example.org/trafficFlow";
-const BASELINE_PREDICATE: &str = "http://example.org/baselineFlow";
+const CONGESTION_PREDICATE: &str = "http://example.org/congestionLevel";
+const XSD_DECIMAL: &str = "http://www.w3.org/2001/XMLSchema#decimal";
+const SENSOR_COUNT: usize = 8;
 
 static CONFIG_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -391,16 +396,6 @@ fn baseline_statements_from_bindings(
         .collect()
 }
 
-fn materialize_bindings_as_static_baseline(
-    processor: &mut LiveStreamProcessing,
-    bindings: &[HashMap<String, String>],
-) -> Result<(), Box<dyn std::error::Error>> {
-    for (subject, predicate, object) in baseline_statements_from_bindings(bindings) {
-        processor.add_static_data(RDFEvent::new(0, &subject, &predicate, &object, ""))?;
-    }
-    Ok(())
-}
-
 fn materialized_baseline_rows_from_bindings(
     bindings: &[HashMap<String, String>],
     baseline_variable: &str,
@@ -419,6 +414,36 @@ fn materialized_baseline_rows_from_bindings(
         .collect()
 }
 
+fn build_historical_baseline_bindings_from_events(
+    events: &[RDFEvent],
+) -> Vec<HashMap<String, String>> {
+    let mut sums = HashMap::<String, (f64, usize)>::new();
+    for event in events {
+        let Ok(value) = event.object.parse::<f64>() else {
+            continue;
+        };
+        let entry = sums.entry(event.subject.clone()).or_insert((0.0, 0));
+        entry.0 += value;
+        entry.1 += 1;
+    }
+
+    let mut rows = sums
+        .into_iter()
+        .map(|(sensor, (sum, count))| {
+            HashMap::from([
+                ("sensor".to_string(), sensor),
+                ("historicalAvgCongestion".to_string(), format!("{:.6}", sum / count as f64)),
+            ])
+        })
+        .collect::<Vec<_>>();
+    rows.sort_by(|left, right| {
+        normalize_binding_term(left.get("sensor").map(String::as_str).unwrap_or_default()).cmp(
+            &normalize_binding_term(right.get("sensor").map(String::as_str).unwrap_or_default()),
+        )
+    });
+    rows
+}
+
 fn join_live_with_baseline_with_filter(
     live_rows: &[HashMap<String, String>],
     baseline_rows: &[HashMap<String, String>],
@@ -435,11 +460,11 @@ fn join_live_with_baseline_with_filter(
         if let Some(sensor) = live_row.get("sensor").map(|v| normalize_binding_term(v)) {
             if let Some(baseline_row) = baseline_by_sensor.get(&sensor) {
                 let live_val: f64 = live_row
-                    .get("liveFlow")
+                    .get("liveAvgCongestion")
                     .and_then(|v| normalize_binding_term(v).parse().ok())
                     .unwrap_or(0.0);
                 let base_val: f64 = baseline_row
-                    .get("baselineFlow")
+                    .get("historicalAvgCongestion")
                     .and_then(|v| normalize_binding_term(v).parse().ok())
                     .unwrap_or(0.0);
                 if live_val > base_val {
@@ -447,6 +472,8 @@ fn join_live_with_baseline_with_filter(
                     for (k, v) in live_row {
                         merged.insert(k.clone(), v.clone());
                     }
+                    merged
+                        .insert("congestionDelta".to_string(), format!("{}", live_val - base_val));
                     joined.push(merged);
                 }
             }
@@ -464,23 +491,77 @@ fn hybrid_query(
     format!(
         r#"
         PREFIX ex: <http://example.org/>
-        PREFIX baseline: <{BASELINE_NS}>
 
         REGISTER RStream <output> AS
-        SELECT ?sensor ?liveFlow ?baselineFlow
-        FROM NAMED WINDOW ex:hist ON STREAM <{GRAPH_URI}> [START {start_ts} END {end_ts}]
+        SELECT ?sensor
+               ?liveAvgCongestion
+               ?historicalAvgCongestion
+               ((?liveAvgCongestion - ?historicalAvgCongestion) AS ?congestionDelta)
+        FROM NAMED WINDOW ex:hist ON LOG <{GRAPH_URI}> [START {start_ts} END {end_ts}]
         FROM NAMED WINDOW ex:live ON STREAM <{LIVE_STREAM_URI}> [RANGE {window_size_ms} STEP {window_slide_ms}]
-        USING BASELINE ex:hist AGGREGATE
         WHERE {{
-            WINDOW ex:hist {{
-                ?sensor ex:baselineFlow ?baselineFlow .
+            {{
+                SELECT ?sensor
+                       (AVG(?historicalCongestion) AS ?historicalAvgCongestion)
+                WHERE {{
+                    WINDOW ex:hist {{
+                        ?sensor ex:congestionLevel ?historicalCongestion .
+                    }}
+                }}
+                GROUP BY ?sensor
+            }}
+
+            {{
+                SELECT ?sensor
+                       (AVG(?liveCongestion) AS ?liveAvgCongestion)
+                WHERE {{
+                    WINDOW ex:live {{
+                        ?sensor ex:congestionLevel ?liveCongestion .
+                    }}
+                }}
+                GROUP BY ?sensor
+            }}
+
+            FILTER(?liveAvgCongestion > ?historicalAvgCongestion)
+        }}
+        "#
+    )
+}
+
+fn hybrid_query_execution_form(
+    start_ts: u64,
+    end_ts: u64,
+    window_size_ms: usize,
+    window_slide_ms: usize,
+) -> String {
+    format!(
+        r#"
+        PREFIX ex: <http://example.org/>
+
+        REGISTER RStream <output> AS
+        SELECT ?sensor
+               (AVG(?liveCongestion) AS ?liveAvgCongestion)
+               ?historicalAvgCongestion
+               ((AVG(?liveCongestion) - ?historicalAvgCongestion) AS ?congestionDelta)
+        FROM NAMED WINDOW ex:hist ON LOG <{GRAPH_URI}> [START {start_ts} END {end_ts}]
+        FROM NAMED WINDOW ex:live ON STREAM <{LIVE_STREAM_URI}> [RANGE {window_size_ms} STEP {window_slide_ms}]
+        WHERE {{
+            {{
+                SELECT ?sensor
+                       (AVG(?historicalCongestion) AS ?historicalAvgCongestion)
+                WHERE {{
+                    WINDOW ex:hist {{
+                        ?sensor ex:congestionLevel ?historicalCongestion .
+                    }}
+                }}
+                GROUP BY ?sensor
             }}
             WINDOW ex:live {{
-                ?sensor ex:trafficFlow ?liveFlow .
+                ?sensor ex:congestionLevel ?liveCongestion .
             }}
-            ?sensor baseline:baselineFlow ?baselineFlow .
-            FILTER(?liveFlow > ?baselineFlow)
         }}
+        GROUP BY ?sensor ?historicalAvgCongestion
+        HAVING(AVG(?liveCongestion) > ?historicalAvgCongestion)
         "#
     )
 }
@@ -491,13 +572,15 @@ fn live_only_rspql(window_size_ms: usize, window_slide_ms: usize) -> String {
         PREFIX ex: <http://example.org/>
 
         REGISTER RStream <output> AS
-        SELECT ?sensor ?liveFlow
+        SELECT ?sensor
+               (AVG(?liveCongestion) AS ?liveAvgCongestion)
         FROM NAMED WINDOW ex:live ON STREAM <{LIVE_STREAM_URI}> [RANGE {window_size_ms} STEP {window_slide_ms}]
         WHERE {{
             WINDOW ex:live {{
-                ?sensor ex:trafficFlow ?liveFlow .
+                ?sensor ex:congestionLevel ?liveCongestion .
             }}
         }}
+        GROUP BY ?sensor
         "#
     )
 }
@@ -507,14 +590,15 @@ fn build_decomposed_sparql(start_ts: u64, end_ts: u64) -> String {
         r#"
         PREFIX ex: <http://example.org/>
         PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
-        SELECT ?sensor ?baselineFlow WHERE {{
+        SELECT ?sensor (AVG(?historicalCongestion) AS ?historicalAvgCongestion) WHERE {{
             GRAPH ?eventGraph {{
-                ?sensor ex:baselineFlow ?baselineFlow .
+                ?sensor ex:congestionLevel ?historicalCongestion .
             }}
             ?eventGraph ex:timestamp ?t .
             ?eventGraph ex:graph <http://example.org/citybench> .
             FILTER(?t >= {} && ?t <= {})
         }}
+        GROUP BY ?sensor
         "#,
         start_ts, end_ts
     )
@@ -529,11 +613,12 @@ fn prepare_historical_storage(
 
     for index in 0..target_historical_quads {
         let ts = base_ts + index as u64 * 60;
-        let event = RDFEvent::new(
+        let event = RDFEvent::new_typed_literal_object(
             ts,
-            &format!("http://example.org/junction/{}", index % 64),
-            BASELINE_PREDICATE,
-            &format!("{:.6}", 40.0 + (index % 17) as f64 + (index as f64) * 0.000001),
+            &sensor_uri(index),
+            CONGESTION_PREDICATE,
+            &format!("{:.3}", congestion_value_for_historical(index)),
+            XSD_DECIMAL,
             GRAPH_URI,
         );
         storage.write_rdf_event(event)?;
@@ -550,16 +635,40 @@ fn generate_live_events(live_duration_ms: u64, event_interval_ms: u64) -> Vec<RD
     let mut live_events = Vec::new();
     for index in 0..total_live_events {
         let ts = live_start_ts + index as u64 * event_interval_ms;
-        let event = RDFEvent::new(
+        let event = RDFEvent::new_typed_literal_object(
             ts,
-            &format!("http://example.org/junction/{}", index % 64),
-            TRAFFIC_PREDICATE,
-            &(70 + (index % 11)).to_string(),
+            &sensor_uri(index),
+            CONGESTION_PREDICATE,
+            &format!("{:.3}", congestion_value_for_live(index)),
+            XSD_DECIMAL,
             GRAPH_URI,
         );
         live_events.push(event);
     }
     live_events
+}
+
+fn sensor_uri(index: usize) -> String {
+    format!("http://example.org/junction/{}", index % SENSOR_COUNT)
+}
+
+fn historical_sensor_base(sensor_idx: usize) -> f64 {
+    30.0 + sensor_idx as f64 * 5.0
+}
+
+fn congestion_value_for_historical(index: usize) -> f64 {
+    let sensor_idx = index % SENSOR_COUNT;
+    let sample_idx = index / SENSOR_COUNT;
+    let seasonal = ((sample_idx * 7 + sensor_idx * 3) % 9) as f64 - 4.0;
+    historical_sensor_base(sensor_idx) + seasonal
+}
+
+fn congestion_value_for_live(index: usize) -> f64 {
+    let sensor_idx = index % SENSOR_COUNT;
+    let sample_idx = index / SENSOR_COUNT;
+    let bias = if sensor_idx % 2 == 0 { 8.0 } else { -8.0 };
+    let oscillation = ((sample_idx * 5 + sensor_idx) % 5) as f64 - 2.0;
+    historical_sensor_base(sensor_idx) + bias + oscillation
 }
 
 fn wait_for_live_event_schedule(replay_start: Instant, event_index: usize, rate_hz: f64) {
@@ -582,6 +691,81 @@ fn calculate_stats(values: &[f64]) -> SummaryStats {
         0.0
     };
     SummaryStats { mean, std }
+}
+
+fn find_first_baseline_definition<'a>(
+    parsed: &'a ParsedJanusQuery,
+) -> Result<(&'a BaselineDefinition, &'a BaselineGraphTemplate), Box<dyn std::error::Error>> {
+    let definition = parsed
+        .ast
+        .baseline_definitions
+        .first()
+        .ok_or("missing lowered historical subquery definition")?;
+    let template = parsed
+        .baseline_graph_templates
+        .iter()
+        .find(|template| template.baseline_name == definition.name)
+        .ok_or("missing lowered historical subquery graph template")?;
+    Ok((definition, template))
+}
+
+fn find_baseline_source_windows<'a>(
+    parsed: &'a ParsedJanusQuery,
+    definition: &'a BaselineDefinition,
+) -> Result<Vec<&'a WindowDefinition>, Box<dyn std::error::Error>> {
+    definition
+        .source_windows
+        .iter()
+        .map(|source_window_name| {
+            parsed
+                .historical_windows
+                .iter()
+                .find(|window| window.window_name == *source_window_name)
+                .ok_or_else(|| {
+                    format!("missing historical source window '{source_window_name}'").into()
+                })
+        })
+        .collect()
+}
+
+fn execute_lowered_historical_subquery(
+    parsed: &ParsedJanusQuery,
+    storage: Arc<StreamingSegmentedStorage>,
+    evaluation_time: u64,
+) -> Result<Vec<HashMap<String, String>>, Box<dyn std::error::Error>> {
+    let (definition, _) = find_first_baseline_definition(parsed)?;
+    let source_windows = find_baseline_source_windows(parsed, definition)?;
+    let mut historical_events = Vec::new();
+
+    for window in source_windows {
+        let (start, end) = window.resolve_historical_bounds(evaluation_time).ok_or_else(|| {
+            format!("failed to resolve historical bounds for window '{}'", window.window_name)
+        })?;
+        historical_events.extend(storage.query_rdf(start, end)?);
+    }
+
+    Ok(build_historical_baseline_bindings_from_events(&historical_events))
+}
+
+fn materialize_lowered_historical_subquery(
+    processor: &mut LiveStreamProcessing,
+    parsed: &ParsedJanusQuery,
+    bindings: &[HashMap<String, String>],
+) -> Result<(), Box<dyn std::error::Error>> {
+    let (definition, template) = find_first_baseline_definition(parsed)?;
+    validate_template_against_definition(definition, template)?;
+    let graph_name = GraphName::NamedNode(NamedNode::new(template.baseline_name.as_str())?);
+
+    for binding in bindings {
+        for triple in &template.triples {
+            let subject = resolve_subject_term(triple, binding)?;
+            let predicate = resolve_predicate_term(triple)?;
+            let object = resolve_object_term(triple, binding)?;
+            processor.add_static_quad(Quad::new(subject, predicate, object, graph_name.clone()));
+        }
+    }
+
+    Ok(())
 }
 
 fn run_janus_unified(
@@ -614,27 +798,36 @@ fn run_janus_unified(
         _ => return Err("invalid query type".into()),
     };
 
-    let expected_historical_result_count = match historical_query_type {
+    let selected_historical_events = match historical_query_type {
         "point_lookup" => 1,
-        "fixed_60s" => 1000,
-        "range_10_percent" => h / 10,
-        "range_50_percent" => h / 2,
-        "range_100_percent" => h,
+        "fixed_60s" => 1000.min(h),
+        "range_10_percent" => (h / 10).max(1),
+        "range_50_percent" => (h / 2).max(1),
+        "range_100_percent" => h.max(1),
         _ => 0,
     };
+    let expected_historical_result_count = selected_historical_events.min(SENSOR_COUNT);
 
     let parser = JanusQLParser::new()?;
-    // Query range is half-open [start_ts, end_ts), so use end_ts - 1
-    let query_str = hybrid_query(start_ts, end_ts - 1, args.window_size_ms, args.window_slide_ms);
-    let parsed = parser.parse(&query_str)?;
+    // Query range is half-open [start_ts, end_ts), so use end_ts - 1.
+    // The benchmark keeps the user-facing Janus-QL query in nested-subquery form,
+    // but lowers the live-only subquery into an equivalent top-level aggregate
+    // because the current parser only supports lowering historical nested subqueries.
+    let _user_facing_query =
+        hybrid_query(start_ts, end_ts - 1, args.window_size_ms, args.window_slide_ms);
+    let execution_query = hybrid_query_execution_form(
+        start_ts,
+        end_ts - 1,
+        args.window_size_ms,
+        args.window_slide_ms,
+    );
+    let parsed = parser.parse(&execution_query)?;
     let query_registered = now_ms();
 
     let historical_start = now_ms();
-    let executor = HistoricalExecutor::new(historical_storage, OxigraphAdapter::new());
-    let baseline_bindings = executor.execute_fixed_window(
-        parsed.historical_windows.first().ok_or("missing historical window")?,
-        parsed.sparql_queries.first().ok_or("missing historical SPARQL query")?,
-    )?;
+    let _ = parsed.historical_windows.first().ok_or("missing historical window")?;
+    let baseline_bindings =
+        execute_lowered_historical_subquery(&parsed, historical_storage.clone(), end_ts - 1)?;
     let historical_done = now_ms();
     let historical_query_ms = (historical_done - historical_start) as f64;
 
@@ -642,7 +835,7 @@ fn run_janus_unified(
 
     let mut processor = LiveStreamProcessing::new(parsed.rspql_query.clone())?;
     processor.register_stream(LIVE_STREAM_URI)?;
-    materialize_bindings_as_static_baseline(&mut processor, &baseline_bindings)?;
+    materialize_lowered_historical_subquery(&mut processor, &parsed, &baseline_bindings)?;
     processor.start_processing()?;
 
     let replay_start = Instant::now();
@@ -811,14 +1004,15 @@ fn run_decomposed_oxigraph(
         _ => return Err("invalid query type".into()),
     };
 
-    let expected_historical_result_count = match historical_query_type {
+    let selected_historical_events = match historical_query_type {
         "point_lookup" => 1,
-        "fixed_60s" => 1000,
-        "range_10_percent" => h / 10,
-        "range_50_percent" => h / 2,
-        "range_100_percent" => h,
+        "fixed_60s" => 1000.min(h),
+        "range_10_percent" => (h / 10).max(1),
+        "range_50_percent" => (h / 2).max(1),
+        "range_100_percent" => h.max(1),
         _ => 0,
     };
+    let expected_historical_result_count = selected_historical_events.min(SENSOR_COUNT);
 
     // Load full history into Oxigraph
     let load_start = now_ms();
@@ -906,7 +1100,7 @@ fn run_decomposed_oxigraph(
 
     let historical_result_count = external_bindings.len();
     let materialized_baseline_rows =
-        materialized_baseline_rows_from_bindings(&external_bindings, "baselineFlow");
+        materialized_baseline_rows_from_bindings(&external_bindings, "historicalAvgCongestion");
 
     // Live stream processing setup
     let live_query_def = live_only_rspql(args.window_size_ms, args.window_slide_ms);

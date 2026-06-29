@@ -182,8 +182,10 @@ pub fn run_coordination_system(
                 &workload.historical_sparql_query,
                 &workload.historical_rdf_events,
             )?;
-            let materialized_baseline_rows =
-                materialized_baseline_rows_from_bindings(&external_bindings, "baselineFlow");
+            let materialized_baseline_rows = materialized_baseline_rows_from_bindings(
+                &external_bindings,
+                "historicalAvgCongestion",
+            );
             let historical_done = now_ms();
             let mut processor = LiveStreamProcessing::new(live_only_rspql())?;
             processor.register_stream(LIVE_STREAM_URI)?;
