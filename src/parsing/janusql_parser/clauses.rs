@@ -62,18 +62,30 @@ impl JanusQLParser {
         let spec = match spec_parts.as_slice() {
             ["RANGE", range, "STEP", step] => {
                 if source_kind != SourceKind::Stream {
-                    return Err(self.parse_error(
-                        "Live RANGE/STEP windows are only supported on STREAM sources",
-                    ));
+                    return Err(
+                        self.parse_error("Live RANGE/STEP windows must use ON STREAM, not ON LOG")
+                    );
                 }
                 WindowSpec::LiveSliding { range: range.parse()?, step: step.parse()? }
             }
-            ["OFFSET", offset, "RANGE", range, "STEP", step] => WindowSpec::HistoricalSliding {
-                offset: offset.parse()?,
-                range: range.parse()?,
-                step: step.parse()?,
-            },
+            ["OFFSET", offset, "RANGE", range, "STEP", step] => {
+                if source_kind != SourceKind::Log {
+                    return Err(self.parse_error(
+                        "Historical OFFSET/RANGE/STEP windows must use ON LOG, not ON STREAM",
+                    ));
+                }
+                WindowSpec::HistoricalSliding {
+                    offset: offset.parse()?,
+                    range: range.parse()?,
+                    step: step.parse()?,
+                }
+            }
             ["START", start, "END", end] => {
+                if source_kind != SourceKind::Log {
+                    return Err(self.parse_error(
+                        "Historical START/END windows must use ON LOG, not ON STREAM",
+                    ));
+                }
                 WindowSpec::HistoricalFixed { start: start.parse()?, end: end.parse()? }
             }
             _ => {
@@ -100,7 +112,7 @@ impl JanusQLParser {
             WindowSpec::LiveSliding { range, step } => WindowDefinition {
                 window_name: window.window_name.clone(),
                 source_kind: window.source_kind.clone(),
-                stream_name: window.source_name.clone(),
+                source_name: window.source_name.clone(),
                 width: range,
                 slide: step,
                 offset: None,
@@ -111,7 +123,7 @@ impl JanusQLParser {
             WindowSpec::HistoricalSliding { offset, range, step } => WindowDefinition {
                 window_name: window.window_name.clone(),
                 source_kind: window.source_kind.clone(),
-                stream_name: window.source_name.clone(),
+                source_name: window.source_name.clone(),
                 width: range,
                 slide: step,
                 offset: Some(offset),
@@ -122,7 +134,7 @@ impl JanusQLParser {
             WindowSpec::HistoricalFixed { start, end } => WindowDefinition {
                 window_name: window.window_name.clone(),
                 source_kind: window.source_kind.clone(),
-                stream_name: window.source_name.clone(),
+                source_name: window.source_name.clone(),
                 width: 0,
                 slide: 0,
                 offset: None,

@@ -159,7 +159,7 @@ SELECT ?sensor
        ?liveAvgCongestion
        ?historicalAvgCongestion
        ((?liveAvgCongestion - ?historicalAvgCongestion) AS ?congestionDelta)
-FROM NAMED WINDOW ex:hist ON STREAM <http://example.org/citybench> [START T_START END T_END]
+FROM NAMED WINDOW ex:hist ON LOG <http://example.org/citybench> [START T_START END T_END]
 FROM NAMED WINDOW ex:live ON STREAM <http://example.org/live> [RANGE WINDOW_SIZE_MS STEP WINDOW_SLIDE_MS]
 WHERE {
   {

@@ -88,7 +88,7 @@ Notes:
 ```bash
 curl -X POST http://localhost:8080/api/queries \
   -H "Content-Type: application/json" \
-  -d '{"query_id":"q1","janusql":"PREFIX ex: <http://example.org/> REGISTER RStream ex:o AS SELECT ?s ?p ?o FROM NAMED WINDOW ex:w ON STREAM ex:s [START 1704067200 END 1735689599] WHERE { WINDOW ex:w { ?s ?p ?o . } }"}'
+  -d '{"query_id":"q1","janusql":"PREFIX ex: <http://example.org/> REGISTER RStream ex:o AS SELECT ?s ?p ?o FROM NAMED WINDOW ex:w ON LOG ex:s [START 1704067200 END 1735689599] WHERE { WINDOW ex:w { ?s ?p ?o . } }"}'
 ```
 
 ### Start Replay

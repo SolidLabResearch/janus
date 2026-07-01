@@ -24,8 +24,8 @@ pub struct WindowDefinition {
     pub window_name: String,
     /// Source kind used by the window clause.
     pub source_kind: SourceKind,
-    /// Name of the stream
-    pub stream_name: String,
+    /// Name of the declared source, either a live stream or historical log.
+    pub source_name: String,
     /// Width of the window
     pub width: u64,
     /// Slide step

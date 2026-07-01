@@ -42,8 +42,8 @@ fn test_mixed_windows() {
         REGISTER RStream sensor:output AS
         SELECT ?temperature ?timestamp
         FROM NAMED WINDOW sensor:tempWindow ON STREAM sensor:temperatureStream [RANGE 5000 STEP 1000]
-        FROM NAMED WINDOW sensor:histWindow ON STREAM sensor:temperatureStream [START 1622505600 END 1622592000]
-        FROM NAMED WINDOW sensor:histSlideWindow ON STREAM sensor:temperatureStream [OFFSET 1622505600 RANGE 10000 STEP 2000]
+        FROM NAMED WINDOW sensor:histWindow ON LOG sensor:temperatureStream [START 1622505600 END 1622592000]
+        FROM NAMED WINDOW sensor:histSlideWindow ON LOG sensor:temperatureStream [OFFSET 1622505600 RANGE 10000 STEP 2000]
         WHERE {
             WINDOW sensor:tempWindow {
                 ?event saref:hasValue ?temperature .
@@ -67,9 +67,11 @@ fn test_mixed_windows() {
     assert_eq!(result.live_windows[0].slide, 1000);
     assert_eq!(result.historical_windows[0].start, Some(1_622_505_600));
     assert_eq!(result.historical_windows[0].end, Some(1_622_592_000));
+    assert_eq!(result.historical_windows[0].source_kind, SourceKind::Log);
     assert_eq!(result.historical_windows[1].offset, Some(1_622_505_600));
     assert_eq!(result.historical_windows[1].width, 10000);
     assert_eq!(result.historical_windows[1].slide, 2000);
+    assert_eq!(result.historical_windows[1].source_kind, SourceKind::Log);
     assert!(!result.rspql_query.is_empty());
     assert_eq!(result.sparql_queries.len(), 2);
 }
@@ -192,6 +194,40 @@ fn test_parse_ast_on_log_historical_sliding_window() {
         ast.windows[0].spec,
         WindowSpec::HistoricalSliding { offset: 3000, range: 1000, step: 250 }
     ));
+}
+
+#[test]
+fn test_historical_start_end_on_stream_is_rejected() {
+    let parser = JanusQLParser::new().unwrap();
+    let query = r#"
+        PREFIX ex: <http://example.org/>
+        SELECT ?sensor
+        FROM NAMED WINDOW ex:hist ON STREAM ex:store [START 1000 END 2000]
+        WHERE {
+            WINDOW ex:hist { ?sensor ex:value ?value }
+        }
+    "#;
+
+    let err = parser
+        .parse(query)
+        .expect_err("historical START/END on STREAM must be rejected");
+    assert!(err.to_string().contains("Historical START/END windows must use ON LOG"));
+}
+
+#[test]
+fn test_live_range_step_on_log_is_rejected() {
+    let parser = JanusQLParser::new().unwrap();
+    let query = r#"
+        PREFIX ex: <http://example.org/>
+        SELECT ?sensor
+        FROM NAMED WINDOW ex:live ON LOG ex:store [RANGE 500 STEP 100]
+        WHERE {
+            WINDOW ex:live { ?sensor ex:value ?value }
+        }
+    "#;
+
+    let err = parser.parse(query).expect_err("live RANGE/STEP on LOG must be rejected");
+    assert!(err.to_string().contains("Live RANGE/STEP windows must use ON STREAM"));
 }
 
 #[test]

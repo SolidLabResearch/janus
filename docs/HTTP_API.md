@@ -61,7 +61,7 @@ Register a new JanusQL query.
 ```json
 {
   "query_id": "sensor_query_1",
-  "janusql": "PREFIX ex: <http://example.org/> SELECT ?sensor ?temp FROM NAMED WINDOW ex:histWindow ON STREAM ex:graph1 [START 0 END 9999999999999] WHERE { WINDOW ex:histWindow { ?sensor ex:temperature ?temp . } }"
+  "janusql": "PREFIX ex: <http://example.org/> SELECT ?sensor ?temp FROM NAMED WINDOW ex:histWindow ON LOG ex:graph1 [START 0 END 9999999999999] WHERE { WINDOW ex:histWindow { ?sensor ex:temperature ?temp . } }"
 }
 ```
 
@@ -398,7 +398,7 @@ curl -X POST http://localhost:8080/api/queries \
   -H "Content-Type: application/json" \
   -d '{
     "query_id": "temp_query",
-    "janusql": "PREFIX ex: <http://example.org/> SELECT ?sensor ?temp FROM NAMED WINDOW ex:histWindow ON STREAM ex:graph1 [START 0 END 9999999999999] WHERE { WINDOW ex:histWindow { ?sensor ex:temperature ?temp . } }"
+    "janusql": "PREFIX ex: <http://example.org/> SELECT ?sensor ?temp FROM NAMED WINDOW ex:histWindow ON LOG ex:graph1 [START 0 END 9999999999999] WHERE { WINDOW ex:histWindow { ?sensor ex:temperature ?temp . } }"
   }'
 ```
 
@@ -462,7 +462,7 @@ response = requests.post(
     f"{BASE_URL}/api/queries",
     json={
         "query_id": "my_query",
-        "janusql": "PREFIX ex: <http://example.org/> SELECT ?s ?p ?o FROM NAMED WINDOW ex:histWindow ON STREAM ex:graph1 [START 0 END 9999999999999] WHERE { WINDOW ex:histWindow { ?s ?p ?o . } }"
+        "janusql": "PREFIX ex: <http://example.org/> SELECT ?s ?p ?o FROM NAMED WINDOW ex:histWindow ON LOG ex:graph1 [START 0 END 9999999999999] WHERE { WINDOW ex:histWindow { ?s ?p ?o . } }"
     }
 )
 print(f"Register: {response.json()}")
@@ -500,7 +500,7 @@ async function demo() {
   // Register a query
   const registerResponse = await axios.post(`${BASE_URL}/api/queries`, {
     query_id: 'js_query',
-    janusql: 'PREFIX ex: <http://example.org/> SELECT ?s ?p ?o FROM NAMED WINDOW ex:histWindow ON STREAM ex:graph1 [START 0 END 9999999999999] WHERE { WINDOW ex:histWindow { ?s ?p ?o . } }'
+    janusql: 'PREFIX ex: <http://example.org/> SELECT ?s ?p ?o FROM NAMED WINDOW ex:histWindow ON LOG ex:graph1 [START 0 END 9999999999999] WHERE { WINDOW ex:histWindow { ?s ?p ?o . } }'
   });
   console.log('Registered:', registerResponse.data);
 
@@ -629,7 +629,7 @@ For a simple demo dashboard with "Start Replay" and "Start Query" buttons:
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             query_id: QUERY_ID,
-            janusql: 'PREFIX ex: <http://example.org/> SELECT ?sensor ?temp FROM NAMED WINDOW ex:histWindow ON STREAM ex:graph1 [START 0 END 9999999999999] WHERE { WINDOW ex:histWindow { ?sensor ex:temperature ?temp . } }'
+            janusql: 'PREFIX ex: <http://example.org/> SELECT ?sensor ?temp FROM NAMED WINDOW ex:histWindow ON LOG ex:graph1 [START 0 END 9999999999999] WHERE { WINDOW ex:histWindow { ?sensor ex:temperature ?temp . } }'
           })
         });
 

@@ -30,11 +30,11 @@ impl JanusQLParser {
 
         for window in &parsed.live_windows {
             let wrapped_window_name = self.wrap_iri(&window.window_name, &parsed.prefixes);
-            let wrapped_stream_name = self.wrap_iri(&window.stream_name, &parsed.prefixes);
+            let wrapped_source_name = self.wrap_iri(&window.source_name, &parsed.prefixes);
 
             lines.push(format!(
                 "FROM NAMED WINDOW {} ON STREAM {} [RANGE {} STEP {}]",
-                wrapped_window_name, wrapped_stream_name, window.width, window.slide
+                wrapped_window_name, wrapped_source_name, window.width, window.slide
             ));
         }
 

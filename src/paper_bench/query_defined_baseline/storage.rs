@@ -24,7 +24,7 @@ pub fn smoke_historical_window(
     Ok(WindowDefinition {
         window_name: format!("{PREFIX}historyDay"),
         source_kind: SourceKind::Log,
-        stream_name: format!("{PREFIX}stream"),
+        source_name: format!("{PREFIX}stream"),
         width: 0,
         slide: 0,
         offset: None,

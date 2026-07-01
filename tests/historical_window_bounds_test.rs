@@ -4,7 +4,7 @@ fn sliding_window() -> WindowDefinition {
     WindowDefinition {
         window_name: "http://example.org/sameMinuteYesterday".to_string(),
         source_kind: SourceKind::Log,
-        stream_name: "http://example.org/stream".to_string(),
+        source_name: "http://example.org/stream".to_string(),
         width: 60_000,
         slide: 60_000,
         offset: Some(86_400_000),
@@ -18,7 +18,7 @@ fn fixed_window() -> WindowDefinition {
     WindowDefinition {
         window_name: "http://example.org/historyDay".to_string(),
         source_kind: SourceKind::Log,
-        stream_name: "http://example.org/stream".to_string(),
+        source_name: "http://example.org/stream".to_string(),
         width: 0,
         slide: 0,
         offset: None,

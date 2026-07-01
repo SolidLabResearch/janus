@@ -126,7 +126,7 @@ pub fn run_hybrid_baseline_lookup(
 
         REGISTER RStream <output> AS
         SELECT ?sensor ?liveFlow ?baselineFlow
-        FROM NAMED WINDOW ex:hist ON STREAM <{}> [START {} END {}]
+        FROM NAMED WINDOW ex:hist ON LOG <{}> [START {} END {}]
         FROM NAMED WINDOW ex:live ON STREAM <{}> [RANGE 5000 STEP 1000]
         USING BASELINE ex:hist AGGREGATE
         WHERE {{

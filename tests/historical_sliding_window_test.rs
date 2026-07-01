@@ -65,8 +65,8 @@ fn test_historical_sliding_window_with_real_iris() {
     // Define Window: Width 200, Slide 100, Offset 500
     let window_def = WindowDefinition {
         window_name: "http://example.org/window/temp-sliding".to_string(),
-        source_kind: SourceKind::Stream,
-        stream_name: "http://example.org/stream/temperature".to_string(),
+        source_kind: SourceKind::Log,
+        source_name: "http://example.org/stream/temperature".to_string(),
         width: 200,
         slide: 100,
         offset: Some(500),
@@ -146,8 +146,8 @@ fn test_historical_sliding_window_foaf_example() {
 
     let window_def = WindowDefinition {
         window_name: "http://example.org/window/people-sliding".to_string(),
-        source_kind: SourceKind::Stream,
-        stream_name: "http://example.org/stream/people".to_string(),
+        source_kind: SourceKind::Log,
+        source_name: "http://example.org/stream/people".to_string(),
         width: 250,
         slide: 100,
         offset: Some(600),

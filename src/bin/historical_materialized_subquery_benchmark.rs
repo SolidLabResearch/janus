@@ -197,7 +197,7 @@ fn measure_live_startup(parsed: &ParsedJanusQuery) -> Result<f64, Box<dyn std::e
     let started = Instant::now();
     let mut processor = LiveStreamProcessing::new(parsed.rspql_query.clone())?;
     for window in &parsed.live_windows {
-        processor.register_stream(&window.stream_name)?;
+        processor.register_stream(&window.source_name)?;
     }
     processor.start_processing()?;
     Ok(elapsed_ms(started))

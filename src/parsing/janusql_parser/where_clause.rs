@@ -213,7 +213,7 @@ impl JanusQLParser {
                     )
                 }
                 SourceKind::Stream => {
-                    let stream_uri = self.wrap_iri(&window.stream_name, prefixes);
+                    let stream_uri = self.wrap_iri(&window.source_name, prefixes);
                     format!("WHERE {{\n  GRAPH {} {{\n    {}\n  }}\n}}", stream_uri, inner_pattern)
                 }
             }

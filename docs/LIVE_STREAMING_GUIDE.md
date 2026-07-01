@@ -82,7 +82,7 @@ Click "Start Query". This:
 PREFIX ex: <http://example.org/>
 REGISTER RStream ex:output AS
 SELECT ?sensor ?temp
-FROM NAMED WINDOW ex:histWindow ON STREAM ex:sensorStream [START 1000000000000 END 2000000000000]
+FROM NAMED WINDOW ex:histWindow ON LOG ex:sensorStream [START 1000000000000 END 2000000000000]
 FROM NAMED WINDOW ex:liveWindow ON STREAM ex:sensorStream [RANGE 5000 STEP 2000]
 WHERE {
   WINDOW ex:histWindow {
@@ -96,12 +96,12 @@ WHERE {
 
 ### Window Types
 
-**Historical Window (START/END)**
+**Historical Window (ON LOG + START/END)**
 - Queries past data from storage
 - Fixed time range: `[START timestamp END timestamp]`
 - Example: `[START 1000000000000 END 2000000000000]`
 
-**Live Window (RANGE/STEP)**
+**Live Window (ON STREAM + RANGE/STEP)**
 - Queries streaming data from MQTT
 - Sliding window: `[RANGE duration STEP slide]`
 - Example: `[RANGE 5000 STEP 2000]` (5 second window, 2 second slide)

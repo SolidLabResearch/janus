@@ -72,8 +72,8 @@ fn test_historical_fixed_window_with_real_iris() {
     // Define Fixed Window: [200, 500]
     let window_def = WindowDefinition {
         window_name: "http://example.org/window/temp-fixed".to_string(),
-        source_kind: SourceKind::Stream,
-        stream_name: "http://example.org/stream/temperature".to_string(),
+        source_kind: SourceKind::Log,
+        source_name: "http://example.org/stream/temperature".to_string(),
         width: 0,
         slide: 0,
         offset: None,
@@ -160,8 +160,8 @@ fn test_historical_fixed_window_semantic_web() {
     // Query publications from timestamp 150 to 450
     let window_def = WindowDefinition {
         window_name: "http://example.org/window/publications-fixed".to_string(),
-        source_kind: SourceKind::Stream,
-        stream_name: "http://example.org/stream/publications".to_string(),
+        source_kind: SourceKind::Log,
+        source_name: "http://example.org/stream/publications".to_string(),
         width: 0,
         slide: 0,
         offset: None,

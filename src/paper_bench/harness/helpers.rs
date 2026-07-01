@@ -194,7 +194,7 @@ pub fn hybrid_query(start_ts: u64, end_ts: u64) -> String {
                (AVG(?liveCongestion) AS ?liveAvgCongestion)
                ?historicalAvgCongestion
                ((AVG(?liveCongestion) - ?historicalAvgCongestion) AS ?congestionDelta)
-        FROM NAMED WINDOW ex:hist ON STREAM <{GRAPH_URI}> [START {start_ts} END {end_ts}]
+        FROM NAMED WINDOW ex:hist ON LOG <{GRAPH_URI}> [START {start_ts} END {end_ts}]
         FROM NAMED WINDOW ex:live ON STREAM <{LIVE_STREAM_URI}> [RANGE 10000 STEP 1000]
         USING BASELINE ex:hist AGGREGATE
         WHERE {{
@@ -257,7 +257,7 @@ pub fn historical_lookup_query(start: u64, end: u64, subject_filter: Option<&str
         PREFIX ex: <http://example.org/>
 
         SELECT ?sensor ?trafficFlow
-        FROM NAMED WINDOW ex:hist ON STREAM <{GRAPH_URI}> [START {start} END {end}]
+        FROM NAMED WINDOW ex:hist ON LOG <{GRAPH_URI}> [START {start} END {end}]
         WHERE {{
             WINDOW ex:hist {{
                 {subject_clause}
@@ -283,7 +283,7 @@ pub fn sustained_hybrid_query(
                (AVG(?liveCongestion) AS ?liveAvgCongestion)
                ?historicalAvgCongestion
                ((AVG(?liveCongestion) - ?historicalAvgCongestion) AS ?congestionDelta)
-        FROM NAMED WINDOW ex:hist ON STREAM <{GRAPH_URI}> [START {start_ts} END {end_ts}]
+        FROM NAMED WINDOW ex:hist ON LOG <{GRAPH_URI}> [START {start_ts} END {end_ts}]
         FROM NAMED WINDOW ex:live ON STREAM <{LIVE_STREAM_URI}> [RANGE {window_size_ms} STEP {window_slide_ms}]
         USING BASELINE ex:hist AGGREGATE
         WHERE {{

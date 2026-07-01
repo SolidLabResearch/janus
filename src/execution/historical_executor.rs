@@ -490,8 +490,8 @@ mod tests {
 
         let window = WindowDefinition {
             window_name: "test_window".to_string(),
-            source_kind: crate::parsing::janusql_parser::SourceKind::Stream,
-            stream_name: "test_stream".to_string(),
+            source_kind: crate::parsing::janusql_parser::SourceKind::Log,
+            source_name: "test_stream".to_string(),
             width: 1000,
             slide: 100,
             offset: None,
@@ -518,8 +518,8 @@ mod tests {
 
         let window = WindowDefinition {
             window_name: "test_window".to_string(),
-            source_kind: crate::parsing::janusql_parser::SourceKind::Stream,
-            stream_name: "test_stream".to_string(),
+            source_kind: crate::parsing::janusql_parser::SourceKind::Log,
+            source_name: "test_stream".to_string(),
             width: 1000,
             slide: 100,
             offset: Some(5000),
@@ -547,7 +547,7 @@ mod tests {
         let window = WindowDefinition {
             window_name: "test_window".to_string(),
             source_kind: crate::parsing::janusql_parser::SourceKind::Log,
-            stream_name: "test_stream".to_string(),
+            source_name: "test_stream".to_string(),
             width: 100,
             slide: 50,
             offset: Some(250),
@@ -576,7 +576,7 @@ mod tests {
         let window = WindowDefinition {
             window_name: "test_tumbling_window".to_string(),
             source_kind: crate::parsing::janusql_parser::SourceKind::Log,
-            stream_name: "test_stream".to_string(),
+            source_name: "test_stream".to_string(),
             width: 100,
             slide: 100,
             offset: Some(250),
