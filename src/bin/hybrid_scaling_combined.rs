@@ -68,12 +68,12 @@ pub struct HybridScalingRow {
     pub historical_lookup_ms: f64,
     pub historical_query_ms: f64,
     pub first_live_window_result_ms: Option<f64>,
-    pub first_hybrid_result_ms: f64,
-    pub main_window_result_ms: f64,
-    pub first_hybrid_window_adjusted_overhead_ms: f64,
-    pub main_window_adjusted_overhead_ms: f64,
-    pub window_processing_overhead_ms: f64, // preserved for compatibility
-    pub post_trigger_result_observation_delay_ms: f64,
+    pub first_hybrid_result_ms: Option<f64>,
+    pub main_window_result_ms: Option<f64>,
+    pub first_hybrid_window_adjusted_overhead_ms: Option<f64>,
+    pub main_window_adjusted_overhead_ms: Option<f64>,
+    pub window_processing_overhead_ms: Option<f64>, // preserved for compatibility
+    pub post_trigger_result_observation_delay_ms: Option<f64>,
     pub external_merge_ms: f64,
     pub total_run_ms: f64,
 
@@ -103,6 +103,22 @@ pub struct HybridScalingRow {
 struct SummaryStats {
     mean: f64,
     std: f64,
+}
+
+fn adjusted_overhead(result_ms: Option<f64>, baseline_ms: f64) -> Option<f64> {
+    let latency_ms = result_ms?;
+    let adjusted = latency_ms - baseline_ms;
+    if adjusted < 0.0 {
+        // A missing/invalid observed timestamp must not be serialized as a negative
+        // adjusted overhead. This benchmark expects the observed hybrid result to
+        // arrive after the window has logically closed.
+        return None;
+    }
+    Some(adjusted)
+}
+
+fn format_optional_ms(value: Option<f64>) -> String {
+    value.map(|value| format!("{value:.3}")).unwrap_or_default()
 }
 
 const DURABLE_RESULTS_CSV: &str = "hybrid_scaling_combined.results.csv";
@@ -695,6 +711,27 @@ fn calculate_stats(values: &[f64]) -> SummaryStats {
     SummaryStats { mean, std }
 }
 
+fn calculate_optional_stats(values: impl Iterator<Item = Option<f64>>) -> Option<SummaryStats> {
+    let collected = values.flatten().collect::<Vec<_>>();
+    if collected.is_empty() {
+        None
+    } else {
+        Some(calculate_stats(&collected))
+    }
+}
+
+fn format_optional_stats_csv(stats: Option<SummaryStats>) -> (String, String) {
+    stats
+        .map(|stats| (format!("{:.3}", stats.mean), format!("{:.3}", stats.std)))
+        .unwrap_or_default()
+}
+
+fn format_optional_stats_md(stats: Option<SummaryStats>, unit: &str) -> String {
+    stats
+        .map(|stats| format!("{:.3} ± {:.3} {unit}", stats.mean, stats.std))
+        .unwrap_or_else(|| "N/A".to_string())
+}
+
 fn find_first_baseline_definition<'a>(
     parsed: &'a ParsedJanusQuery,
 ) -> Result<(&'a BaselineDefinition, &'a BaselineGraphTemplate), Box<dyn std::error::Error>> {
@@ -892,9 +929,9 @@ fn run_janus_unified(
     slides.sort_unstable();
     slides.dedup();
 
-    let mut first_hybrid_result_ms = 0.0;
-    let mut main_window_result_ms = 0.0;
-    let mut window_processing_overhead_ms = 0.0;
+    let mut first_hybrid_result_ms = None;
+    let mut main_window_result_ms = None;
+    let mut window_processing_overhead_ms = None;
 
     let mut all_hybrid_rows = Vec::new();
 
@@ -903,15 +940,21 @@ fn run_janus_unified(
         all_hybrid_rows.push(parsed_rows.clone());
 
         if !slides.is_empty() && res.timestamp_to == slides[0] {
-            if first_hybrid_result_ms == 0.0 {
-                first_hybrid_result_ms = *received_at;
-                window_processing_overhead_ms = *overhead;
+            if first_hybrid_result_ms.is_none() {
+                first_hybrid_result_ms = Some(*received_at);
+                window_processing_overhead_ms = Some(*overhead);
             }
         } else if slides.len() >= 2 && res.timestamp_to == slides[1] {
-            if main_window_result_ms == 0.0 {
-                main_window_result_ms = *received_at;
+            if main_window_result_ms.is_none() {
+                main_window_result_ms = Some(*received_at);
             }
         }
+    }
+
+    if all_hybrid_rows.is_empty() {
+        first_hybrid_result_ms = None;
+        main_window_result_ms = None;
+        window_processing_overhead_ms = None;
     }
 
     let result_hash = canonical_result_hash(&all_hybrid_rows)?;
@@ -949,8 +992,8 @@ fn run_janus_unified(
         first_live_window_result_ms: None,
         first_hybrid_result_ms,
         main_window_result_ms,
-        first_hybrid_window_adjusted_overhead_ms: first_hybrid_result_ms - 5000.0,
-        main_window_adjusted_overhead_ms: main_window_result_ms - 10000.0,
+        first_hybrid_window_adjusted_overhead_ms: adjusted_overhead(first_hybrid_result_ms, 5000.0),
+        main_window_adjusted_overhead_ms: adjusted_overhead(main_window_result_ms, 10000.0),
         window_processing_overhead_ms,
         post_trigger_result_observation_delay_ms: window_processing_overhead_ms,
         external_merge_ms: 0.0,
@@ -1187,10 +1230,10 @@ fn run_decomposed_oxigraph(
     slides.sort_unstable();
     slides.dedup();
 
-    let mut first_live_window_result_ms = 0.0;
-    let mut first_hybrid_result_ms = 0.0;
-    let mut main_window_result_ms = 0.0;
-    let mut window_processing_overhead_ms = 0.0;
+    let mut first_live_window_result_ms = None;
+    let mut first_hybrid_result_ms = None;
+    let mut main_window_result_ms = None;
+    let mut window_processing_overhead_ms = None;
     let mut external_merge_ms_total = 0.0;
 
     let mut all_hybrid_rows = Vec::new();
@@ -1199,17 +1242,25 @@ fn run_decomposed_oxigraph(
         all_hybrid_rows.extend(joined.clone());
 
         if !slides.is_empty() && res.timestamp_to == slides[0] {
-            if first_live_window_result_ms == 0.0 {
-                first_live_window_result_ms = *received_at;
-                first_hybrid_result_ms = *received_at + *merge_ms;
-                window_processing_overhead_ms = *overhead;
+            if first_live_window_result_ms.is_none() {
+                first_live_window_result_ms = Some(*received_at);
+                first_hybrid_result_ms = Some(*received_at + *merge_ms);
+                window_processing_overhead_ms = Some(*overhead);
                 external_merge_ms_total = *merge_ms;
             }
         } else if slides.len() >= 2 && res.timestamp_to == slides[1] {
-            if main_window_result_ms == 0.0 {
-                main_window_result_ms = *received_at + *merge_ms;
+            if main_window_result_ms.is_none() {
+                main_window_result_ms = Some(*received_at + *merge_ms);
             }
         }
+    }
+
+    if all_hybrid_rows.is_empty() {
+        first_live_window_result_ms = None;
+        first_hybrid_result_ms = None;
+        main_window_result_ms = None;
+        window_processing_overhead_ms = None;
+        external_merge_ms_total = 0.0;
     }
 
     let result_hash = canonical_result_hash(&all_hybrid_rows)?;
@@ -1244,11 +1295,11 @@ fn run_decomposed_oxigraph(
         registration_ms: live_registration_ms,
         historical_lookup_ms: historical_query_ms,
         historical_query_ms,
-        first_live_window_result_ms: Some(first_live_window_result_ms),
+        first_live_window_result_ms,
         first_hybrid_result_ms,
         main_window_result_ms,
-        first_hybrid_window_adjusted_overhead_ms: first_hybrid_result_ms - 5000.0,
-        main_window_adjusted_overhead_ms: main_window_result_ms - 10000.0,
+        first_hybrid_window_adjusted_overhead_ms: adjusted_overhead(first_hybrid_result_ms, 5000.0),
+        main_window_adjusted_overhead_ms: adjusted_overhead(main_window_result_ms, 10000.0),
         window_processing_overhead_ms,
         post_trigger_result_observation_delay_ms: window_processing_overhead_ms,
         external_merge_ms: external_merge_ms_total,
@@ -1318,16 +1369,15 @@ fn write_reports(
                 if filtered.is_empty() {
                     continue;
                 }
-                let first_hybrid_vals =
-                    filtered.iter().map(|r| r.first_hybrid_result_ms).collect::<Vec<_>>();
-                let main_window_vals =
-                    filtered.iter().map(|r| r.main_window_result_ms).collect::<Vec<_>>();
                 let lookup_vals =
                     filtered.iter().map(|r| r.historical_lookup_ms).collect::<Vec<_>>();
-                let overhead_vals = filtered
-                    .iter()
-                    .map(|r| r.post_trigger_result_observation_delay_ms)
-                    .collect::<Vec<_>>();
+                let first_hybrid_stats =
+                    calculate_optional_stats(filtered.iter().map(|r| r.first_hybrid_result_ms));
+                let main_window_stats =
+                    calculate_optional_stats(filtered.iter().map(|r| r.main_window_result_ms));
+                let overhead_stats = calculate_optional_stats(
+                    filtered.iter().map(|r| r.post_trigger_result_observation_delay_ms),
+                );
                 let merge_vals = filtered.iter().map(|r| r.external_merge_ms).collect::<Vec<_>>();
 
                 // Resource fields
@@ -1336,10 +1386,7 @@ fn write_reports(
                 let cpu_vals = filtered.iter().map(|r| r.mean_cpu_percent).collect::<Vec<_>>();
                 let peak_cpu_vals = filtered.iter().map(|r| r.peak_cpu_percent).collect::<Vec<_>>();
 
-                let first_hybrid_stats = calculate_stats(&first_hybrid_vals);
-                let main_window_stats = calculate_stats(&main_window_vals);
                 let lookup_stats = calculate_stats(&lookup_vals);
-                let overhead_stats = calculate_stats(&overhead_vals);
                 let merge_stats = calculate_stats(&merge_vals);
 
                 let rss_stats = calculate_stats(&rss_vals);
@@ -1350,20 +1397,26 @@ fn write_reports(
                 let matches = filtered.iter().filter(|r| r.result_equivalence).count();
                 let eq_rate = matches as f64 / filtered.len() as f64;
 
+                let (first_hybrid_mean, first_hybrid_std) =
+                    format_optional_stats_csv(first_hybrid_stats);
+                let (main_window_mean, main_window_std) =
+                    format_optional_stats_csv(main_window_stats);
+                let (overhead_mean, overhead_std) = format_optional_stats_csv(overhead_stats);
+
                 writeln!(
                     csv_file,
-                    "{},{},{},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3}",
+                    "{},{},{},{},{},{},{},{:.3},{:.3},{},{},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3}",
                     q_type,
                     size,
                     system,
-                    first_hybrid_stats.mean,
-                    first_hybrid_stats.std,
-                    main_window_stats.mean,
-                    main_window_stats.std,
+                    first_hybrid_mean,
+                    first_hybrid_std,
+                    main_window_mean,
+                    main_window_std,
                     lookup_stats.mean,
                     lookup_stats.std,
-                    overhead_stats.mean,
-                    overhead_stats.std,
+                    overhead_mean,
+                    overhead_std,
                     merge_stats.mean,
                     merge_stats.std,
                     eq_rate,
@@ -1407,16 +1460,14 @@ fn write_reports(
                 if filtered.is_empty() {
                     continue;
                 }
-                let first_hybrid_vals =
-                    filtered.iter().map(|r| r.first_hybrid_result_ms).collect::<Vec<_>>();
-                let main_window_vals =
-                    filtered.iter().map(|r| r.main_window_result_ms).collect::<Vec<_>>();
                 let lookup_vals =
                     filtered.iter().map(|r| r.historical_lookup_ms).collect::<Vec<_>>();
                 let merge_vals = filtered.iter().map(|r| r.external_merge_ms).collect::<Vec<_>>();
 
-                let first_hybrid_stats = calculate_stats(&first_hybrid_vals);
-                let main_window_stats = calculate_stats(&main_window_vals);
+                let first_hybrid_stats =
+                    calculate_optional_stats(filtered.iter().map(|r| r.first_hybrid_result_ms));
+                let main_window_stats =
+                    calculate_optional_stats(filtered.iter().map(|r| r.main_window_result_ms));
                 let lookup_stats = calculate_stats(&lookup_vals);
                 let merge_stats = calculate_stats(&merge_vals);
 
@@ -1433,16 +1484,14 @@ fn write_reports(
 
                 writeln!(
                     md_file,
-                    "| {} | {} | {} | {} | {} | {:.3} ± {:.3} ms | {:.3} ± {:.3} ms | {:.3} ± {:.3} ms | {:.3} ± {:.3} ms | {}% |",
+                    "| {} | {} | {} | {} | {} | {} | {} | {:.3} ± {:.3} ms | {:.3} ± {:.3} ms | {}% |",
                     q_type,
                     size,
                     sys_label,
                     backend,
                     lang,
-                    first_hybrid_stats.mean,
-                    first_hybrid_stats.std,
-                    main_window_stats.mean,
-                    main_window_stats.std,
+                    format_optional_stats_md(first_hybrid_stats, "ms"),
+                    format_optional_stats_md(main_window_stats, "ms"),
                     lookup_stats.mean,
                     lookup_stats.std,
                     merge_stats.mean,
@@ -1737,15 +1786,13 @@ fn append_incremental_csv_row(file: &mut File, row: &HybridScalingRow) -> std::i
         format!("{:.3}", row.registration_ms),
         format!("{:.3}", row.historical_lookup_ms),
         format!("{:.3}", row.historical_query_ms),
-        row.first_live_window_result_ms
-            .map(|value| format!("{value:.3}"))
-            .unwrap_or_default(),
-        format!("{:.3}", row.first_hybrid_result_ms),
-        format!("{:.3}", row.main_window_result_ms),
-        format!("{:.3}", row.first_hybrid_window_adjusted_overhead_ms),
-        format!("{:.3}", row.main_window_adjusted_overhead_ms),
-        format!("{:.3}", row.window_processing_overhead_ms),
-        format!("{:.3}", row.post_trigger_result_observation_delay_ms),
+        format_optional_ms(row.first_live_window_result_ms),
+        format_optional_ms(row.first_hybrid_result_ms),
+        format_optional_ms(row.main_window_result_ms),
+        format_optional_ms(row.first_hybrid_window_adjusted_overhead_ms),
+        format_optional_ms(row.main_window_adjusted_overhead_ms),
+        format_optional_ms(row.window_processing_overhead_ms),
+        format_optional_ms(row.post_trigger_result_observation_delay_ms),
         format!("{:.3}", row.external_merge_ms),
         format!("{:.3}", row.total_run_ms),
         row.result_count.to_string(),
@@ -1932,4 +1979,113 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    fn sample_row() -> HybridScalingRow {
+        HybridScalingRow {
+            benchmark_name: "hybrid_scaling_combined".to_string(),
+            system: "janus".to_string(),
+            historical_size_quads: 10000,
+            target_historical_quads: 10000,
+            actual_historical_quads: 10000,
+            historical_query_type: "point_lookup".to_string(),
+            expected_historical_result_count: 0,
+            historical_result_count: 0,
+            historical_result_count_matches_expected: true,
+            historical_query_start_ms: 0,
+            historical_query_end_ms: 1,
+            historical_query_span_ms: 1,
+            iteration: 0,
+            live_duration_ms: 5000,
+            event_rate_per_second: 4.0,
+            event_interval_ms: 250,
+            total_live_events: 20,
+            window_size_ms: 5000,
+            window_slide_ms: 2500,
+            query_name: "hybrid_query".to_string(),
+            timestamp: 0,
+            registration_ms: 1.0,
+            historical_lookup_ms: 2.0,
+            historical_query_ms: 2.0,
+            first_live_window_result_ms: None,
+            first_hybrid_result_ms: None,
+            main_window_result_ms: None,
+            first_hybrid_window_adjusted_overhead_ms: None,
+            main_window_adjusted_overhead_ms: None,
+            window_processing_overhead_ms: None,
+            post_trigger_result_observation_delay_ms: None,
+            external_merge_ms: 0.0,
+            total_run_ms: 10.0,
+            result_count: 0,
+            result_hash: String::new(),
+            matching_reference_hash: String::new(),
+            result_equivalence: true,
+            mismatch_reason: "none".to_string(),
+            rss_start_mb: 1.0,
+            rss_end_mb: 1.0,
+            peak_rss_mb: 1.0,
+            rss_delta_mb: 0.0,
+            mean_cpu_percent: 0.0,
+            peak_cpu_percent: 0.0,
+            resource_sample_count: 1,
+            resource_sample_interval_ms: 100,
+            historical_backend: "janus_segmented".to_string(),
+            historical_query_language: "janus_range_lookup".to_string(),
+            historical_load_ms: 0.0,
+        }
+    }
+
+    #[test]
+    fn no_result_row_serializes_empty_latency_fields() {
+        let path = std::env::temp_dir().join(format!(
+            "hybrid_scaling_combined_test_{}_{}.csv",
+            std::process::id(),
+            now_ms()
+        ));
+        let mut file = File::create(&path).unwrap();
+        write_incremental_csv_header(&mut file).unwrap();
+
+        let row = sample_row();
+        append_incremental_csv_row(&mut file, &row).unwrap();
+
+        let csv = fs::read_to_string(&path).unwrap();
+        fs::remove_file(&path).unwrap();
+        let row_line = csv.lines().nth(1).unwrap();
+
+        assert!(row_line.contains(",,,"));
+        assert!(!row_line.contains(",0.000,0.000,-5000.000,-10000.000,"));
+        assert!(!row_line.contains("-5000.000"));
+        assert!(!row_line.contains("-10000.000"));
+    }
+
+    #[test]
+    fn result_row_serializes_present_latency_fields() {
+        let row = HybridScalingRow {
+            first_live_window_result_ms: Some(5000.0),
+            first_hybrid_result_ms: Some(5001.25),
+            main_window_result_ms: Some(10002.5),
+            first_hybrid_window_adjusted_overhead_ms: adjusted_overhead(Some(5001.25), 5000.0),
+            main_window_adjusted_overhead_ms: adjusted_overhead(Some(10002.5), 10000.0),
+            window_processing_overhead_ms: Some(1.25),
+            post_trigger_result_observation_delay_ms: Some(1.25),
+            result_count: 1,
+            ..sample_row()
+        };
+
+        assert_eq!(format_optional_ms(row.first_hybrid_result_ms), "5001.250");
+        assert_eq!(format_optional_ms(row.first_hybrid_window_adjusted_overhead_ms), "1.250");
+        assert_eq!(format_optional_ms(row.main_window_adjusted_overhead_ms), "2.500");
+    }
+
+    #[test]
+    fn negative_adjusted_overhead_is_treated_as_missing() {
+        assert_eq!(adjusted_overhead(None, 5000.0), None);
+        assert_eq!(adjusted_overhead(Some(0.0), 5000.0), None);
+        assert_eq!(adjusted_overhead(Some(5000.0), 5000.0), Some(0.0));
+    }
 }

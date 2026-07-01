@@ -1,0 +1,3 @@
+historical_query_type,historical_size_quads,system,first_hybrid_result_mean_ms,first_hybrid_result_std_ms,main_window_result_mean_ms,main_window_result_std_ms,historical_lookup_mean_ms,historical_lookup_std_ms,window_overhead_mean_ms,window_overhead_std_ms,external_merge_mean_ms,external_merge_std_ms,equivalence_rate,peak_rss_mean,peak_rss_std,rss_delta_mean,rss_delta_std,mean_cpu_mean,mean_cpu_std,peak_cpu_mean,peak_cpu_std
+point_lookup,10000,janus,,,,,0.000,0.000,,,0.000,0.000,1.000,23.688,0.000,2.828,0.000,2.058,0.000,8.660,0.000
+point_lookup,10000,decomposed_oxigraph,,,,,5.000,0.000,,,0.000,0.000,1.000,44.562,0.000,20.344,0.000,2.051,0.000,8.747,0.000
