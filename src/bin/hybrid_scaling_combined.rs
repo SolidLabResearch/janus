@@ -22,7 +22,7 @@ use oxigraph::store::Store;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
-use std::fs::File;
+use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering as AtomicOrdering};
@@ -104,6 +104,8 @@ struct SummaryStats {
     mean: f64,
     std: f64,
 }
+
+const DURABLE_RESULTS_CSV: &str = "hybrid_scaling_combined.results.csv";
 
 #[derive(Debug, Parser)]
 #[command(name = "hybrid_scaling_combined")]
@@ -1696,6 +1698,85 @@ fn write_reports(
     Ok(())
 }
 
+fn write_incremental_csv_header(file: &mut File) -> std::io::Result<()> {
+    writeln!(
+        file,
+        "status,benchmark_name,system,historical_size_quads,target_historical_quads,actual_historical_quads,historical_query_type,expected_historical_result_count,historical_result_count,historical_result_count_matches_expected,historical_query_start_ms,historical_query_end_ms,historical_query_span_ms,iteration,live_duration_ms,event_rate_per_second,event_interval_ms,total_live_events,window_size_ms,window_slide_ms,query_name,timestamp,registration_ms,historical_lookup_ms,historical_query_ms,first_live_window_result_ms,first_hybrid_result_ms,main_window_result_ms,first_hybrid_window_adjusted_overhead_ms,main_window_adjusted_overhead_ms,window_processing_overhead_ms,post_trigger_result_observation_delay_ms,external_merge_ms,total_run_ms,result_count,result_hash,matching_reference_hash,result_equivalence,mismatch_reason,rss_start_mb,rss_end_mb,peak_rss_mb,rss_delta_mb,mean_cpu_percent,peak_cpu_percent,resource_sample_count,resource_sample_interval_ms,historical_backend,historical_query_language,historical_load_ms"
+    )?;
+    file.flush()
+}
+
+fn csv_escape(value: &str) -> String {
+    format!("\"{}\"", value.replace('"', "\"\""))
+}
+
+fn append_incremental_csv_row(file: &mut File, row: &HybridScalingRow) -> std::io::Result<()> {
+    let fields = vec![
+        csv_escape("completed"),
+        csv_escape(&row.benchmark_name),
+        csv_escape(&row.system),
+        row.historical_size_quads.to_string(),
+        row.target_historical_quads.to_string(),
+        row.actual_historical_quads.to_string(),
+        csv_escape(&row.historical_query_type),
+        row.expected_historical_result_count.to_string(),
+        row.historical_result_count.to_string(),
+        row.historical_result_count_matches_expected.to_string(),
+        row.historical_query_start_ms.to_string(),
+        row.historical_query_end_ms.to_string(),
+        row.historical_query_span_ms.to_string(),
+        (row.iteration + 1).to_string(),
+        row.live_duration_ms.to_string(),
+        format!("{:.3}", row.event_rate_per_second),
+        row.event_interval_ms.to_string(),
+        row.total_live_events.to_string(),
+        row.window_size_ms.to_string(),
+        row.window_slide_ms.to_string(),
+        csv_escape(&row.query_name),
+        row.timestamp.to_string(),
+        format!("{:.3}", row.registration_ms),
+        format!("{:.3}", row.historical_lookup_ms),
+        format!("{:.3}", row.historical_query_ms),
+        row.first_live_window_result_ms
+            .map(|value| format!("{value:.3}"))
+            .unwrap_or_default(),
+        format!("{:.3}", row.first_hybrid_result_ms),
+        format!("{:.3}", row.main_window_result_ms),
+        format!("{:.3}", row.first_hybrid_window_adjusted_overhead_ms),
+        format!("{:.3}", row.main_window_adjusted_overhead_ms),
+        format!("{:.3}", row.window_processing_overhead_ms),
+        format!("{:.3}", row.post_trigger_result_observation_delay_ms),
+        format!("{:.3}", row.external_merge_ms),
+        format!("{:.3}", row.total_run_ms),
+        row.result_count.to_string(),
+        csv_escape(&row.result_hash),
+        csv_escape(&row.matching_reference_hash),
+        row.result_equivalence.to_string(),
+        csv_escape(&row.mismatch_reason),
+        format!("{:.3}", row.rss_start_mb),
+        format!("{:.3}", row.rss_end_mb),
+        format!("{:.3}", row.peak_rss_mb),
+        format!("{:.3}", row.rss_delta_mb),
+        format!("{:.3}", row.mean_cpu_percent),
+        format!("{:.3}", row.peak_cpu_percent),
+        row.resource_sample_count.to_string(),
+        row.resource_sample_interval_ms.to_string(),
+        csv_escape(&row.historical_backend),
+        csv_escape(&row.historical_query_language),
+        format!("{:.3}", row.historical_load_ms),
+    ];
+    writeln!(file, "{}", fields.join(","))?;
+    file.flush()?;
+    println!(
+        "Saved result row: H={}, query={}, iteration={}, system={}",
+        row.historical_size_quads,
+        row.historical_query_type,
+        row.iteration + 1,
+        row.system
+    );
+    Ok(())
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
 
@@ -1704,6 +1785,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .clone()
         .unwrap_or_else(|| default_benchmark_output_dir("hybrid_scaling_combined"));
     ensure_output_dir(&output_dir)?;
+
+    let incremental_csv_path = output_dir.join(DURABLE_RESULTS_CSV);
+    let mut incremental_csv = OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(&incremental_csv_path)?;
+    write_incremental_csv_header(&mut incremental_csv)?;
 
     let metadata = collect_repro_metadata();
     let mut all_results = Vec::new();
@@ -1788,13 +1877,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         dr.result_equivalence = equivalent;
                         dr.mismatch_reason = mismatch_reason;
 
+                        append_incremental_csv_row(&mut incremental_csv, &jr)?;
+                        append_incremental_csv_row(&mut incremental_csv, &dr)?;
                         all_results.push(jr);
                         all_results.push(dr);
                     }
                     (Some(jr), None) => {
+                        append_incremental_csv_row(&mut incremental_csv, &jr)?;
                         all_results.push(jr);
                     }
                     (None, Some(dr)) => {
+                        append_incremental_csv_row(&mut incremental_csv, &dr)?;
                         all_results.push(dr);
                     }
                     (None, None) => {}
