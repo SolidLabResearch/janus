@@ -42,3 +42,4 @@ debug_*.py
 tests/reproduction_test.rs
 tests/user_query_repro.rs
 /logs/
+experiments/benchmark-results/
