@@ -327,6 +327,25 @@ Reported columns:
 
 This CSV is the operational check for “scales predictably.”
 
+## Storage Footprint Benchmark Command
+
+```bash
+cargo run --release --bin paper_storage_footprint
+```
+
+Optional smoke run for smaller sizes:
+
+```bash
+cargo run --release --bin paper_storage_footprint -- \
+  --event-counts 10000,50000
+```
+
+Output:
+
+- `results/paper_storage_footprint.csv`
+
+This benchmark compares the specialized Janus append-only historical RDF event log against a general-purpose Oxigraph persistent RDF store after loading the same deterministic historical stream events. The result should be interpreted as a specialization trade-off in persistent event-log representation, not as a claim that Janus replaces a full RDF database.
+
 ## Validation Commands
 
 Recommended correctness and build validation:
