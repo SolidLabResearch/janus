@@ -1,0 +1,51 @@
+query,system,size,mean_ms,std_ms
+Point,Janus,10k,0.042,0.006
+Point,Janus,50k,0.033,0.001
+Point,Janus,100k,0.046,0.006
+Point,Janus,500k,0.05,0.006
+Point,Janus,1M,0.068,0.004
+Point,Oxigraph,10k,6.988,0.091
+Point,Oxigraph,50k,40.722,0.587
+Point,Oxigraph,100k,83.136,0.87
+Point,Oxigraph,500k,429.221,5.237
+Point,Oxigraph,1M,818.002,8.683
+Fixed 60s,Janus,10k,1.366,0.217
+Fixed 60s,Janus,50k,1.213,0.026
+Fixed 60s,Janus,100k,1.213,0.031
+Fixed 60s,Janus,500k,1.224,0.029
+Fixed 60s,Janus,1M,1.247,0.06
+Fixed 60s,Oxigraph,10k,7.292,0.06
+Fixed 60s,Oxigraph,50k,37.617,0.204
+Fixed 60s,Oxigraph,100k,81.432,0.547
+Fixed 60s,Oxigraph,500k,416.478,2.053
+Fixed 60s,Oxigraph,1M,845.388,6.13
+Range 10%,Janus,10k,1.313,0.125
+Range 10%,Janus,50k,5.589,0.083
+Range 10%,Janus,100k,11.103,0.086
+Range 10%,Janus,500k,54.602,0.268
+Range 10%,Janus,1M,111.088,2.654
+Range 10%,Oxigraph,10k,7.323,0.063
+Range 10%,Oxigraph,50k,42.236,0.235
+Range 10%,Oxigraph,100k,86.156,0.54
+Range 10%,Oxigraph,500k,445.541,3.121
+Range 10%,Oxigraph,1M,860.69,4.201
+Range 50%,Janus,10k,6.437,0.501
+Range 50%,Janus,50k,27.67,0.144
+Range 50%,Janus,100k,54.777,0.25
+Range 50%,Janus,500k,269.867,0.794
+Range 50%,Janus,1M,541.342,6.438
+Range 50%,Oxigraph,10k,9.56,0.117
+Range 50%,Oxigraph,50k,51.502,0.236
+Range 50%,Oxigraph,100k,107.374,0.597
+Range 50%,Oxigraph,500k,557.4,3.166
+Range 50%,Oxigraph,1M,1125.296,5.51
+Range 100%,Janus,10k,13.023,1.286
+Range 100%,Janus,50k,55.007,0.467
+Range 100%,Janus,100k,108.847,0.343
+Range 100%,Janus,500k,538.963,1.464
+Range 100%,Janus,1M,1075.73,2.685
+Range 100%,Oxigraph,10k,12.331,0.156
+Range 100%,Oxigraph,50k,66.026,0.483
+Range 100%,Oxigraph,100k,134.321,1.565
+Range 100%,Oxigraph,500k,698.019,2.919
+Range 100%,Oxigraph,1M,1454.357,8.035

@@ -96,6 +96,14 @@ impl JanusQLParser {
 
             lines.push(String::new());
             lines.push(where_clause);
+            if parsed.live_windows.is_empty() {
+                if let Some(group_by_clause) = &parsed.group_by_clause {
+                    lines.push(group_by_clause.clone());
+                }
+                if let Some(having_clause) = &parsed.having_clause {
+                    lines.push(having_clause.clone());
+                }
+            }
             queries.push(lines.join("\n"));
         }
 

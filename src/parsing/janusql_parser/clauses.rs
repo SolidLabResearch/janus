@@ -287,6 +287,13 @@ impl JanusQLParser {
             return Err(self.parse_error(format!("Invalid REGISTER clause: {line}")));
         }
 
+        if parts[0] != "RStream" {
+            return Err(self.parse_error(format!(
+                "Unsupported REGISTER operator '{}'; Janus-QL Core only supports REGISTER RStream",
+                parts[0]
+            )));
+        }
+
         Ok(RegisterClause {
             operator: parts[0].to_string(),
             name: self.unwrap_iri(parts[1], prefix_mapper),

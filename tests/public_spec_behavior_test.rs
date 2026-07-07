@@ -64,6 +64,120 @@ WHERE {
 }
 "#;
 
+const SPEC_LIVE_ONLY_RSTREAM_QUERY: &str = r#"
+PREFIX ex: <http://example.org/>
+
+REGISTER RStream ex:output AS
+SELECT ?sensor ?value
+FROM NAMED WINDOW ex:liveWindow ON STREAM ex:stream [RANGE 60000 STEP 30000]
+WHERE {
+  WINDOW ex:liveWindow {
+    ?sensor ex:hasValue ?value .
+  }
+}
+"#;
+
+const SPEC_HYBRID_FIXED_QUERY: &str = r#"
+PREFIX ex: <http://example.org/>
+
+REGISTER RStream ex:output AS
+SELECT ?sensor ?liveValue ?historicalValue
+FROM NAMED WINDOW ex:liveWindow ON STREAM ex:stream [RANGE 60000 STEP 30000]
+FROM NAMED WINDOW ex:historicalWindow ON LOG ex:stream [START 0 END 86400000]
+WHERE {
+  WINDOW ex:liveWindow {
+    ?sensor ex:hasValue ?liveValue .
+  }
+
+  WINDOW ex:historicalWindow {
+    ?sensor ex:hasValue ?historicalValue .
+  }
+}
+"#;
+
+const SPEC_HISTORICAL_ONLY_NESTED_SUBQUERY_QUERY: &str = r#"
+PREFIX ex: <http://example.org/>
+
+SELECT ?sensor ?historicalAverage
+FROM NAMED WINDOW ex:historicalWindow ON LOG ex:stream [START 0 END 86400000]
+WHERE {
+  {
+    SELECT ?sensor (AVG(?oldValue) AS ?historicalAverage)
+    WHERE {
+      WINDOW ex:historicalWindow {
+        ?sensor ex:hasValue ?oldValue .
+      }
+    }
+    GROUP BY ?sensor
+  }
+}
+"#;
+
+const SPEC_INVALID_UNDECLARED_WINDOW_QUERY: &str = r#"
+PREFIX ex: <http://example.org/>
+
+SELECT ?sensor ?value
+WHERE {
+  WINDOW ex:missing {
+    ?sensor ex:hasValue ?value .
+  }
+}
+"#;
+
+const SPEC_INVALID_ISTREAM_QUERY: &str = r#"
+PREFIX ex: <http://example.org/>
+
+REGISTER IStream ex:output AS
+SELECT ?sensor
+FROM NAMED WINDOW ex:liveWindow ON STREAM ex:stream [RANGE 60000 STEP 30000]
+WHERE {
+  WINDOW ex:liveWindow {
+    ?sensor ex:value ?value .
+  }
+}
+"#;
+
+const SPEC_INVALID_DSTREAM_QUERY: &str = r#"
+PREFIX ex: <http://example.org/>
+
+REGISTER DStream ex:output AS
+SELECT ?sensor
+FROM NAMED WINDOW ex:liveWindow ON STREAM ex:stream [RANGE 60000 STEP 30000]
+WHERE {
+  WINDOW ex:liveWindow {
+    ?sensor ex:value ?value .
+  }
+}
+"#;
+
+const SPEC_INVALID_PROPERTY_PATH_QUERY: &str = r#"
+PREFIX ex: <http://example.org/>
+
+REGISTER RStream ex:output AS
+SELECT ?sensor
+FROM NAMED WINDOW ex:liveWindow ON STREAM ex:stream [RANGE 60000 STEP 30000]
+WHERE {
+  WINDOW ex:liveWindow {
+    ?sensor ex:connectedTo/ex:value ?value .
+  }
+}
+"#;
+
+const SPEC_INVALID_SERVICE_QUERY: &str = r#"
+PREFIX ex: <http://example.org/>
+
+REGISTER RStream ex:output AS
+SELECT ?sensor
+FROM NAMED WINDOW ex:liveWindow ON STREAM ex:stream [RANGE 60000 STEP 30000]
+WHERE {
+  WINDOW ex:liveWindow {
+    SERVICE <https://example.org/sparql> {
+      ?sensor ex:value ?value .
+    }
+  }
+}
+"#;
+
 fn create_test_storage_with_data(
 ) -> Result<(TempDir, Arc<StreamingSegmentedStorage>), std::io::Error> {
     let temp_dir = TempDir::new()?;
@@ -115,6 +229,17 @@ fn spec_canonical_live_historical_nested_query_parses() {
 }
 
 #[test]
+fn spec_live_only_rstream_query_parses() {
+    let parser = JanusQLParser::new().expect("Failed to create parser");
+
+    let parsed = parser.parse(SPEC_LIVE_ONLY_RSTREAM_QUERY).unwrap();
+
+    assert_eq!(parsed.live_windows.len(), 1);
+    assert_eq!(parsed.historical_windows.len(), 0);
+    assert!(parsed.rspql_query.contains("REGISTER RStream ex:output AS"));
+}
+
+#[test]
 fn spec_canonical_live_historical_nested_query_registers_and_starts_via_api() {
     let (_temp_dir, storage) = create_test_storage_with_data().expect("Failed to create storage");
     let api = create_test_api(storage);
@@ -155,6 +280,17 @@ fn spec_historical_only_query_without_register_parses() {
 }
 
 #[test]
+fn spec_hybrid_fixed_query_parses() {
+    let parser = JanusQLParser::new().expect("Failed to create parser");
+
+    let parsed = parser.parse(SPEC_HYBRID_FIXED_QUERY).unwrap();
+
+    assert_eq!(parsed.live_windows.len(), 1);
+    assert_eq!(parsed.historical_windows.len(), 1);
+    assert_eq!(parsed.sparql_queries.len(), 1);
+}
+
+#[test]
 fn spec_historical_only_query_without_register_executes_via_historical_query_path() {
     let (_temp_dir, storage) = create_test_storage_with_data().expect("Failed to create storage");
     let api = create_test_api(storage);
@@ -178,6 +314,16 @@ fn spec_historical_only_query_without_register_executes_via_historical_query_pat
     assert!(!results.is_empty(), "historical-only public spec query should emit results");
     assert!(results.iter().all(|result| matches!(result.source, ResultSource::Historical)));
     assert!(results.iter().any(|result| !result.bindings.is_empty()));
+}
+
+#[test]
+fn spec_hybrid_historical_sliding_query_parses() {
+    let parser = JanusQLParser::new().expect("Failed to create parser");
+
+    let parsed = parser.parse(SPEC_HISTORICAL_SLIDING_LOG_WINDOW_QUERY).unwrap();
+
+    assert_eq!(parsed.live_windows.len(), 1);
+    assert_eq!(parsed.historical_windows.len(), 1);
 }
 
 #[test]
@@ -205,6 +351,17 @@ fn spec_historical_sliding_bounds_follow_t_minus_offset_plus_range_formula() {
 }
 
 #[test]
+fn spec_historical_only_nested_subquery_query_parses() {
+    let parser = JanusQLParser::new().expect("Failed to create parser");
+
+    let parsed = parser.parse(SPEC_HISTORICAL_ONLY_NESTED_SUBQUERY_QUERY).unwrap();
+
+    assert_eq!(parsed.live_windows.len(), 0);
+    assert_eq!(parsed.historical_windows.len(), 1);
+    assert_eq!(parsed.historical_materialized_subqueries.len(), 1);
+}
+
+#[test]
 fn spec_historical_sliding_log_window_rejects_range_greater_than_offset() {
     let parser = JanusQLParser::new().expect("Failed to create parser");
     let invalid_query = SPEC_HISTORICAL_SLIDING_LOG_WINDOW_QUERY
@@ -215,6 +372,17 @@ fn spec_historical_sliding_log_window_rejects_range_greater_than_offset() {
         .expect_err("historical sliding log window should reject RANGE > OFFSET");
 
     assert!(err.to_string().contains("first window would extend beyond the evaluation time"));
+}
+
+#[test]
+fn spec_invalid_undeclared_window_is_rejected() {
+    let parser = JanusQLParser::new().expect("Failed to create parser");
+
+    let err = parser
+        .parse(SPEC_INVALID_UNDECLARED_WINDOW_QUERY)
+        .expect_err("undeclared WINDOW blocks must be rejected");
+
+    assert!(err.to_string().contains("references undeclared window"));
 }
 
 #[test]
@@ -322,11 +490,58 @@ WHERE {
 }
 
 #[test]
+fn spec_invalid_istream_query_is_rejected() {
+    let parser = JanusQLParser::new().expect("Failed to create parser");
+
+    let err = parser
+        .parse(SPEC_INVALID_ISTREAM_QUERY)
+        .expect_err("IStream must be rejected for Janus-QL Core");
+
+    assert!(err.to_string().contains("only supports REGISTER RStream"));
+}
+
+#[test]
+fn spec_invalid_dstream_query_is_rejected() {
+    let parser = JanusQLParser::new().expect("Failed to create parser");
+
+    let err = parser
+        .parse(SPEC_INVALID_DSTREAM_QUERY)
+        .expect_err("DStream must be rejected for Janus-QL Core");
+
+    assert!(err.to_string().contains("only supports REGISTER RStream"));
+}
+
+#[test]
+fn spec_invalid_property_path_query_is_rejected() {
+    let parser = JanusQLParser::new().expect("Failed to create parser");
+
+    let err = parser
+        .parse(SPEC_INVALID_PROPERTY_PATH_QUERY)
+        .expect_err("property paths must be rejected for Janus-QL Core");
+
+    assert!(err.to_string().contains("does not support property paths"));
+}
+
+#[test]
+fn spec_invalid_service_query_is_rejected() {
+    let parser = JanusQLParser::new().expect("Failed to create parser");
+
+    let err = parser
+        .parse(SPEC_INVALID_SERVICE_QUERY)
+        .expect_err("SERVICE must be rejected for Janus-QL Core");
+
+    assert!(err.to_string().contains("does not support SERVICE"));
+}
+
+#[test]
 fn spec_public_example_fixtures_do_not_contain_public_baseline_syntax() {
     for fixture in [
+        SPEC_LIVE_ONLY_RSTREAM_QUERY,
+        SPEC_HYBRID_FIXED_QUERY,
         SPEC_CANONICAL_LIVE_HISTORICAL_NESTED_QUERY,
         SPEC_HISTORICAL_ONLY_QUERY_WITHOUT_REGISTER,
         SPEC_HISTORICAL_SLIDING_LOG_WINDOW_QUERY,
+        SPEC_HISTORICAL_ONLY_NESTED_SUBQUERY_QUERY,
     ] {
         assert!(!fixture.contains("DEFINE BASELINE"));
         assert!(!fixture.contains("USING BASELINE"));

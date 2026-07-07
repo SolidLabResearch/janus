@@ -18,7 +18,7 @@ fn test_basic_live_window() {
         SELECT ?temperature ?timestamp
         FROM NAMED WINDOW sensor:tempWindow ON STREAM sensor:temperatureStream [RANGE 5000 STEP 1000]
         WHERE {
-            WINDOW :temperatureWindow {
+            WINDOW sensor:tempWindow {
                 ?event saref:hasValue ?temperature .
                 ?event saref:hasTimestamp ?timestamp .
             }
@@ -231,6 +231,208 @@ fn test_live_range_step_on_log_is_rejected() {
 }
 
 #[test]
+fn test_top_level_window_reference_must_exist() {
+    let parser = JanusQLParser::new().unwrap();
+    let query = r#"
+        PREFIX ex: <http://example.org/>
+        SELECT ?sensor ?value
+        WHERE {
+            WINDOW ex:missing {
+                ?sensor ex:hasValue ?value .
+            }
+        }
+    "#;
+
+    let err = parser.parse(query).expect_err("undeclared top-level WINDOW must be rejected");
+    assert!(err.to_string().contains("references undeclared window"));
+}
+
+#[test]
+fn test_duplicate_stream_window_name_is_rejected() {
+    let parser = JanusQLParser::new().unwrap();
+    let query = r#"
+        PREFIX ex: <http://example.org/>
+        REGISTER RStream ex:out AS
+        SELECT ?sensor
+        FROM NAMED WINDOW ex:w ON STREAM ex:stream [RANGE 500 STEP 100]
+        FROM NAMED WINDOW ex:w ON STREAM ex:other [RANGE 1000 STEP 200]
+        WHERE {
+            WINDOW ex:w { ?sensor ex:value ?value }
+        }
+    "#;
+
+    let err = parser.parse(query).expect_err("duplicate stream window names must be rejected");
+    assert!(err.to_string().contains("declared more than once"));
+}
+
+#[test]
+fn test_duplicate_log_window_name_is_rejected() {
+    let parser = JanusQLParser::new().unwrap();
+    let query = r#"
+        PREFIX ex: <http://example.org/>
+        SELECT ?sensor
+        FROM NAMED WINDOW ex:w ON LOG ex:stream [START 0 END 1000]
+        FROM NAMED WINDOW ex:w ON LOG ex:stream [START 1000 END 2000]
+        WHERE {
+            WINDOW ex:w { ?sensor ex:value ?value }
+        }
+    "#;
+
+    let err = parser.parse(query).expect_err("duplicate log window names must be rejected");
+    assert!(err.to_string().contains("declared more than once"));
+}
+
+#[test]
+fn test_duplicate_mixed_window_name_is_rejected() {
+    let parser = JanusQLParser::new().unwrap();
+    let query = r#"
+        PREFIX ex: <http://example.org/>
+        REGISTER RStream ex:out AS
+        SELECT ?sensor
+        FROM NAMED WINDOW ex:w ON STREAM ex:stream [RANGE 500 STEP 100]
+        FROM NAMED WINDOW ex:w ON LOG ex:stream [START 0 END 1000]
+        WHERE {
+            WINDOW ex:w { ?sensor ex:value ?value }
+        }
+    "#;
+
+    let err = parser.parse(query).expect_err("duplicate mixed window names must be rejected");
+    assert!(err.to_string().contains("declared more than once"));
+}
+
+#[test]
+fn test_register_istream_is_rejected() {
+    let parser = JanusQLParser::new().unwrap();
+    let query = r#"
+        PREFIX ex: <http://example.org/>
+        REGISTER IStream ex:out AS
+        SELECT ?sensor
+        FROM NAMED WINDOW ex:live ON STREAM ex:stream [RANGE 500 STEP 100]
+        WHERE {
+            WINDOW ex:live { ?sensor ex:value ?value }
+        }
+    "#;
+
+    let err = parser.parse(query).expect_err("IStream must be rejected");
+    assert!(err.to_string().contains("only supports REGISTER RStream"));
+}
+
+#[test]
+fn test_register_dstream_is_rejected() {
+    let parser = JanusQLParser::new().unwrap();
+    let query = r#"
+        PREFIX ex: <http://example.org/>
+        REGISTER DStream ex:out AS
+        SELECT ?sensor
+        FROM NAMED WINDOW ex:live ON STREAM ex:stream [RANGE 500 STEP 100]
+        WHERE {
+            WINDOW ex:live { ?sensor ex:value ?value }
+        }
+    "#;
+
+    let err = parser.parse(query).expect_err("DStream must be rejected");
+    assert!(err.to_string().contains("only supports REGISTER RStream"));
+}
+
+#[test]
+fn test_fixed_historical_log_window_rejects_equal_start_end() {
+    let parser = JanusQLParser::new().unwrap();
+    let query = r#"
+        PREFIX ex: <http://example.org/>
+        SELECT ?sensor
+        FROM NAMED WINDOW ex:hist ON LOG ex:store [START 1000 END 1000]
+        WHERE {
+            WINDOW ex:hist { ?sensor ex:value ?value }
+        }
+    "#;
+
+    let err = parser.parse(query).expect_err("equal START/END must be rejected");
+    assert!(err.to_string().contains("START less than END"));
+}
+
+#[test]
+fn test_fixed_historical_log_window_rejects_start_after_end() {
+    let parser = JanusQLParser::new().unwrap();
+    let query = r#"
+        PREFIX ex: <http://example.org/>
+        SELECT ?sensor
+        FROM NAMED WINDOW ex:hist ON LOG ex:store [START 2000 END 1000]
+        WHERE {
+            WINDOW ex:hist { ?sensor ex:value ?value }
+        }
+    "#;
+
+    let err = parser.parse(query).expect_err("START greater than END must be rejected");
+    assert!(err.to_string().contains("START less than END"));
+}
+
+#[test]
+fn test_live_window_rejects_zero_range() {
+    let parser = JanusQLParser::new().unwrap();
+    let query = r#"
+        PREFIX ex: <http://example.org/>
+        REGISTER RStream ex:out AS
+        SELECT ?sensor
+        FROM NAMED WINDOW ex:live ON STREAM ex:stream [RANGE 0 STEP 100]
+        WHERE {
+            WINDOW ex:live { ?sensor ex:value ?value }
+        }
+    "#;
+
+    let err = parser.parse(query).expect_err("zero RANGE must be rejected");
+    assert!(err.to_string().contains("RANGE greater than 0"));
+}
+
+#[test]
+fn test_live_window_rejects_zero_step() {
+    let parser = JanusQLParser::new().unwrap();
+    let query = r#"
+        PREFIX ex: <http://example.org/>
+        REGISTER RStream ex:out AS
+        SELECT ?sensor
+        FROM NAMED WINDOW ex:live ON STREAM ex:stream [RANGE 500 STEP 0]
+        WHERE {
+            WINDOW ex:live { ?sensor ex:value ?value }
+        }
+    "#;
+
+    let err = parser.parse(query).expect_err("zero STEP must be rejected");
+    assert!(err.to_string().contains("STEP greater than 0"));
+}
+
+#[test]
+fn test_historical_sliding_window_rejects_zero_range() {
+    let parser = JanusQLParser::new().unwrap();
+    let query = r#"
+        PREFIX ex: <http://example.org/>
+        SELECT ?sensor
+        FROM NAMED WINDOW ex:hist ON LOG ex:store [OFFSET 1000 RANGE 0 STEP 100]
+        WHERE {
+            WINDOW ex:hist { ?sensor ex:value ?value }
+        }
+    "#;
+
+    let err = parser.parse(query).expect_err("historical sliding RANGE 0 must be rejected");
+    assert!(err.to_string().contains("RANGE greater than 0"));
+}
+
+#[test]
+fn test_historical_sliding_window_rejects_zero_step() {
+    let parser = JanusQLParser::new().unwrap();
+    let query = r#"
+        PREFIX ex: <http://example.org/>
+        SELECT ?sensor
+        FROM NAMED WINDOW ex:hist ON LOG ex:store [OFFSET 1000 RANGE 100 STEP 0]
+        WHERE {
+            WINDOW ex:hist { ?sensor ex:value ?value }
+        }
+    "#;
+
+    let err = parser.parse(query).expect_err("historical sliding STEP 0 must be rejected");
+    assert!(err.to_string().contains("STEP greater than 0"));
+}
+
+#[test]
 fn test_fixed_historical_log_window_parses_to_fixed_spec() {
     let parser = JanusQLParser::new().unwrap();
     let query = r#"
@@ -309,6 +511,141 @@ fn test_parse_ast_extracts_window_body_with_nested_braces() {
     assert_eq!(ast.where_windows.len(), 1);
     assert!(ast.where_windows[0].body.contains("FILTER(EXISTS"));
     assert!(ast.where_windows[0].body.contains("?sensor ex:meta ?meta"));
+}
+
+#[test]
+fn test_service_in_window_block_is_rejected() {
+    let parser = JanusQLParser::new().unwrap();
+    let query = r#"
+        PREFIX ex: <http://example.org/>
+        REGISTER RStream ex:out AS
+        SELECT ?sensor
+        FROM NAMED WINDOW ex:live ON STREAM ex:stream [RANGE 500 STEP 100]
+        WHERE {
+            WINDOW ex:live {
+                SERVICE <https://example.org/sparql> {
+                    ?sensor ex:value ?value .
+                }
+            }
+        }
+    "#;
+
+    let err = parser.parse(query).expect_err("SERVICE must be rejected");
+    assert!(err.to_string().contains("does not support SERVICE"));
+}
+
+#[test]
+fn test_property_path_with_slash_is_rejected() {
+    let parser = JanusQLParser::new().unwrap();
+    let query = r#"
+        PREFIX ex: <http://example.org/>
+        REGISTER RStream ex:out AS
+        SELECT ?sensor
+        FROM NAMED WINDOW ex:live ON STREAM ex:stream [RANGE 500 STEP 100]
+        WHERE {
+            WINDOW ex:live {
+                ?sensor ex:p/ex:q ?value .
+            }
+        }
+    "#;
+
+    let err = parser.parse(query).expect_err("slash property path must be rejected");
+    assert!(err.to_string().contains("does not support property paths"));
+}
+
+#[test]
+fn test_property_path_with_star_is_rejected() {
+    let parser = JanusQLParser::new().unwrap();
+    let query = r#"
+        PREFIX ex: <http://example.org/>
+        REGISTER RStream ex:out AS
+        SELECT ?sensor
+        FROM NAMED WINDOW ex:live ON STREAM ex:stream [RANGE 500 STEP 100]
+        WHERE {
+            WINDOW ex:live {
+                ?sensor ex:p* ?value .
+            }
+        }
+    "#;
+
+    let err = parser.parse(query).expect_err("star property path must be rejected");
+    assert!(err.to_string().contains("does not support property paths"));
+}
+
+#[test]
+fn test_property_path_with_plus_is_rejected() {
+    let parser = JanusQLParser::new().unwrap();
+    let query = r#"
+        PREFIX ex: <http://example.org/>
+        REGISTER RStream ex:out AS
+        SELECT ?sensor
+        FROM NAMED WINDOW ex:live ON STREAM ex:stream [RANGE 500 STEP 100]
+        WHERE {
+            WINDOW ex:live {
+                ?sensor ex:p+ ?value .
+            }
+        }
+    "#;
+
+    let err = parser.parse(query).expect_err("plus property path must be rejected");
+    assert!(err.to_string().contains("does not support property paths"));
+}
+
+#[test]
+fn test_property_path_with_optional_is_rejected() {
+    let parser = JanusQLParser::new().unwrap();
+    let query = r#"
+        PREFIX ex: <http://example.org/>
+        REGISTER RStream ex:out AS
+        SELECT ?sensor
+        FROM NAMED WINDOW ex:live ON STREAM ex:stream [RANGE 500 STEP 100]
+        WHERE {
+            WINDOW ex:live {
+                ?sensor ex:p? ?value .
+            }
+        }
+    "#;
+
+    let err = parser.parse(query).expect_err("optional property path must be rejected");
+    assert!(err.to_string().contains("does not support property paths"));
+}
+
+#[test]
+fn test_property_path_with_inverse_is_rejected() {
+    let parser = JanusQLParser::new().unwrap();
+    let query = r#"
+        PREFIX ex: <http://example.org/>
+        REGISTER RStream ex:out AS
+        SELECT ?sensor
+        FROM NAMED WINDOW ex:live ON STREAM ex:stream [RANGE 500 STEP 100]
+        WHERE {
+            WINDOW ex:live {
+                ?sensor ^ex:p ?value .
+            }
+        }
+    "#;
+
+    let err = parser.parse(query).expect_err("inverse property path must be rejected");
+    assert!(err.to_string().contains("does not support property paths"));
+}
+
+#[test]
+fn test_property_path_with_alternative_is_rejected() {
+    let parser = JanusQLParser::new().unwrap();
+    let query = r#"
+        PREFIX ex: <http://example.org/>
+        REGISTER RStream ex:out AS
+        SELECT ?sensor
+        FROM NAMED WINDOW ex:live ON STREAM ex:stream [RANGE 500 STEP 100]
+        WHERE {
+            WINDOW ex:live {
+                ?sensor ex:p|ex:q ?value .
+            }
+        }
+    "#;
+
+    let err = parser.parse(query).expect_err("alternative property path must be rejected");
+    assert!(err.to_string().contains("does not support property paths"));
 }
 
 #[test]
@@ -574,6 +911,30 @@ fn generated_baseline_query_wraps_where_body_in_log_graph() {
 }
 
 #[test]
+fn historical_only_query_preserves_group_by_and_having_in_generated_sparql() {
+    let parser = JanusQLParser::new().unwrap();
+    let query = r#"
+        PREFIX ex: <http://example.org/>
+        SELECT ?sensor (AVG(?value) AS ?avgValue)
+        FROM NAMED WINDOW ex:historyDay ON LOG ex:stream [START 0 END 86400000]
+        WHERE {
+          WINDOW ex:historyDay {
+            ?sensor ex:hasValue ?value .
+          }
+        }
+        GROUP BY ?sensor
+        HAVING(AVG(?value) > 10)
+    "#;
+
+    let parsed = parser.parse(query).unwrap();
+    assert_eq!(parsed.live_windows.len(), 0);
+    assert_eq!(parsed.historical_windows.len(), 1);
+    assert_eq!(parsed.sparql_queries.len(), 1);
+    assert!(parsed.sparql_queries[0].contains("GROUP BY ?sensor"));
+    assert!(parsed.sparql_queries[0].contains("HAVING(AVG(?value) > 10)"));
+}
+
+#[test]
 fn nested_historical_subquery_is_lowered_to_historical_materialization() {
     let parser = JanusQLParser::new().unwrap();
     let query = r#"
@@ -791,7 +1152,9 @@ fn unknown_window_reference_in_nested_subquery_is_rejected_cleanly() {
     "#;
 
     let err = parser.parse(query).unwrap_err().to_string();
-    assert!(err.contains("references unknown window"));
+    assert!(
+        err.contains("references undeclared window") || err.contains("references unknown window")
+    );
 }
 
 #[test]
