@@ -35,6 +35,7 @@ cargo bench --bench janusql_live_mqtt_e2e
 cargo run --release --bin storage_footprint_benchmark -- \
   --event-counts 10000,50000 \
   --iterations 1 \
+  --cleanup-runs-after-measurement \
   --output-dir results/storage_footprint_local
 ```
 
@@ -61,7 +62,8 @@ CityBench-style RDF events to:
 
 It then flushes and closes the store, measures the full recursive directory size in bytes, and
 records ingest time, events per second, and bytes per event. `--include-10m` is required before
-running the 10,000,000-event case.
+running the 10,000,000-event case. If `--cleanup-runs-after-measurement` is enabled, each
+per-run store directory is deleted only after its raw CSV row has been written and flushed.
 
 ### `historical_fixed`
 

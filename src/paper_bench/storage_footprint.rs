@@ -12,7 +12,7 @@ use serde::Serialize;
 use std::{
     collections::BTreeMap,
     fs::{self, File},
-    io::Write,
+    io::{BufWriter, Write},
     path::{Path, PathBuf},
     time::Instant,
 };
@@ -66,6 +66,7 @@ pub struct StorageFootprintConfig {
     pub iterations: usize,
     pub output_dir: PathBuf,
     pub include_10m: bool,
+    pub cleanup_runs_after_measurement: bool,
     pub system_selection: StorageSystemSelection,
 }
 
@@ -126,6 +127,10 @@ struct RunMeasurement {
     path: PathBuf,
 }
 
+struct RawCsvWriter {
+    writer: BufWriter<File>,
+}
+
 pub fn run_storage_footprint_benchmark(
     config: &StorageFootprintConfig,
 ) -> Result<StorageFootprintOutcome, BoxError> {
@@ -134,6 +139,8 @@ pub fn run_storage_footprint_benchmark(
 
     let metadata = collect_repro_metadata();
     let mut raw_rows = Vec::new();
+    let raw_csv_path = config.output_dir.join("storage_footprint_raw.csv");
+    let mut raw_csv_writer = RawCsvWriter::create(&raw_csv_path)?;
 
     for &event_count in &config.event_counts {
         for iteration in 1..=config.iterations {
@@ -155,7 +162,7 @@ pub fn run_storage_footprint_benchmark(
                     0.0
                 };
 
-                raw_rows.push(StorageFootprintRawRow {
+                let raw_row = StorageFootprintRawRow {
                     event_count,
                     iteration,
                     system: system.as_str().to_string(),
@@ -165,22 +172,25 @@ pub fn run_storage_footprint_benchmark(
                     load_time_ms: measurement.load_time_ms,
                     events_per_second,
                     path: display_path(&measurement.path),
-                });
+                };
+                raw_csv_writer.write_row(&raw_row)?;
+                if config.cleanup_runs_after_measurement {
+                    cleanup_run_store_dir(&measurement.path)?;
+                }
+                raw_rows.push(raw_row);
             }
         }
     }
 
     let summary_rows = summarize_rows(&raw_rows);
     let ratio_rows = build_ratio_rows(&summary_rows);
-    let raw_csv_path = config.output_dir.join("storage_footprint_raw.csv");
     let summary_csv_path = config.output_dir.join("storage_footprint_summary.csv");
     let ratio_csv_path = config.output_dir.join("storage_footprint_ratio_summary.csv");
     let markdown_path = config.output_dir.join("storage_footprint_summary.md");
 
-    write_raw_csv(&raw_csv_path, &raw_rows)?;
     write_summary_csv(&summary_csv_path, &summary_rows)?;
     write_ratio_csv(&ratio_csv_path, &ratio_rows)?;
-    write_markdown_report(&markdown_path, &metadata, &summary_rows, &ratio_rows)?;
+    write_markdown_report(&markdown_path, &metadata, config, &summary_rows, &ratio_rows)?;
 
     Ok(StorageFootprintOutcome {
         metadata,
@@ -341,6 +351,17 @@ fn event_quads_for_persistent_oxigraph(
     Ok([data_quad, timestamp_quad, graph_quad])
 }
 
+fn cleanup_run_store_dir(store_dir: &Path) -> Result<(), BoxError> {
+    fs::remove_dir_all(store_dir).map_err(|err| {
+        std::io::Error::other(format!(
+            "failed to remove run store directory {} after persisting raw CSV row: {}",
+            store_dir.display(),
+            err
+        ))
+    })?;
+    Ok(())
+}
+
 fn recursive_dir_size_bytes(root: &Path) -> Result<u64, BoxError> {
     let mut total = 0_u64;
     for entry in fs::read_dir(root)? {
@@ -452,30 +473,6 @@ fn build_ratio_rows(summary_rows: &[StorageFootprintSummaryRow]) -> Vec<StorageF
         .collect()
 }
 
-fn write_raw_csv(path: &Path, rows: &[StorageFootprintRawRow]) -> Result<(), BoxError> {
-    let mut file = File::create(path)?;
-    writeln!(
-        file,
-        "event_count,iteration,system,storage_bytes,storage_mb,bytes_per_event,load_time_ms,events_per_second,path"
-    )?;
-    for row in rows {
-        writeln!(
-            file,
-            "{},{},{},{},{:.6},{:.6},{:.3},{:.6},{}",
-            row.event_count,
-            row.iteration,
-            row.system,
-            row.storage_bytes,
-            row.storage_mb,
-            row.bytes_per_event,
-            row.load_time_ms,
-            row.events_per_second,
-            csv_escape(&row.path)
-        )?;
-    }
-    Ok(())
-}
-
 fn write_summary_csv(path: &Path, rows: &[StorageFootprintSummaryRow]) -> Result<(), BoxError> {
     let mut file = File::create(path)?;
     writeln!(
@@ -527,6 +524,7 @@ fn write_ratio_csv(path: &Path, rows: &[StorageFootprintRatioRow]) -> Result<(),
 fn write_markdown_report(
     path: &Path,
     metadata: &ReproMetadata,
+    config: &StorageFootprintConfig,
     summary_rows: &[StorageFootprintSummaryRow],
     ratio_rows: &[StorageFootprintRatioRow],
 ) -> Result<(), BoxError> {
@@ -557,6 +555,11 @@ fn write_markdown_report(
     writeln!(file, "- Rust: {}", metadata.rustc_version)?;
     writeln!(file, "- OS: {}", metadata.os)?;
     writeln!(file, "- CPU: {}", metadata.cpu_model)?;
+    writeln!(
+        file,
+        "- Cleanup runs after measurement: {}",
+        config.cleanup_runs_after_measurement
+    )?;
     writeln!(
         file,
         "- RAM bytes: {}",
@@ -641,6 +644,36 @@ fn display_path(path: &Path) -> String {
     path.canonicalize().unwrap_or_else(|_| path.to_path_buf()).display().to_string()
 }
 
+impl RawCsvWriter {
+    fn create(path: &Path) -> Result<Self, BoxError> {
+        let mut writer = BufWriter::new(File::create(path)?);
+        writeln!(
+            writer,
+            "event_count,iteration,system,storage_bytes,storage_mb,bytes_per_event,load_time_ms,events_per_second,path"
+        )?;
+        writer.flush()?;
+        Ok(Self { writer })
+    }
+
+    fn write_row(&mut self, row: &StorageFootprintRawRow) -> Result<(), BoxError> {
+        writeln!(
+            self.writer,
+            "{},{},{},{},{:.6},{:.6},{:.3},{:.6},{}",
+            row.event_count,
+            row.iteration,
+            row.system,
+            row.storage_bytes,
+            row.storage_mb,
+            row.bytes_per_event,
+            row.load_time_ms,
+            row.events_per_second,
+            csv_escape(&row.path)
+        )?;
+        self.writer.flush()?;
+        Ok(())
+    }
+}
+
 fn mean(values: &[f64]) -> f64 {
     if values.is_empty() {
         0.0
@@ -687,6 +720,7 @@ mod tests {
             iterations: 1,
             output_dir: output_dir.clone(),
             include_10m: false,
+            cleanup_runs_after_measurement: false,
             system_selection: StorageSystemSelection::Both,
         })
         .expect("small benchmark run should succeed");
@@ -708,10 +742,33 @@ mod tests {
             iterations: 1,
             output_dir: temp_dir.path().join("guard"),
             include_10m: false,
+            cleanup_runs_after_measurement: false,
             system_selection: StorageSystemSelection::Janus,
         })
         .expect_err("10M run should be rejected without include_10m");
 
         assert!(err.to_string().contains("--include-10m"));
+    }
+
+    #[test]
+    fn cleanup_enabled_removes_run_store_dirs_but_keeps_result_files() {
+        let temp_dir = TempDir::new().expect("temp dir should be created");
+        let output_dir = temp_dir.path().join("storage_footprint_cleanup");
+        let outcome = run_storage_footprint_benchmark(&StorageFootprintConfig {
+            event_counts: vec![10],
+            iterations: 1,
+            output_dir: output_dir.clone(),
+            include_10m: false,
+            cleanup_runs_after_measurement: true,
+            system_selection: StorageSystemSelection::Both,
+        })
+        .expect("cleanup benchmark run should succeed");
+
+        assert!(outcome.raw_csv_path.is_file());
+        assert!(outcome.summary_csv_path.is_file());
+        assert!(outcome.ratio_csv_path.is_file());
+        assert!(outcome.markdown_path.is_file());
+        assert!(!output_dir.join("runs/janus_events_10_iter_1/store").exists());
+        assert!(!output_dir.join("runs/oxigraph_events_10_iter_1/store").exists());
     }
 }

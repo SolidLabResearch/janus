@@ -45,6 +45,9 @@ struct Args {
     #[arg(long, default_value_t = false)]
     include_10m: bool,
 
+    #[arg(long, default_value_t = false)]
+    cleanup_runs_after_measurement: bool,
+
     #[arg(long, value_enum, default_value_t = SystemArg::Both)]
     system: SystemArg,
 
@@ -64,6 +67,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         iterations: args.iterations,
         output_dir: output_dir.clone(),
         include_10m: args.include_10m,
+        cleanup_runs_after_measurement: args.cleanup_runs_after_measurement,
         system_selection: args.system.into(),
     })?;
 
