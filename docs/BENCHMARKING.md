@@ -7,6 +7,7 @@ This document defines the current benchmark harness for Janus backend work.
 The benchmark suite is split by engine path so regressions are easier to localize:
 
 - `storage_write`: ingest-only storage throughput
+- `storage_footprint_benchmark`: persistent on-disk storage footprint after ingestion for Janus versus Oxigraph
 - `historical_fixed`: fixed historical window execution
 - `historical_sliding`: sliding historical window execution
 - `live_injection`: live event ingestion to first emitted result
@@ -30,6 +31,11 @@ cargo bench --bench live_injection
 cargo bench --bench hybrid_baseline
 cargo bench --bench janusql_e2e
 cargo bench --bench janusql_live_mqtt_e2e
+
+cargo run --release --bin storage_footprint_benchmark -- \
+  --event-counts 10000,50000 \
+  --iterations 1 \
+  --output-dir results/storage_footprint_local
 ```
 
 To verify that all benchmark targets compile without running them:
@@ -44,6 +50,18 @@ cargo bench --no-run
 
 Measures `StreamingSegmentedStorage::write_rdf_event` throughput on fresh storage with large flush
 thresholds so the benchmark isolates write-path cost rather than background flush cost.
+
+### `storage_footprint_benchmark`
+
+Measures persistent storage footprint, not RSS memory. The benchmark writes the same deterministic
+CityBench-style RDF events to:
+
+- Janus's real segmented RDF event-log storage path
+- Oxigraph's persistent on-disk store
+
+It then flushes and closes the store, measures the full recursive directory size in bytes, and
+records ingest time, events per second, and bytes per event. `--include-10m` is required before
+running the 10,000,000-event case.
 
 ### `historical_fixed`
 
