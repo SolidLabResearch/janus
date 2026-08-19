@@ -44,3 +44,6 @@ tests/user_query_repro.rs
 /logs/
 experiments/benchmark-results/
 /results/storage_footprint*/
+*.png
+*.csv
+*.pdf

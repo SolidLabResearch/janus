@@ -1,203 +1,179 @@
 # Janus
 
 Janus is a Rust engine for unified historical and live RDF stream processing.
+It stores RDF events in a segmented, dictionary-encoded event log, evaluates
+historical windows over that log, and evaluates live windows over MQTT-backed
+streams. A Janus-QL query can combine both paths and deliver results through a
+REST and WebSocket API.
 
-It combines:
+The name refers to the Roman deity associated with looking backward and
+forward: Janus is built to query past and arriving RDF data together.
 
-- historical window evaluation over segmented RDF storage
-- live window evaluation over incoming streams
-- a single Janus-QL query model for hybrid queries
-- an HTTP/WebSocket API for query lifecycle management and result delivery
+## Capabilities
 
-The name comes from the Roman deity Janus, associated with transitions and with looking both backward and forward. That dual perspective matches Janus's goal: querying past and live RDF data together.
+- Fixed and sliding historical windows over persisted RDF events
+- Sliding live windows over RDF streams
+- Hybrid queries containing both `ON LOG` and `ON STREAM` windows
+- Janus-QL parsing, validation, and lowering to historical SPARQL and live
+  RSP-QL execution paths
+- Historical materialization through nested historical subqueries
+- Query lifecycle management and result delivery through HTTP and WebSockets
+- MQTT replay and ingestion through the stream-bus CLI or HTTP replay API
+- Dictionary encoding, segmented storage, and persistent storage-footprint
+  benchmarking
 
-## What Janus Supports
+Janus also contains implementation support for baseline-backed hybrid queries
+and anomaly-oriented extension functions. See [Janus-QL](./docs/JANUSQL.md) and
+[the baseline guide](./docs/BASELINES.md) for their supported shapes and
+limitations.
 
-- Historical windows with `START` / `END`
-- Sliding live windows with `RANGE` / `STEP`
-- Hybrid queries that mix historical and live windows
-- Extension functions for anomaly-style predicates such as thresholds, relative change, z-score, outlier checks, and trend divergence
-- Optional baseline bootstrapping for hybrid anomaly queries with `USING BASELINE <window> LAST|AGGREGATE`
-- Query-defined baselines with `DEFINE BASELINE ... ON WINDOW ... AS SELECT ...`, `USING BASELINE :name`, and `GRAPH :name { ... }` materialization templates
-- HTTP endpoints for registering, starting, stopping, listing, and deleting queries
-- WebSocket result streaming for running queries
+## Query model
 
-## Query Model
+Janus-QL declares each data source as a named window:
 
-Janus uses Janus-QL, a hybrid query language for querying historical and live RDF data in one query.
+- `ON LOG` reads the persisted historical event log. Use `[START … END …]` for
+  a fixed range, or `[OFFSET … RANGE … STEP …]` for a historical sliding
+  window.
+- `ON STREAM` reads a live stream. Use `[RANGE … STEP …]` for a live sliding
+  window.
 
-- `ON LOG` declares a persisted historical RDF event log queried with historical bounds such as `[START ... END ...]` or historical sliding offsets.
-- `ON STREAM` declares a live stream evaluated with live windows such as `[RANGE ... STEP ...]`.
-
-Example:
+For example, this query combines a recent live window with a fixed historical
+window:
 
 ```sparql
-PREFIX : <http://example.org/>
+PREFIX ex: <http://example.org/>
 
-FROM NAMED WINDOW :liveMinute ON STREAM :stream [RANGE 60000 STEP 1000]
-FROM NAMED WINDOW :historyDay ON LOG :stream [START 0 END 86400000]
-
-DEFINE BASELINE :dayBaseline ON WINDOW :historyDay AS
-SELECT ?sensor
-       (AVG(?value) AS ?dayAvgValue)
+REGISTER RStream ex:out AS
+SELECT ?sensor ?reading ?reference
+FROM NAMED WINDOW ex:live ON STREAM ex:sensors [RANGE 60000 STEP 1000]
+FROM NAMED WINDOW ex:history ON LOG ex:sensors [START 1700000000000 END 1700086400000]
 WHERE {
-  ?sensor :hasValue ?value .
-}
-GROUP BY ?sensor
-
-REGISTER RStream :output AS
-USING BASELINE :dayBaseline
-SELECT ?sensor
-       (AVG(?value) AS ?minuteAvgValue)
-       ?dayAvgValue
-       ((AVG(?value) - ?dayAvgValue) AS ?difference)
-WHERE {
-  WINDOW :liveMinute {
-    ?sensor :hasValue ?value .
+  WINDOW ex:live {
+    ?sensor ex:hasReading ?reading .
   }
-  GRAPH :dayBaseline {
-    ?sensor :dayAvgValue ?dayAvgValue .
+  WINDOW ex:history {
+    ?sensor ex:referenceValue ?reference .
   }
 }
-GROUP BY ?sensor ?dayAvgValue
-HAVING(AVG(?value) > ?dayAvgValue)
 ```
 
-For query-defined baselines:
+The parser validates the relationship between a window source and its bounds;
+for example, `START`/`END` belongs to a log window, while `RANGE`/`STEP`
+belongs to a stream window. The complete syntax and execution details are in
+[docs/JANUSQL.md](./docs/JANUSQL.md) and
+[docs/QUERY_EXECUTION.md](./docs/QUERY_EXECUTION.md).
 
-- `DEFINE BASELINE` evaluates the historical baseline query before live startup over the source `LOG` window
-- `USING BASELINE :dayBaseline` tells Janus to prepare that baseline and inject the resulting quads into the live engine
-- `GRAPH :dayBaseline { ... }` is the materialization template; its concrete predicates and projected variables define the quads that are inserted
-- the live query can then use baseline variables in `SELECT`, `GROUP BY`, `HAVING`, and arithmetic expressions
-
-Legacy `USING BASELINE <window> LAST|AGGREGATE` remains available:
-
-- `LAST`: use the final historical window snapshot as baseline
-- `AGGREGATE`: merge the historical window outputs into one compact baseline
-
-## Repository Status
-
-The backend repository is active and locally healthy:
-
-- `cargo test --all-features` passes
-- `cargo clippy --all-targets --all-features -- -D warnings` passes
-- the HTTP API, Janus API, parser, storage layer, and stream bus all have integration coverage
-
-This repository is the backend and engine implementation.
-
-The maintained dashboard lives in a separate repository:
-
-- `https://github.com/SolidLabResearch/janus-dashboard`
-
-## Performance
-
-Janus uses dictionary encoding and segmented storage for high-throughput ingestion and historical reads.
-
-- Write throughput: 2.6-3.14 million quads/sec
-- Read throughput: 2.7-2.77 million quads/sec
-- Point query latency: 0.235 ms at 1M quads
-- Space efficiency: about 40% smaller encoded events
-- Segment file IDs are process-monotonic, so rapid flushes cannot reuse the same millisecond timestamp and overwrite an earlier segment.
-
-Detailed benchmark data is in [docs/BENCHMARK_RESULTS.md](./docs/BENCHMARK_RESULTS.md).
-Current benchmark commands and scope are in [docs/BENCHMARKING.md](./docs/BENCHMARKING.md).
-Paper-facing benchmark evidence is in [docs/PAPER_BENCHMARKING.md](./docs/PAPER_BENCHMARKING.md) and [docs/PAPER_ARTIFACT_MAP.md](./docs/PAPER_ARTIFACT_MAP.md).
-
-## Quick Start
+## Quick start
 
 ### Prerequisites
 
-- Rust stable
-- Cargo
-- Docker, if you want to run the local MQTT broker from `docker-compose.yml`
+- A current stable Rust toolchain with Cargo
+- Docker Compose, only for MQTT-backed replay or live-query flows
 
-### Build
+Build and run the test suite:
 
 ```bash
 make build
-make release
+make test
 ```
 
-### Run the HTTP API
+Start a local MQTT broker when exercising live streaming:
 
 ```bash
-cargo run --bin http_server -- --host 127.0.0.1 --port 8080 --storage-dir ./data/storage
+docker-compose up -d mosquitto
 ```
 
-Then check the server:
+Start the HTTP and WebSocket API in another terminal:
+
+```bash
+cargo run --bin http_server -- \
+  --host 127.0.0.1 \
+  --port 8080 \
+  --storage-dir ./data/storage
+```
+
+Confirm that the server is running:
 
 ```bash
 curl http://127.0.0.1:8080/health
 ```
 
-### Try the HTTP client example
+The fastest local API exercise is the client example:
 
 ```bash
 cargo run --example http_client_example
 ```
 
-This example demonstrates:
+It covers registering, starting, inspecting, and stopping a query; replay
+control; and consuming results over WebSockets. For request and response
+formats, use [the current HTTP API reference](./docs/HTTP_API_CURRENT.md).
 
-- query registration
-- query start and stop
-- query inspection
-- replay control
-- WebSocket result consumption
+## Entry points
 
-### Frontend Boundary
+| Command | Purpose |
+| --- | --- |
+| `cargo run --bin http_server -- --help` | Run the REST/WebSocket server. |
+| `cargo run --bin stream_bus_cli -- --help` | Replay N-Triples or N-Quads to storage and, optionally, MQTT. |
+| `cargo run --bin janus -- info` | Show the package-level entry points. |
+| `cargo run --example http_client_example` | Exercise the HTTP and WebSocket query lifecycle. |
+| `cargo bench --no-run` | Compile every Criterion benchmark without executing it. |
 
-The maintained web dashboard lives in the separate
-`SolidLabResearch/janus-dashboard` repository.
-
-Frontend development should happen in the dedicated dashboard repo.
+The repository also contains focused paper and storage benchmark binaries under
+`src/bin/`. Their commands, output contracts, and reproducibility rules are in
+[docs/BENCHMARKING.md](./docs/BENCHMARKING.md) and
+[docs/PAPER_BENCHMARKING.md](./docs/PAPER_BENCHMARKING.md). Benchmark results
+are workload- and machine-dependent; do not treat historical numbers as a
+current performance guarantee.
 
 ## Development
-
-### Common Commands
 
 ```bash
 make build         # debug build
 make release       # optimized build
-make test          # full test suite
-make test-verbose  # verbose tests
+make test          # cargo test --all-features
 make fmt           # format code
 make fmt-check     # check formatting
-make lint          # clippy with warnings as errors
-make check         # formatting + linting
+make lint          # clippy, with warnings denied
+make check         # formatting and linting
 make ci-check      # local CI script
+make doc-links     # validate local Markdown links
 ```
 
-### Examples
+The main implementation areas are:
 
-The repository includes runnable examples under [`examples/`](./examples), including:
-
-- [`examples/http_client_example.rs`](./examples/http_client_example.rs)
-- [`examples/comparator_demo.rs`](./examples/comparator_demo.rs)
+- `src/parsing/` — Janus-QL parsing and validation
+- `src/api/` and `src/http/` — query lifecycle and REST/WebSocket interfaces
+- `src/execution/` and `src/stream/` — historical and live execution
+- `src/storage/` — segmented event storage and indexes
+- `src/stream_bus/` — replay and MQTT publishing
+- `src/bin/`, `benches/`, and `examples/` — runnable tools, benchmarks, and
+  examples
 
 ## Documentation
 
-Start here:
+Begin with [GETTING_STARTED.md](./GETTING_STARTED.md) or
+[START_HERE.md](./START_HERE.md). The complete reading order and guide index
+are in [docs/DOCUMENTATION_INDEX.md](./docs/DOCUMENTATION_INDEX.md).
 
-- [GETTING_STARTED.md](./GETTING_STARTED.md)
-- [START_HERE.md](./START_HERE.md)
-- [docs/DOCUMENTATION_INDEX.md](./docs/DOCUMENTATION_INDEX.md)
-- [docs/README.md](./docs/README.md)
-- [docs/HTTP_API_CURRENT.md](./docs/HTTP_API_CURRENT.md)
-- [docs/PAPER_BENCHMARKING.md](./docs/PAPER_BENCHMARKING.md)
-- [docs/PAPER_ARTIFACT_MAP.md](./docs/PAPER_ARTIFACT_MAP.md)
-- [docs/PAPER_ARCHITECTURE.md](./docs/PAPER_ARCHITECTURE.md)
-- [docs/PAPER_SUBMISSION_PACKAGE.md](./docs/PAPER_SUBMISSION_PACKAGE.md)
+Useful references:
 
-## Notes
+- [Janus-QL](./docs/JANUSQL.md)
+- [Current HTTP API](./docs/HTTP_API_CURRENT.md)
+- [Live streaming guide](./docs/LIVE_STREAMING_GUIDE.md)
+- [Stream-bus CLI](./docs/STREAM_BUS_CLI.md)
+- [Benchmarking](./docs/BENCHMARKING.md)
+- [Paper artifact map](./docs/PAPER_ARTIFACT_MAP.md)
 
-- `src/main.rs` is now a lightweight entry binary that points to the main Janus
-  executables and benchmark helpers.
-- The primary user-facing entry point is `http_server`.
+The maintained web dashboard is a separate project:
+[SolidLabResearch/janus-dashboard](https://github.com/SolidLabResearch/janus-dashboard).
 
-## Licence
+## Contributing and licence
 
-This code is copyrighted by Ghent University - imec and released under the MIT Licence.
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for local development and contribution
+guidance. Janus is copyrighted by Ghent University — imec and released under
+the [MIT License](./LICENCE.md).
 
 ## Contact
 
-For questions, contact [Kush](mailto:mailkushbisen@gmail.com) or open an issue in the repository.
+For questions, contact [Kush](mailto:mailkushbisen@gmail.com) or open an issue
+in the repository.
