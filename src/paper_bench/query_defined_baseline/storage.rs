@@ -1,17 +1,17 @@
+use std::convert::TryFrom;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use std::convert::TryFrom;
 
-use crate::{
-    core::RDFEvent,
-    parsing::janusql_parser::{SourceKind, WindowDefinition, WindowType},
-    storage::{segmented_storage::StreamingSegmentedStorage, util::StreamingConfig},
-};
 use super::types::{
     HistoricalWriteStats, LiveReplayMode, PreparedStorage, QueryDefinedBaselineProfile,
     ResolvedLiveReplayConfig,
 };
 use super::PREFIX;
+use crate::{
+    core::RDFEvent,
+    parsing::janusql_parser::{SourceKind, WindowDefinition, WindowType},
+    storage::{segmented_storage::StreamingSegmentedStorage, util::StreamingConfig},
+};
 
 pub fn sensor_iri(sensor_idx: usize) -> String {
     format!("{PREFIX}sensor{sensor_idx}")
@@ -24,7 +24,7 @@ pub fn smoke_historical_window(
     Ok(WindowDefinition {
         window_name: format!("{PREFIX}historyDay"),
         source_kind: SourceKind::Log,
-        stream_name: format!("{PREFIX}stream"),
+        source_name: format!("{PREFIX}stream"),
         width: 0,
         slide: 0,
         offset: None,

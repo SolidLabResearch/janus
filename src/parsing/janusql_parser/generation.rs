@@ -1,11 +1,14 @@
-use crate::parsing::janusql_parser::JanusQLParser;
 use crate::parsing::janusql_parser::ast::{
-    ParsedJanusQuery, GeneratedBaselineQuery, BaselineDefinition,
-    HistoricalMaterializationKind
+    BaselineDefinition, GeneratedBaselineQuery, HistoricalMaterializationKind, ParsedJanusQuery,
 };
+use crate::parsing::janusql_parser::JanusQLParser;
 
 impl JanusQLParser {
-    pub(crate) fn generate_rspql_query(&self, parsed: &ParsedJanusQuery, prefix_lines: &[String]) -> String {
+    pub(crate) fn generate_rspql_query(
+        &self,
+        parsed: &ParsedJanusQuery,
+        prefix_lines: &[String],
+    ) -> String {
         let mut lines: Vec<String> = Vec::new();
 
         for prefix in prefix_lines {
@@ -27,11 +30,11 @@ impl JanusQLParser {
 
         for window in &parsed.live_windows {
             let wrapped_window_name = self.wrap_iri(&window.window_name, &parsed.prefixes);
-            let wrapped_stream_name = self.wrap_iri(&window.stream_name, &parsed.prefixes);
+            let wrapped_source_name = self.wrap_iri(&window.source_name, &parsed.prefixes);
 
             lines.push(format!(
                 "FROM NAMED WINDOW {} ON STREAM {} [RANGE {} STEP {}]",
-                wrapped_window_name, wrapped_stream_name, window.width, window.slide
+                wrapped_window_name, wrapped_source_name, window.width, window.slide
             ));
         }
 
@@ -93,6 +96,14 @@ impl JanusQLParser {
 
             lines.push(String::new());
             lines.push(where_clause);
+            if parsed.live_windows.is_empty() {
+                if let Some(group_by_clause) = &parsed.group_by_clause {
+                    lines.push(group_by_clause.clone());
+                }
+                if let Some(having_clause) = &parsed.having_clause {
+                    lines.push(having_clause.clone());
+                }
+            }
             queries.push(lines.join("\n"));
         }
 

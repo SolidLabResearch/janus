@@ -25,10 +25,7 @@ use crate::{
 };
 use std::{
     collections::HashMap,
-    sync::{
-        mpsc,
-        Arc, Mutex, RwLock,
-    },
+    sync::{mpsc, Arc, Mutex, RwLock},
     thread,
 };
 
@@ -271,8 +268,8 @@ impl JanusApi {
                     })?;
                 }
                 for window in &live_windows {
-                    if let Err(e) = processor.register_stream(&window.stream_name) {
-                        eprintln!("Failed to register stream '{}': {}", window.stream_name, e);
+                    if let Err(e) = processor.register_stream(&window.source_name) {
+                        eprintln!("Failed to register stream '{}': {}", window.source_name, e);
                     }
                 }
 
@@ -350,15 +347,15 @@ impl JanusApi {
 
             // Spawn MQTT subscriber for each live window
             for window in &live_windows {
-                let (host, port, topic) = parse_mqtt_uri(&window.stream_name);
+                let (host, port, topic) = parse_mqtt_uri(&window.source_name);
 
                 let config = MqttSubscriberConfig {
                     host,
                     port,
-                    client_id: format!("janus_live_{}_{}", query_id.clone(), window.stream_name),
+                    client_id: format!("janus_live_{}_{}", query_id.clone(), window.source_name),
                     keep_alive_secs: 30,
                     topic,
-                    stream_uri: window.stream_name.clone(),
+                    stream_uri: window.source_name.clone(),
                     window_graph: window.window_name.clone(),
                 };
 

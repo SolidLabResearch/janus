@@ -20,17 +20,77 @@ pub struct RDFEvent {
     pub predicate: String,
     pub object: String,
     pub graph: String,
+    pub object_is_literal: bool,
+    pub object_datatype: Option<String>,
 }
 
 /// Implement methods for RDFEvent struct.
 impl RDFEvent {
     pub fn new(timestamp: u64, subject: &str, predicate: &str, object: &str, graph: &str) -> Self {
+        let is_literal = !crate::storage::indexing::dictionary::Dictionary::looks_like_iri(object);
         Self {
             timestamp,
             subject: subject.to_string(),
             predicate: predicate.to_string(),
             object: object.to_string(),
             graph: graph.to_string(),
+            object_is_literal: is_literal,
+            object_datatype: None,
+        }
+    }
+
+    pub fn new_iri_object(
+        timestamp: u64,
+        subject: &str,
+        predicate: &str,
+        object_iri: &str,
+        graph: &str,
+    ) -> Self {
+        Self {
+            timestamp,
+            subject: subject.to_string(),
+            predicate: predicate.to_string(),
+            object: object_iri.to_string(),
+            graph: graph.to_string(),
+            object_is_literal: false,
+            object_datatype: None,
+        }
+    }
+
+    pub fn new_literal_object(
+        timestamp: u64,
+        subject: &str,
+        predicate: &str,
+        object_value: &str,
+        graph: &str,
+    ) -> Self {
+        Self {
+            timestamp,
+            subject: subject.to_string(),
+            predicate: predicate.to_string(),
+            object: object_value.to_string(),
+            graph: graph.to_string(),
+            object_is_literal: true,
+            object_datatype: None,
+        }
+    }
+
+    pub fn new_typed_literal_object(
+        timestamp: u64,
+        subject: &str,
+        predicate: &str,
+        object_value: &str,
+        datatype_uri: &str,
+        graph: &str,
+    ) -> Self {
+        Self {
+            timestamp,
+            subject: subject.to_string(),
+            predicate: predicate.to_string(),
+            object: object_value.to_string(),
+            graph: graph.to_string(),
+            object_is_literal: true,
+            object_datatype: Some(datatype_uri.to_string()),
         }
     }
 }

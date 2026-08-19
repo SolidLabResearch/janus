@@ -1,10 +1,10 @@
-use std::collections::{HashMap, HashSet};
-use crate::parsing::janusql_parser::JanusQLParser;
 use crate::parsing::janusql_parser::ast::{
-    PrefixDeclaration, WindowClause, SourceKind, WindowSpec, WindowDefinition, WindowType,
-    BaselineClause, BaselineBootstrapMode, BaselineUse, BaselineDefinition,
-    HistoricalMaterializationKind, RegisterClause, NestedSubquery
+    BaselineBootstrapMode, BaselineClause, BaselineDefinition, BaselineUse,
+    HistoricalMaterializationKind, NestedSubquery, PrefixDeclaration, RegisterClause, SourceKind,
+    WindowClause, WindowDefinition, WindowSpec, WindowType,
 };
+use crate::parsing::janusql_parser::JanusQLParser;
+use std::collections::{HashMap, HashSet};
 
 impl JanusQLParser {
     pub(crate) fn parse_prefix_declaration(
@@ -62,18 +62,30 @@ impl JanusQLParser {
         let spec = match spec_parts.as_slice() {
             ["RANGE", range, "STEP", step] => {
                 if source_kind != SourceKind::Stream {
-                    return Err(self.parse_error(
-                        "Live RANGE/STEP windows are only supported on STREAM sources",
-                    ));
+                    return Err(
+                        self.parse_error("Live RANGE/STEP windows must use ON STREAM, not ON LOG")
+                    );
                 }
                 WindowSpec::LiveSliding { range: range.parse()?, step: step.parse()? }
             }
-            ["OFFSET", offset, "RANGE", range, "STEP", step] => WindowSpec::HistoricalSliding {
-                offset: offset.parse()?,
-                range: range.parse()?,
-                step: step.parse()?,
-            },
+            ["OFFSET", offset, "RANGE", range, "STEP", step] => {
+                if source_kind != SourceKind::Log {
+                    return Err(self.parse_error(
+                        "Historical OFFSET/RANGE/STEP windows must use ON LOG, not ON STREAM",
+                    ));
+                }
+                WindowSpec::HistoricalSliding {
+                    offset: offset.parse()?,
+                    range: range.parse()?,
+                    step: step.parse()?,
+                }
+            }
             ["START", start, "END", end] => {
+                if source_kind != SourceKind::Log {
+                    return Err(self.parse_error(
+                        "Historical START/END windows must use ON LOG, not ON STREAM",
+                    ));
+                }
                 WindowSpec::HistoricalFixed { start: start.parse()?, end: end.parse()? }
             }
             _ => {
@@ -84,7 +96,10 @@ impl JanusQLParser {
         Ok(WindowClause { window_name, source_kind, source_name, spec })
     }
 
-    pub(crate) fn parse_source_kind(&self, raw: &str) -> Result<SourceKind, Box<dyn std::error::Error>> {
+    pub(crate) fn parse_source_kind(
+        &self,
+        raw: &str,
+    ) -> Result<SourceKind, Box<dyn std::error::Error>> {
         match raw {
             "STREAM" => Ok(SourceKind::Stream),
             "LOG" => Ok(SourceKind::Log),
@@ -97,7 +112,7 @@ impl JanusQLParser {
             WindowSpec::LiveSliding { range, step } => WindowDefinition {
                 window_name: window.window_name.clone(),
                 source_kind: window.source_kind.clone(),
-                stream_name: window.source_name.clone(),
+                source_name: window.source_name.clone(),
                 width: range,
                 slide: step,
                 offset: None,
@@ -108,7 +123,7 @@ impl JanusQLParser {
             WindowSpec::HistoricalSliding { offset, range, step } => WindowDefinition {
                 window_name: window.window_name.clone(),
                 source_kind: window.source_kind.clone(),
-                stream_name: window.source_name.clone(),
+                source_name: window.source_name.clone(),
                 width: range,
                 slide: step,
                 offset: Some(offset),
@@ -119,7 +134,7 @@ impl JanusQLParser {
             WindowSpec::HistoricalFixed { start, end } => WindowDefinition {
                 window_name: window.window_name.clone(),
                 source_kind: window.source_kind.clone(),
-                stream_name: window.source_name.clone(),
+                source_name: window.source_name.clone(),
                 width: 0,
                 slide: 0,
                 offset: None,
@@ -272,6 +287,13 @@ impl JanusQLParser {
             return Err(self.parse_error(format!("Invalid REGISTER clause: {line}")));
         }
 
+        if parts[0] != "RStream" {
+            return Err(self.parse_error(format!(
+                "Unsupported REGISTER operator '{}'; Janus-QL Core only supports REGISTER RStream",
+                parts[0]
+            )));
+        }
+
         Ok(RegisterClause {
             operator: parts[0].to_string(),
             name: self.unwrap_iri(parts[1], prefix_mapper),
@@ -334,7 +356,11 @@ impl JanusQLParser {
         })
     }
 
-    pub(crate) fn filter_select_clause(&self, select_clause: &str, allowed_vars: &HashSet<String>) -> String {
+    pub(crate) fn filter_select_clause(
+        &self,
+        select_clause: &str,
+        allowed_vars: &HashSet<String>,
+    ) -> String {
         if allowed_vars.is_empty() {
             return select_clause.to_string();
         }

@@ -7,8 +7,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use super::types::{
     LiveReplayMode, QueryDefinedBaselineBenchmarkConfig, QueryDefinedBaselineBenchmarkCsvRows,
     QueryDefinedBaselineBenchmarkReport, QueryDefinedBaselineComparisonRow,
-    QueryDefinedBaselineMatrixSummaryRow, QueryDefinedBaselineVariantMetrics, ResourceSample,
-    ResourceSummary, ResolvedLiveReplayConfig,
+    QueryDefinedBaselineMatrixSummaryRow, QueryDefinedBaselineVariantMetrics,
+    ResolvedLiveReplayConfig, ResourceSample, ResourceSummary,
 };
 
 #[derive(Clone, Copy, Debug)]

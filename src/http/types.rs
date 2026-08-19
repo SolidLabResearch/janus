@@ -9,10 +9,7 @@ use crate::{
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
-    sync::{
-        atomic::AtomicU64,
-        Arc, Mutex,
-    },
+    sync::{atomic::AtomicU64, Arc, Mutex},
     time::Instant,
 };
 use tokio::sync::broadcast;

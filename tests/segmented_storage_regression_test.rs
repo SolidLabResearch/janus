@@ -174,3 +174,99 @@ fn test_storage_rapid_flush_loop_keeps_all_segments_queryable() {
 
     assert_eq!(query_all_events(&storage), expected);
 }
+
+#[test]
+fn test_dictionary_atomic_writes_cleanup() {
+    let temp_dir = TempDir::new().expect("failed to create temp dir");
+    let storage_dir = temp_dir.path().join("storage");
+    fs::create_dir_all(&storage_dir).unwrap();
+
+    let config = StreamingConfig {
+        segment_base_path: storage_dir.to_string_lossy().into_owned(),
+        max_batch_events: 100,
+        max_batch_age_seconds: 60,
+        max_batch_bytes: 1_000_000,
+        sparse_interval: 1,
+        entries_per_index_block: 1,
+    };
+
+    {
+        let mut storage = StreamingSegmentedStorage::new(config.clone()).unwrap();
+        storage.start_background_flushing();
+
+        storage.write_rdf(1000, "http://a", "http://b", "10", "http://g").unwrap();
+        storage.flush().unwrap();
+        storage.shutdown().unwrap();
+    }
+
+    let dict_path = storage_dir.join("dictionary.bin");
+    assert!(dict_path.exists());
+
+    for entry in fs::read_dir(&storage_dir).unwrap() {
+        let entry = entry.unwrap();
+        let name = entry.file_name();
+        let name_str = name.to_str().unwrap();
+        assert!(!name_str.contains(".tmp"), "Found leftover temp file: {}", name_str);
+    }
+
+    {
+        let mut storage = StreamingSegmentedStorage::new(config).unwrap();
+        storage.start_background_flushing();
+
+        let events = query_all_events(&storage);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].1, "http://a");
+
+        storage
+            .write_rdf(2000, "http://new_subj", "http://b", "20", "http://g")
+            .unwrap();
+        storage.flush().unwrap();
+        storage.shutdown().unwrap();
+    }
+}
+
+#[test]
+fn test_shutdown_race_safety() {
+    let temp_dir = TempDir::new().expect("failed to create temp dir");
+    let storage_dir = temp_dir.path().join("storage");
+    fs::create_dir_all(&storage_dir).unwrap();
+
+    let config = StreamingConfig {
+        segment_base_path: storage_dir.to_string_lossy().into_owned(),
+        max_batch_events: 5,
+        max_batch_age_seconds: 1,
+        max_batch_bytes: 10_000,
+        sparse_interval: 1,
+        entries_per_index_block: 1,
+    };
+
+    let event_count = 20;
+    {
+        let mut storage = StreamingSegmentedStorage::new(config.clone()).unwrap();
+        storage.start_background_flushing();
+
+        for i in 0..event_count {
+            let ts = 1000 + i;
+            let subject = format!("http://example.org/sensor/{}", i);
+            storage
+                .write_rdf(ts, &subject, "http://example.org/val", "12", "http://g")
+                .unwrap();
+
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+
+        storage.shutdown().unwrap();
+    }
+
+    {
+        let storage = StreamingSegmentedStorage::new(config).unwrap();
+        let events = query_all_events(&storage);
+
+        assert_eq!(events.len(), event_count as usize, "Mismatch in event count after shutdown");
+
+        let mut timestamps = std::collections::HashSet::new();
+        for event in &events {
+            assert!(timestamps.insert(event.0), "Duplicate event timestamp found: {}", event.0);
+        }
+    }
+}

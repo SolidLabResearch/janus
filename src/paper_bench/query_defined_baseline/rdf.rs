@@ -1,10 +1,10 @@
 use oxigraph::model::{BlankNode, GraphName, NamedNode, NamedOrBlankNode, Quad, Term};
 use std::collections::{HashMap, HashSet};
 
+use super::{BASELINE_GRAPH, BASELINE_QUERY_NAME};
 use crate::parsing::janusql_parser::{
     BaselineDefinition, BaselineGraphTemplate, GraphTermTemplate, ParsedJanusQuery, TripleTemplate,
 };
-use super::{BASELINE_GRAPH, BASELINE_QUERY_NAME};
 
 pub fn parse_numeric(raw: &str) -> Result<f64, Box<dyn std::error::Error>> {
     let trimmed = raw.trim();
@@ -131,7 +131,9 @@ pub fn resolve_object_term(
     }
 }
 
-pub fn parse_named_or_blank_node(raw: &str) -> Result<NamedOrBlankNode, Box<dyn std::error::Error>> {
+pub fn parse_named_or_blank_node(
+    raw: &str,
+) -> Result<NamedOrBlankNode, Box<dyn std::error::Error>> {
     let trimmed = raw.trim();
     if let Some(name) = trimmed.strip_prefix("_:") {
         Ok(NamedOrBlankNode::BlankNode(BlankNode::new(name)?))
@@ -158,7 +160,9 @@ pub fn parse_term(raw: &str) -> Result<Term, Box<dyn std::error::Error>> {
     Ok(Term::Literal(parse_literal_term(trimmed)?))
 }
 
-pub fn parse_literal_term(raw: &str) -> Result<oxigraph::model::Literal, Box<dyn std::error::Error>> {
+pub fn parse_literal_term(
+    raw: &str,
+) -> Result<oxigraph::model::Literal, Box<dyn std::error::Error>> {
     let trimmed = raw.trim();
     if let Ok(value) = trimmed.parse::<i64>() {
         return Ok(oxigraph::model::Literal::new_typed_literal(
@@ -196,7 +200,9 @@ pub fn parse_literal_term(raw: &str) -> Result<oxigraph::model::Literal, Box<dyn
     Ok(oxigraph::model::Literal::new_simple_literal(lexical))
 }
 
-pub fn split_literal_lexical_and_suffix(raw: &str) -> Result<(&str, &str), Box<dyn std::error::Error>> {
+pub fn split_literal_lexical_and_suffix(
+    raw: &str,
+) -> Result<(&str, &str), Box<dyn std::error::Error>> {
     let mut escaped = false;
 
     for (index, ch) in raw.char_indices().skip(1) {

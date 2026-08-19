@@ -37,6 +37,55 @@ pub struct ResultConverter {
     query_id: QueryId,
 }
 
+/// Parses an RSP-RS binding debug string into Janus' `HashMap<String, String>` binding format.
+///
+/// This intentionally preserves the existing ad-hoc parsing behavior. It is fragile because it
+/// depends on the current `Debug` representation emitted by RSP-RS, but this refactor keeps that
+/// behavior rather than redesigning the parser.
+pub fn parse_rsprs_binding_string(binding_str: &str) -> HashMap<String, String> {
+    let mut result = HashMap::new();
+    let bindings_str = binding_str.trim_matches(|ch| ch == '{' || ch == '}').trim();
+    let parts = bindings_str.split(", Variable").collect::<Vec<_>>();
+
+    for (index, part) in parts.iter().enumerate() {
+        let binding = if index == 0 {
+            part.trim_start_matches("Variable")
+        } else {
+            part
+        };
+        let Some(name_start) = binding.find("name: \"") else {
+            continue;
+        };
+        let name_offset = name_start + 7;
+        let Some(name_end) = binding[name_offset..].find('"') else {
+            continue;
+        };
+        let variable = &binding[name_offset..name_offset + name_end];
+        let value = if binding.contains("TypedLiteral") {
+            extract_between(binding, "value: \"", "\"")
+        } else if binding.contains("NamedNode") {
+            extract_between(binding, "iri: \"", "\"")
+        } else if binding.contains("Literal(Literal(String(\"") {
+            extract_between(binding, "String(\"", "\")")
+        } else if binding.contains("Literal(Literal(") {
+            extract_between(binding, "Literal(Literal(", "))")
+        } else {
+            None
+        };
+        if let Some(value) = value {
+            result.insert(variable.to_string(), value);
+        }
+    }
+
+    result
+}
+
+fn extract_between(input: &str, start: &str, end: &str) -> Option<String> {
+    let start_index = input.find(start)? + start.len();
+    let end_index = input[start_index..].find(end)?;
+    Some(input[start_index..start_index + end_index].to_string())
+}
+
 impl ResultConverter {
     /// Creates a new ResultConverter for a specific query.
     ///
@@ -112,7 +161,7 @@ impl ResultConverter {
     pub fn from_live_binding(&self, binding: BindingWithTimestamp) -> QueryResult {
         // Convert RSP-RS binding format to HashMap
         // Note: bindings is a String in rsp-rs, so we parse it
-        let converted_bindings = self.parse_rsprs_binding_string(&binding.bindings);
+        let converted_bindings = parse_rsprs_binding_string(&binding.bindings);
 
         QueryResult {
             query_id: self.query_id.clone(),
@@ -120,107 +169,6 @@ impl ResultConverter {
             source: ResultSource::Live,
             bindings: vec![converted_bindings],
         }
-    }
-
-    /// Parses RSP-RS binding string to HashMap format.
-    ///
-    /// RSP-RS bindings field is a String representation of the bindings.
-    /// This parser extracts variable names and values from the debug format:
-    /// {Variable { name: "sensor" }: NamedNode(NamedNode { iri: "http://..." }), ...}
-    ///
-    /// # Arguments
-    ///
-    /// * `binding_str` - String representation of bindings
-    ///
-    /// # Returns
-    ///
-    /// HashMap with variable names as keys and values as strings
-    fn parse_rsprs_binding_string(&self, binding_str: &str) -> HashMap<String, String> {
-        let mut result = HashMap::new();
-
-        // Split by comma to get individual bindings
-        // Format: {Variable { name: "sensor" }: NamedNode(...), Variable { name: "temp" }: Literal(...)}
-        let bindings_str = binding_str.trim_matches(|c| c == '{' || c == '}').trim();
-
-        // Split by ", Variable" to separate individual variable bindings
-        let parts: Vec<&str> = bindings_str.split(", Variable").collect();
-
-        for (i, part) in parts.iter().enumerate() {
-            let binding = if i == 0 {
-                // First part already has "Variable" stripped or starts with it
-                part.trim_start_matches("Variable")
-            } else {
-                // Subsequent parts need "Variable" added back
-                part
-            };
-
-            // Extract variable name
-            if let Some(name_start) = binding.find("name: \"") {
-                let name_offset = name_start + 7; // length of "name: \""
-                if let Some(name_end) = binding[name_offset..].find('"') {
-                    let var_name = &binding[name_offset..name_offset + name_end];
-
-                    // Extract value based on type
-                    // IMPORTANT: Check TypedLiteral BEFORE NamedNode since TypedLiteral contains NamedNode (for datatype)
-                    let value = if binding.contains("TypedLiteral") {
-                        // Extract value from TypedLiteral { value: "...", datatype: ... }
-                        if let Some(val_start) = binding.find("value: \"") {
-                            let val_offset = val_start + 8; // length of "value: \""
-                            if let Some(val_end) = binding[val_offset..].find('"') {
-                                binding[val_offset..val_offset + val_end].to_string()
-                            } else {
-                                continue;
-                            }
-                        } else {
-                            continue;
-                        }
-                    } else if binding.contains("NamedNode") {
-                        // Extract URI from NamedNode(NamedNode { iri: "..." })
-                        if let Some(iri_start) = binding.find("iri: \"") {
-                            let iri_offset = iri_start + 6; // length of "iri: \""
-                            if let Some(iri_end) = binding[iri_offset..].find('"') {
-                                binding[iri_offset..iri_offset + iri_end].to_string()
-                            } else {
-                                continue;
-                            }
-                        } else {
-                            continue;
-                        }
-                    } else if binding.contains("Literal(Literal(String(\"") {
-                        // Extract string from Literal(Literal(String("...")))
-                        if let Some(str_start) = binding.find("String(\"") {
-                            let str_offset = str_start + 8; // length of "String(\""
-                            if let Some(str_end) = binding[str_offset..].find("\")") {
-                                binding[str_offset..str_offset + str_end].to_string()
-                            } else {
-                                continue;
-                            }
-                        } else {
-                            continue;
-                        }
-                    } else if binding.contains("Literal(") {
-                        // Other literal types - try to extract the value
-                        if let Some(lit_start) = binding.find("Literal(Literal(") {
-                            let lit_offset = lit_start + 16;
-                            if let Some(lit_end) = binding[lit_offset..].find("))") {
-                                binding[lit_offset..lit_offset + lit_end].to_string()
-                            } else {
-                                continue;
-                            }
-                        } else {
-                            continue;
-                        }
-                    } else {
-                        // Unknown format, skip
-                        continue;
-                    };
-
-                    result.insert(var_name.to_string(), value);
-                }
-            }
-        }
-
-        result
     }
 
     /// Batch converts multiple historical bindings to QueryResults.
@@ -368,12 +316,10 @@ mod tests {
 
     #[test]
     fn test_parse_typed_literal_binding() {
-        let converter = ResultConverter::new("test_query".into());
-
         // Simulate RSP-RS binding string with TypedLiteral (numeric aggregation result)
         let binding_str = r#"{Variable { name: "avgTemp" }: Literal(Literal(TypedLiteral { value: "23.7", datatype: NamedNode { iri: "http://www.w3.org/2001/XMLSchema#decimal" } }))}"#;
 
-        let result = converter.parse_rsprs_binding_string(binding_str);
+        let result = parse_rsprs_binding_string(binding_str);
 
         assert_eq!(result.len(), 1);
         assert_eq!(result.get("avgTemp"), Some(&"23.7".to_string()));
@@ -381,15 +327,34 @@ mod tests {
 
     #[test]
     fn test_parse_multiple_typed_literals() {
-        let converter = ResultConverter::new("test_query".into());
-
         // Multiple TypedLiterals in one binding
         let binding_str = r#"{Variable { name: "avgTemp" }: Literal(Literal(TypedLiteral { value: "23.7", datatype: NamedNode { iri: "http://www.w3.org/2001/XMLSchema#decimal" } })), Variable { name: "count" }: Literal(Literal(TypedLiteral { value: "24", datatype: NamedNode { iri: "http://www.w3.org/2001/XMLSchema#integer" } }))}"#;
 
-        let result = converter.parse_rsprs_binding_string(binding_str);
+        let result = parse_rsprs_binding_string(binding_str);
 
         assert_eq!(result.len(), 2);
         assert_eq!(result.get("avgTemp"), Some(&"23.7".to_string()));
         assert_eq!(result.get("count"), Some(&"24".to_string()));
+    }
+
+    #[test]
+    fn test_parse_named_node_and_string_literal_bindings() {
+        let binding_str = r#"{Variable { name: "sensor" }: NamedNode(NamedNode { iri: "http://example.org/sensor/1" }), Variable { name: "label" }: Literal(Literal(String("ok")))}"#;
+
+        let result = parse_rsprs_binding_string(binding_str);
+
+        assert_eq!(result.len(), 2);
+        assert_eq!(result.get("sensor"), Some(&"http://example.org/sensor/1".to_string()));
+        assert_eq!(result.get("label"), Some(&"ok".to_string()));
+    }
+
+    #[test]
+    fn test_parse_other_literal_binding() {
+        let binding_str = r#"{Variable { name: "flag" }: Literal(Literal(Boolean(true)))}"#;
+
+        let result = parse_rsprs_binding_string(binding_str);
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result.get("flag"), Some(&"Boolean(true".to_string()));
     }
 }

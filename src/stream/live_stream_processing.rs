@@ -4,8 +4,9 @@
 //! It integrates RSP-QL query execution with Janus's RDFEvent data model.
 
 use crate::core::RDFEvent;
+use crate::execution::rdf_conversion::rdf_event_to_quad;
 use crate::extensions::query_options::build_evaluator;
-use oxigraph::model::{GraphName, NamedNode, Quad, Term};
+use oxigraph::model::{Quad, Term};
 use oxigraph::sparql::QueryResults;
 use oxigraph::store::Store;
 use rsp_rs::{BindingWithTimestamp, RDFStream, RSPEngine, StreamType};
@@ -400,59 +401,7 @@ impl LiveStreamProcessing {
     ///
     /// Returns the corresponding oxigraph Quad
     fn rdf_event_to_quad(&self, event: &RDFEvent) -> Result<Quad, LiveStreamProcessingError> {
-        // Parse subject as NamedNode
-        let subject = NamedNode::new(&event.subject)
-            .map_err(|e| LiveStreamProcessingError(format!("Invalid subject URI: {}", e)))?;
-
-        // Parse predicate as NamedNode
-        let predicate = NamedNode::new(&event.predicate)
-            .map_err(|e| LiveStreamProcessingError(format!("Invalid predicate URI: {}", e)))?;
-
-        // Parse object - can be NamedNode or Literal
-        // For simplicity, treat as NamedNode first, fall back to literal if needed
-        let object = if event.object.starts_with("http://") || event.object.starts_with("https://")
-        {
-            // Try as NamedNode
-            match NamedNode::new(&event.object) {
-                Ok(node) => Term::NamedNode(node),
-                Err(_) => {
-                    Term::Literal(oxigraph::model::Literal::new_simple_literal(&event.object))
-                }
-            }
-        } else {
-            // Treat as literal - check if it's a numeric value
-            let literal = if let Ok(_) = event.object.parse::<f64>() {
-                // It's a decimal number - create typed literal for SPARQL aggregations
-                oxigraph::model::Literal::new_typed_literal(
-                    &event.object,
-                    NamedNode::new("http://www.w3.org/2001/XMLSchema#decimal").unwrap(),
-                )
-            } else if let Ok(_) = event.object.parse::<i64>() {
-                // It's an integer
-                oxigraph::model::Literal::new_typed_literal(
-                    &event.object,
-                    NamedNode::new("http://www.w3.org/2001/XMLSchema#integer").unwrap(),
-                )
-            } else {
-                // Plain string literal
-                oxigraph::model::Literal::new_simple_literal(&event.object)
-            };
-            Term::Literal(literal)
-        };
-
-        // Parse graph - use default graph if empty
-        // NOTE: In rsp-rs 0.3.1+, the window automatically assigns quads to the window's graph
-        // so we can use DefaultGraph here and it will be rewritten by the window
-        let graph = if event.graph.is_empty() || event.graph == "default" {
-            GraphName::DefaultGraph
-        } else {
-            GraphName::NamedNode(
-                NamedNode::new(&event.graph)
-                    .map_err(|e| LiveStreamProcessingError(format!("Invalid graph URI: {}", e)))?,
-            )
-        };
-
-        Ok(Quad::new(subject, predicate, object, graph))
+        rdf_event_to_quad(event).map_err(LiveStreamProcessingError)
     }
 
     fn register_live_callbacks(

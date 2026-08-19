@@ -1,6 +1,5 @@
 use crate::{
-    core::RDFEvent,
-    paper_bench::external::ExternalHistoricalAdapter,
+    core::RDFEvent, paper_bench::external::ExternalHistoricalAdapter,
     storage::segmented_storage::StreamingSegmentedStorage,
 };
 use clap::ValueEnum;
@@ -14,7 +13,8 @@ use std::{
 pub const BASELINE_NS: &str = "https://janus.rs/baseline#";
 pub const GRAPH_URI: &str = "http://example.org/citybench";
 pub const LIVE_STREAM_URI: &str = "http://example.org/live";
-pub const TRAFFIC_PREDICATE: &str = "http://example.org/trafficFlow";
+pub const CONGESTION_PREDICATE: &str = "http://example.org/congestionLevel";
+pub const TRAFFIC_PREDICATE: &str = CONGESTION_PREDICATE;
 pub const BASELINE_PREDICATE: &str = "http://example.org/baselineFlow";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, ValueEnum)]
@@ -495,11 +495,6 @@ pub struct BaselineAccumulator {
 
 impl BaselineAccumulator {
     pub fn new() -> Self {
-        Self {
-            last_value: String::new(),
-            numeric_sum: 0.0,
-            numeric_count: 0,
-            all_numeric: true,
-        }
+        Self { last_value: String::new(), numeric_sum: 0.0, numeric_count: 0, all_numeric: true }
     }
 }

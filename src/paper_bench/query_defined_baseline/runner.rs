@@ -1,26 +1,25 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use crate::{
-    execution::HistoricalExecutor,
-    parsing::janusql_parser::JanusQLParser,
-    querying::oxigraph_adapter::OxigraphAdapter,
-    stream::live_stream_processing::LiveStreamProcessing,
+use super::rdf::materialize_query_defined_baseline_quads;
+use super::storage::{
+    build_live_events_for_replay, realtime_close_timestamp, smoke_historical_window,
 };
 use super::types::{
     LiveReplayMode, PreparedStorage, QueryDefinedBaselineComparisonRow,
     QueryDefinedBaselineProfile, QueryDefinedBaselineVariantMetrics, ResolvedLiveReplayConfig,
-    TimedBinding, VariantRunData, ResourceSampler,
+    ResourceSampler, TimedBinding, VariantRunData,
 };
-use super::storage::{
-    build_live_events_for_replay, realtime_close_timestamp, smoke_historical_window,
-};
-use super::rdf::materialize_query_defined_baseline_quads;
 use super::validation::{
     build_correctness_diagnostics, expected_day_averages, expected_live_averages, parse_live_rows,
     summarize_observed_windows, validate_baseline_rows, validate_live_only_rows,
 };
 use super::{PREFIX, RESOURCE_SAMPLE_INTERVAL, STREAM_URI};
+use crate::{
+    execution::HistoricalExecutor, parsing::janusql_parser::JanusQLParser,
+    querying::oxigraph_adapter::OxigraphAdapter,
+    stream::live_stream_processing::LiveStreamProcessing,
+};
 
 #[allow(clippy::too_many_arguments)]
 pub fn run_single_comparison(

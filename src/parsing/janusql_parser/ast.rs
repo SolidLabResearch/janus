@@ -24,8 +24,8 @@ pub struct WindowDefinition {
     pub window_name: String,
     /// Source kind used by the window clause.
     pub source_kind: SourceKind,
-    /// Name of the stream
-    pub stream_name: String,
+    /// Name of the declared source, either a live stream or historical log.
+    pub source_name: String,
     /// Width of the window
     pub width: u64,
     /// Slide step
@@ -70,8 +70,12 @@ impl WindowDefinition {
         match self.historical_window_spec()? {
             HistoricalWindowSpec::Fixed { start, end } => Some((start, end)),
             HistoricalWindowSpec::Sliding { offset, range, .. } => {
-                let historical_end = evaluation_time.saturating_sub(offset);
-                let historical_start = historical_end.saturating_sub(range);
+                if range > offset {
+                    return None;
+                }
+
+                let historical_start = evaluation_time.saturating_sub(offset);
+                let historical_end = historical_start.checked_add(range)?;
                 Some((historical_start, historical_end))
             }
         }

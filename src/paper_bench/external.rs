@@ -1,6 +1,6 @@
 use crate::core::RDFEvent;
+use crate::execution::rdf_event_to_quad;
 use crate::querying::oxigraph_adapter::OxigraphAdapter;
-use oxigraph::model::{GraphName, NamedNode, Quad, Term};
 use rsp_rs::QuadContainer;
 use std::collections::{HashMap, HashSet};
 
@@ -70,20 +70,4 @@ impl ExternalHistoricalAdapter for JenaExternalAdapterStub {
     ) -> Result<ExternalBindings, Box<dyn std::error::Error>> {
         Err("Apache Jena adapter is not implemented yet".into())
     }
-}
-
-fn rdf_event_to_quad(event: &RDFEvent) -> Result<Quad, Box<dyn std::error::Error>> {
-    let subject = NamedNode::new(event.subject.as_str())?;
-    let predicate = NamedNode::new(event.predicate.as_str())?;
-    let object = if event.object.starts_with("http://") || event.object.starts_with("https://") {
-        Term::NamedNode(NamedNode::new(event.object.as_str())?)
-    } else {
-        Term::Literal(event.object.as_str().into())
-    };
-    let graph = if event.graph.is_empty() {
-        GraphName::DefaultGraph
-    } else {
-        GraphName::NamedNode(NamedNode::new(event.graph.as_str())?)
-    };
-    Ok(Quad::new(subject, predicate, object, graph))
 }

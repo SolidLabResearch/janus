@@ -29,6 +29,7 @@ impl StreamingSegmentedStorage {
     }
 
     pub(super) fn flush_batch_buffer_to_segment(&self) -> std::io::Result<()> {
+        let _guard = self.flush_lock.lock().unwrap();
         let mut events_to_flush = {
             let mut batch_buffer = self.batch_buffer.write().unwrap();
             if batch_buffer.events.is_empty() {

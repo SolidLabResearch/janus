@@ -108,6 +108,100 @@ fn test_register_invalid_query() {
 }
 
 #[test]
+fn test_register_rejects_historical_sliding_window_when_range_exceeds_offset() {
+    let parser = JanusQLParser::new().expect("Failed to create parser");
+    let registry = Arc::new(QueryRegistry::new());
+    let storage = Arc::new(
+        StreamingSegmentedStorage::new(StreamingConfig::default())
+            .expect("Failed to create storage"),
+    );
+
+    let api = JanusApi::new(parser, registry, storage).expect("Failed to create API");
+
+    let janusql = r#"
+        PREFIX ex: <http://example.org/>
+
+        SELECT ?sensor ?temp
+
+        FROM NAMED WINDOW ex:invalid ON LOG ex:sensors
+            [OFFSET 1000 RANGE 1500 STEP 500]
+
+        WHERE {
+            WINDOW ex:invalid { ?sensor ex:temperature ?temp }
+        }
+    "#;
+
+    let err = api
+        .register_query("invalid_hist_sliding".into(), janusql)
+        .expect_err("historical sliding window should be rejected during registration");
+
+    assert!(err.to_string().contains("first window would extend beyond the evaluation time"));
+}
+
+#[test]
+fn test_register_rejects_historical_start_end_on_stream() {
+    let parser = JanusQLParser::new().expect("Failed to create parser");
+    let registry = Arc::new(QueryRegistry::new());
+    let storage = Arc::new(
+        StreamingSegmentedStorage::new(StreamingConfig::default())
+            .expect("Failed to create storage"),
+    );
+
+    let api = JanusApi::new(parser, registry, storage).expect("Failed to create API");
+
+    let janusql = r#"
+        PREFIX ex: <http://example.org/>
+
+        SELECT ?sensor ?temp
+
+        FROM NAMED WINDOW ex:hist ON STREAM ex:sensors
+            [START 1000 END 3000]
+
+        WHERE {
+            WINDOW ex:hist { ?sensor ex:temperature ?temp }
+        }
+    "#;
+
+    let err = api
+        .register_query("invalid_hist_stream".into(), janusql)
+        .expect_err("historical START/END on STREAM should be rejected during registration");
+
+    assert!(err.to_string().contains("Historical START/END windows must use ON LOG"));
+}
+
+#[test]
+fn test_register_rejects_live_range_step_on_log() {
+    let parser = JanusQLParser::new().expect("Failed to create parser");
+    let registry = Arc::new(QueryRegistry::new());
+    let storage = Arc::new(
+        StreamingSegmentedStorage::new(StreamingConfig::default())
+            .expect("Failed to create storage"),
+    );
+
+    let api = JanusApi::new(parser, registry, storage).expect("Failed to create API");
+
+    let janusql = r#"
+        PREFIX ex: <http://example.org/>
+
+        REGISTER RStream ex:out AS
+        SELECT ?sensor ?temp
+
+        FROM NAMED WINDOW ex:live ON LOG ex:sensors
+            [RANGE 1000 STEP 200]
+
+        WHERE {
+            WINDOW ex:live { ?sensor ex:temperature ?temp }
+        }
+    "#;
+
+    let err = api
+        .register_query("invalid_live_log".into(), janusql)
+        .expect_err("live RANGE/STEP on LOG should be rejected during registration");
+
+    assert!(err.to_string().contains("Live RANGE/STEP windows must use ON STREAM"));
+}
+
+#[test]
 fn test_start_query_not_registered() {
     let parser = JanusQLParser::new().expect("Failed to create parser");
     let registry = Arc::new(QueryRegistry::new());
@@ -136,7 +230,7 @@ fn test_historical_fixed_window_query() {
 
         SELECT ?sensor ?temp
 
-        FROM NAMED WINDOW ex:hist ON STREAM ex:sensors
+        FROM NAMED WINDOW ex:hist ON LOG ex:sensors
             [START 1000 END 3000]
 
         WHERE {
@@ -194,7 +288,7 @@ fn test_historical_sliding_window_query() {
 
         SELECT ?sensor ?temp
 
-        FROM NAMED WINDOW ex:sliding ON STREAM ex:sensors
+        FROM NAMED WINDOW ex:sliding ON LOG ex:sensors
             [OFFSET 4000 RANGE 1000 STEP 500]
 
         WHERE {
@@ -397,14 +491,14 @@ fn test_multiple_queries_concurrent() {
     let janusql1 = r#"
         PREFIX ex: <http://example.org/>
         SELECT ?s
-        FROM NAMED WINDOW ex:w1 ON STREAM ex:stream1 [START 1000 END 2000]
+        FROM NAMED WINDOW ex:w1 ON LOG ex:stream1 [START 1000 END 2000]
         WHERE { WINDOW ex:w1 { ?s ?p ?o } }
     "#;
 
     let janusql2 = r#"
         PREFIX ex: <http://example.org/>
         SELECT ?s
-        FROM NAMED WINDOW ex:w2 ON STREAM ex:stream2 [START 2000 END 3000]
+        FROM NAMED WINDOW ex:w2 ON LOG ex:stream2 [START 2000 END 3000]
         WHERE { WINDOW ex:w2 { ?s ?p ?o } }
     "#;
 
@@ -442,7 +536,7 @@ fn test_query_handle_receive() {
     let janusql = r#"
         PREFIX ex: <http://example.org/>
         SELECT ?s ?p ?o
-        FROM NAMED WINDOW ex:w ON STREAM ex:stream1 [START 100 END 500]
+        FROM NAMED WINDOW ex:w ON LOG ex:stream1 [START 100 END 500]
         WHERE { WINDOW ex:w { ?s ?p ?o } }
     "#;
 
@@ -473,7 +567,7 @@ PREFIX ex: <http://example.org/>
 
 SELECT ?sensor ?temp
 
-FROM NAMED WINDOW ex:hist ON STREAM ex:sensors [START 100 END 500]
+FROM NAMED WINDOW ex:hist ON LOG ex:sensors [START 100 END 500]
 
 WHERE {
     WINDOW ex:hist { ?sensor ex:temperature ?temp }
@@ -576,8 +670,8 @@ PREFIX ex: <http://example.org/>
 
 SELECT ?sensor ?temp
 
-FROM NAMED WINDOW ex:hist1 ON STREAM ex:sensors [START 100 END 200]
-FROM NAMED WINDOW ex:hist2 ON STREAM ex:sensors [START 300 END 400]
+FROM NAMED WINDOW ex:hist1 ON LOG ex:sensors [START 100 END 200]
+FROM NAMED WINDOW ex:hist2 ON LOG ex:sensors [START 300 END 400]
 
 WHERE {
     WINDOW ex:hist1 { ?sensor ex:temperature ?temp }
@@ -617,7 +711,7 @@ PREFIX ex: <http://example.org/>
 REGISTER RStream <output> AS
 SELECT ?sensor ?temp
 
-FROM NAMED WINDOW ex:hist ON STREAM ex:sensors [START 100 END 500]
+FROM NAMED WINDOW ex:hist ON LOG ex:sensors [START 100 END 500]
 FROM NAMED WINDOW ex:live ON STREAM ex:sensors [RANGE 1000 STEP 200]
 
 WHERE {

@@ -9,7 +9,7 @@ pub struct HistoricalSlidingWindowOperator {
     storage: Rc<StreamingSegmentedStorage>,
     window_def: WindowDefinition,
     current_start: u64,
-    end_bound: u64,
+    evaluation_time: u64,
 }
 
 impl HistoricalSlidingWindowOperator {
@@ -34,7 +34,7 @@ impl HistoricalSlidingWindowOperator {
             storage,
             window_def,
             current_start: start_time,
-            end_bound: now,
+            evaluation_time: now,
         }
     }
 }
@@ -43,21 +43,13 @@ impl Iterator for HistoricalSlidingWindowOperator {
     type Item = Vec<Event>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        // Calculate the window bounds
         let window_start = self.current_start;
-        let window_end = (window_start + self.window_def.width).min(self.end_bound);
+        let window_end = window_start.checked_add(self.window_def.width)?;
 
-        // Check if we have exceeded the query range
-        // We stop if the window start goes beyond the end bound.
-        // (Alternative: stop if window_end > end_bound, depending on strict containment requirements)
-        if window_start > self.end_bound {
+        if window_end > self.evaluation_time {
             return None;
         }
 
-        // Query the storage for events in this window
-        // Note: query() is inclusive, so we might need to adjust if we want [start, end)
-        // For now, we assume the storage query semantics match what we want or we accept inclusive.
-        // Usually windows are [start, end).
         let events_result = self.storage.query(window_start, window_end);
 
         match events_result {

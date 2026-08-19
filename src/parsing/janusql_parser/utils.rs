@@ -1,8 +1,14 @@
-use std::collections::HashMap;
 use crate::parsing::janusql_parser::JanusQLParser;
+use crate::parsing::janusql_parser::{WhereWindowClause, WindowClause, WindowSpec, WindowType};
+use std::collections::HashMap;
+use std::collections::HashSet;
 
 impl JanusQLParser {
-    pub(crate) fn find_matching_brace(&self, input: &str, open_brace_index: usize) -> Option<usize> {
+    pub(crate) fn find_matching_brace(
+        &self,
+        input: &str,
+        open_brace_index: usize,
+    ) -> Option<usize> {
         let mut depth = 0usize;
         for (relative_index, ch) in input[open_brace_index..].char_indices() {
             match ch {
@@ -123,7 +129,10 @@ impl JanusQLParser {
             .collect()
     }
 
-    pub(crate) fn select_baseline_anchor_variable(&self, output_variables: &[String]) -> Option<String> {
+    pub(crate) fn select_baseline_anchor_variable(
+        &self,
+        output_variables: &[String],
+    ) -> Option<String> {
         for preferred in ["?sensor", "?subject", "?entity", "?s"] {
             if output_variables.iter().any(|variable| variable == preferred) {
                 return Some(preferred.to_string());
@@ -141,7 +150,11 @@ impl JanusQLParser {
         Box::new(std::io::Error::new(std::io::ErrorKind::InvalidInput, message.into()))
     }
 
-    pub(crate) fn unwrap_iri(&self, prefixed_iri: &str, prefix_mapper: &HashMap<String, String>) -> String {
+    pub(crate) fn unwrap_iri(
+        &self,
+        prefixed_iri: &str,
+        prefix_mapper: &HashMap<String, String>,
+    ) -> String {
         let trimmed = prefixed_iri.trim();
 
         if trimmed.starts_with('<') && trimmed.ends_with('>') {
@@ -167,5 +180,171 @@ impl JanusQLParser {
             }
         }
         format!("<{}>", iri)
+    }
+
+    pub(crate) fn validate_window_declarations(
+        &self,
+        windows: &[WindowClause],
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut seen = HashSet::new();
+
+        for window in windows {
+            if !seen.insert(window.window_name.clone()) {
+                return Err(self.parse_error(format!(
+                    "Window '{}' is declared more than once in the same query",
+                    window.window_name
+                )));
+            }
+
+            match window.spec {
+                WindowSpec::LiveSliding { range, step } => {
+                    if range == 0 {
+                        return Err(self.parse_error(format!(
+                            "Live window '{}' must use RANGE greater than 0",
+                            window.window_name
+                        )));
+                    }
+                    if step == 0 {
+                        return Err(self.parse_error(format!(
+                            "Live window '{}' must use STEP greater than 0",
+                            window.window_name
+                        )));
+                    }
+                }
+                WindowSpec::HistoricalFixed { start, end } => {
+                    if start >= end {
+                        return Err(self.parse_error(format!(
+                            "Historical fixed window '{}' must use START less than END",
+                            window.window_name
+                        )));
+                    }
+                }
+                WindowSpec::HistoricalSliding { range, step, .. } => {
+                    if range == 0 {
+                        return Err(self.parse_error(format!(
+                            "Historical sliding window '{}' must use RANGE greater than 0",
+                            window.window_name
+                        )));
+                    }
+                    if step == 0 {
+                        return Err(self.parse_error(format!(
+                            "Historical sliding window '{}' must use STEP greater than 0",
+                            window.window_name
+                        )));
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    pub(crate) fn validate_where_window_references(
+        &self,
+        where_windows: &[WhereWindowClause],
+        windows: &[WindowClause],
+        prefixes: &HashMap<String, String>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let windows_by_name = windows
+            .iter()
+            .map(|window| (window.window_name.clone(), window))
+            .collect::<HashMap<_, _>>();
+
+        for where_window in where_windows {
+            let resolved = self.resolve_window_identifier(
+                &where_window.identifier,
+                &windows_by_name,
+                prefixes,
+            );
+            if resolved.is_none() {
+                return Err(self.parse_error(format!(
+                    "WINDOW '{}' references undeclared window '{}'",
+                    where_window.identifier, where_window.identifier
+                )));
+            }
+        }
+
+        Ok(())
+    }
+
+    pub(crate) fn validate_window_bodies(
+        &self,
+        where_windows: &[WhereWindowClause],
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        for where_window in where_windows {
+            self.validate_window_body_core_fragment(&where_window.identifier, &where_window.body)?;
+        }
+
+        Ok(())
+    }
+
+    pub(crate) fn validate_window_body_core_fragment(
+        &self,
+        window_identifier: &str,
+        body: &str,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        for line in body.lines() {
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+
+            let uppercase = trimmed.to_ascii_uppercase();
+            if uppercase.starts_with("SERVICE ")
+                || uppercase.starts_with("SERVICE\t")
+                || uppercase.starts_with("SERVICE<")
+            {
+                return Err(self.parse_error(format!(
+                    "WINDOW '{}' uses unsupported SERVICE syntax; Janus-QL Core does not support SERVICE",
+                    window_identifier
+                )));
+            }
+
+            if self.line_uses_property_path(trimmed) {
+                return Err(self.parse_error(format!(
+                    "WINDOW '{}' uses unsupported property path syntax; Janus-QL Core does not support property paths",
+                    window_identifier
+                )));
+            }
+        }
+
+        Ok(())
+    }
+
+    fn line_uses_property_path(&self, line: &str) -> bool {
+        if line.starts_with("FILTER")
+            || line.starts_with('{')
+            || line.starts_with('}')
+            || line.starts_with('#')
+        {
+            return false;
+        }
+
+        let stripped = line.trim_end_matches('.').trim();
+        let tokens = stripped.split_whitespace().collect::<Vec<_>>();
+        if tokens.len() < 3 {
+            return false;
+        }
+
+        self.is_property_path_token(tokens[1])
+    }
+
+    fn is_property_path_token(&self, token: &str) -> bool {
+        let trimmed = token.trim_matches(|ch| ch == '(' || ch == ')');
+
+        if trimmed.starts_with('<') && trimmed.ends_with('>') {
+            return false;
+        }
+
+        if trimmed.starts_with('?') || trimmed.starts_with('$') {
+            return false;
+        }
+
+        trimmed.starts_with('^')
+            || trimmed.contains('|')
+            || trimmed.contains('/')
+            || trimmed.ends_with('*')
+            || trimmed.ends_with('+')
+            || trimmed.ends_with('?')
     }
 }

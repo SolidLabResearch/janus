@@ -26,6 +26,9 @@ The name comes from the Roman deity Janus, associated with transitions and with 
 
 Janus uses Janus-QL, a hybrid query language for querying historical and live RDF data in one query.
 
+- `ON LOG` declares a persisted historical RDF event log queried with historical bounds such as `[START ... END ...]` or historical sliding offsets.
+- `ON STREAM` declares a live stream evaluated with live windows such as `[RANGE ... STEP ...]`.
+
 Example:
 
 ```sparql

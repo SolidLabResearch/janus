@@ -1,6 +1,8 @@
-use std::collections::HashMap;
+use crate::parsing::janusql_parser::ast::{
+    BaselineGraphTemplate, GraphTermTemplate, TripleTemplate,
+};
 use crate::parsing::janusql_parser::JanusQLParser;
-use crate::parsing::janusql_parser::ast::{BaselineGraphTemplate, TripleTemplate, GraphTermTemplate};
+use std::collections::HashMap;
 
 impl JanusQLParser {
     pub(crate) fn extract_baseline_graph_templates(

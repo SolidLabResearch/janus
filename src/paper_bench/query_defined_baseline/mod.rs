@@ -1,21 +1,21 @@
-pub mod types;
 pub mod rdf;
-pub mod system;
-pub mod storage;
-pub mod validation;
 pub mod reporting;
 pub mod runner;
+pub mod storage;
+pub mod system;
+pub mod types;
+pub mod validation;
 
-use std::path::PathBuf;
-use crate::parsing::janusql_parser::JanusQLParser;
 use crate::paper_bench::harness::{collect_repro_metadata, ensure_output_dir};
+use crate::parsing::janusql_parser::JanusQLParser;
+use std::path::PathBuf;
 
 pub use types::{
-    LiveReplayMode, QueryDefinedBaselineBenchmarkConfig, QueryDefinedBaselineBenchmarkOutcome,
-    QueryDefinedBaselineBenchmarkReport, QueryDefinedBaselineComparisonRow,
-    QueryDefinedBaselineCorrectnessDiagnostics, QueryDefinedBaselineMatrixSummaryRow,
-    QueryDefinedBaselineObservedRow, QueryDefinedBaselineProfile,
-    QueryDefinedBaselineVariantMetrics, QueryDefinedBaselineBenchmarkCsvRows,
+    LiveReplayMode, QueryDefinedBaselineBenchmarkConfig, QueryDefinedBaselineBenchmarkCsvRows,
+    QueryDefinedBaselineBenchmarkOutcome, QueryDefinedBaselineBenchmarkReport,
+    QueryDefinedBaselineComparisonRow, QueryDefinedBaselineCorrectnessDiagnostics,
+    QueryDefinedBaselineMatrixSummaryRow, QueryDefinedBaselineObservedRow,
+    QueryDefinedBaselineProfile, QueryDefinedBaselineVariantMetrics,
 };
 
 pub const PREFIX: &str = "http://example.org/";
@@ -118,8 +118,10 @@ pub fn run_query_defined_baseline_benchmark(
 mod tests {
     use super::*;
     use std::collections::HashMap;
-    use types::{QueryDefinedBaselineObservedRow, ResolvedLiveReplayConfig, LiveReplayMode};
-    use validation::{validate_live_only_rows, validate_baseline_rows, build_correctness_diagnostics};
+    use types::{LiveReplayMode, QueryDefinedBaselineObservedRow, ResolvedLiveReplayConfig};
+    use validation::{
+        build_correctness_diagnostics, validate_baseline_rows, validate_live_only_rows,
+    };
 
     fn accelerated_replay() -> ResolvedLiveReplayConfig {
         ResolvedLiveReplayConfig {

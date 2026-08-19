@@ -1,8 +1,9 @@
 use super::data_gen::prepare_coordination_workload;
 use super::helpers::{
     canonical_result_hash, collect_live_results, event_payloads, historical_input_hash,
-    live_input_hash, live_only_rspql, materialize_bindings_as_static_baseline,
-    materialized_baseline_rows_from_bindings, publish_live_events, join_live_with_baseline, now_ms,
+    join_live_with_baseline, live_input_hash, live_only_rspql,
+    materialize_bindings_as_static_baseline, materialized_baseline_rows_from_bindings, now_ms,
+    publish_live_events,
 };
 use super::io::write_h1_debug_artifacts;
 use super::types::{
@@ -181,8 +182,10 @@ pub fn run_coordination_system(
                 &workload.historical_sparql_query,
                 &workload.historical_rdf_events,
             )?;
-            let materialized_baseline_rows =
-                materialized_baseline_rows_from_bindings(&external_bindings, "baselineFlow");
+            let materialized_baseline_rows = materialized_baseline_rows_from_bindings(
+                &external_bindings,
+                "historicalAvgCongestion",
+            );
             let historical_done = now_ms();
             let mut processor = LiveStreamProcessing::new(live_only_rspql())?;
             processor.register_stream(LIVE_STREAM_URI)?;

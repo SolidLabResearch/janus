@@ -4,8 +4,7 @@
 //! Also includes stream bus replay control for demo purposes.
 
 use crate::{
-    api::janus_api::JanusApi,
-    registry::query_registry::QueryRegistry,
+    api::janus_api::JanusApi, registry::query_registry::QueryRegistry,
     storage::segmented_storage::StreamingSegmentedStorage,
 };
 use axum::{

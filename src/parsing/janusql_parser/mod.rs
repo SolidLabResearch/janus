@@ -133,14 +133,10 @@ impl JanusQLParser {
                 where_lines.push(line);
             } else if trimmed_line.starts_with("GROUP BY") {
                 in_main_select = false;
-                if register.is_some() {
-                    main_group_by_clause = Some(trimmed_line.to_string());
-                }
+                main_group_by_clause = Some(trimmed_line.to_string());
             } else if trimmed_line.starts_with("HAVING") {
                 in_main_select = false;
-                if register.is_some() {
-                    main_having_clause = Some(trimmed_line.to_string());
-                }
+                main_having_clause = Some(trimmed_line.to_string());
             } else if in_main_select {
                 select_clause.push(' ');
                 select_clause.push_str(trimmed_line);
@@ -195,11 +191,14 @@ impl JanusQLParser {
     /// Parses a JanusQL query string.
     pub fn parse(&self, query: &str) -> Result<ParsedJanusQuery, Box<dyn std::error::Error>> {
         let ast = self.parse_ast(query)?;
+        self.validate_window_declarations(&ast.windows)?;
         let prefixes = ast
             .prefixes
             .iter()
             .map(|prefix| (prefix.prefix.clone(), prefix.namespace.clone()))
             .collect::<HashMap<_, _>>();
+        self.validate_where_window_references(&ast.where_windows, &ast.windows, &prefixes)?;
+        self.validate_window_bodies(&ast.where_windows)?;
         let planning = self.plan_nested_subqueries(&ast, &prefixes)?;
         let ast = self.lower_nested_subqueries(&ast, &planning, &prefixes)?;
         let prefix_lines = ast
@@ -220,6 +219,8 @@ impl JanusQLParser {
                 }
             }
         }
+
+        self.validate_historical_windows(&historical_windows)?;
 
         let r2s = ast
             .register
@@ -326,5 +327,54 @@ impl JanusQLParser {
 impl Default for JanusQLParser {
     fn default() -> Self {
         Self::new().expect("Failed to create JanusQLParser")
+    }
+}
+
+impl JanusQLParser {
+    fn validate_historical_windows(
+        &self,
+        windows: &[WindowDefinition],
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        for window in windows {
+            match window.window_type {
+                WindowType::HistoricalSliding => {
+                    let offset = window.offset.ok_or_else(|| {
+                        self.parse_error(format!(
+                            "Historical sliding window '{}' is missing OFFSET",
+                            window.window_name
+                        ))
+                    })?;
+                    if window.width > offset {
+                        return Err(self.parse_error(format!(
+                            "Historical sliding window '{}' has RANGE {} greater than OFFSET {}; the first window would extend beyond the evaluation time",
+                            window.window_name, window.width, offset
+                        )));
+                    }
+                }
+                WindowType::HistoricalFixed => {
+                    let start = window.start.ok_or_else(|| {
+                        self.parse_error(format!(
+                            "Historical fixed window '{}' is missing START",
+                            window.window_name
+                        ))
+                    })?;
+                    let end = window.end.ok_or_else(|| {
+                        self.parse_error(format!(
+                            "Historical fixed window '{}' is missing END",
+                            window.window_name
+                        ))
+                    })?;
+                    if start >= end {
+                        return Err(self.parse_error(format!(
+                            "Historical fixed window '{}' must use START less than END",
+                            window.window_name
+                        )));
+                    }
+                }
+                WindowType::Live => {}
+            }
+        }
+
+        Ok(())
     }
 }

@@ -1,0 +1,11 @@
+query,system,median_mb
+Point lookup,Janus,1141.8
+Point lookup,Oxigraph,1837.6
+Fixed 60s,Janus,1172.0
+Fixed 60s,Oxigraph,1834.5
+Range 10%,Janus,1220.3
+Range 10%,Oxigraph,1836.8
+Range 50%,Janus,1844.8
+Range 50%,Oxigraph,1844.8
+Range 100%,Janus,1892.4
+Range 100%,Oxigraph,1892.4

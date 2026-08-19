@@ -9,7 +9,7 @@ Returns ONLY past data from storage. No live updates.
 PREFIX ex: <http://example.org/>
 REGISTER RStream ex:output AS
 SELECT ?sensor ?temp
-FROM NAMED WINDOW ex:histWindow ON STREAM ex:sensorStream [START 1 END 10000000]
+FROM NAMED WINDOW ex:histWindow ON LOG ex:sensorStream [START 1 END 10000000]
 WHERE {
   WINDOW ex:histWindow {
     ?sensor ex:temperature ?temp .
@@ -84,7 +84,7 @@ Returns historical data FIRST, then switches to live streaming.
 PREFIX ex: <http://example.org/>
 REGISTER RStream ex:output AS
 SELECT ?sensor ?temp
-FROM NAMED WINDOW ex:histWindow ON STREAM ex:sensorStream [START 1 END 10000000]
+FROM NAMED WINDOW ex:histWindow ON LOG ex:sensorStream [START 1 END 10000000]
 FROM NAMED WINDOW ex:liveWindow ON STREAM ex:sensorStream [RANGE 5000 STEP 2000]
 WHERE {
   WINDOW ex:histWindow {
@@ -123,7 +123,7 @@ WHERE {
 The dashboard now uses **HYBRID** mode:
 
 ```sparql
-FROM NAMED WINDOW ex:histWindow ON STREAM ex:sensorStream [START 1 END 10000000]
+FROM NAMED WINDOW ex:histWindow ON LOG ex:sensorStream [START 1 END 10000000]
 FROM NAMED WINDOW ex:liveWindow ON STREAM ex:sensorStream [RANGE 5000 STEP 2000]
 ```
 
@@ -155,7 +155,7 @@ FROM NAMED WINDOW ex:liveWindow ON STREAM ex:sensorStream [RANGE 5000 STEP 2000]
 
 Dashboard query:
 ```sparql
-FROM NAMED WINDOW ex:histWindow ON STREAM ex:sensorStream [START 1 END 10000000]
+FROM NAMED WINDOW ex:histWindow ON LOG ex:sensorStream [START 1 END 10000000]
 WHERE {
   WINDOW ex:histWindow {
     ?sensor ex:temperature ?temp .
@@ -191,7 +191,7 @@ Replay:
 
 Dashboard query:
 ```sparql
-FROM NAMED WINDOW ex:histWindow ON STREAM ex:sensorStream [START 1 END 10000000]
+FROM NAMED WINDOW ex:histWindow ON LOG ex:sensorStream [START 1 END 10000000]
 FROM NAMED WINDOW ex:liveWindow ON STREAM ex:sensorStream [RANGE 5000 STEP 2000]
 WHERE {
   WINDOW ex:histWindow { ... }
@@ -221,7 +221,7 @@ FROM NAMED WINDOW ex:liveWindow ON STREAM ... [RANGE ...]
 
 ### ❌ Only historical window but expecting live
 ```sparql
-FROM NAMED WINDOW ex:histWindow ON STREAM ... [START ... END ...]
+FROM NAMED WINDOW ex:histWindow ON LOG ... [START ... END ...]
 // No live window!
 ```
 Result: Only historical, no live updates

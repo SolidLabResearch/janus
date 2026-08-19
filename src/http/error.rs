@@ -1,12 +1,12 @@
 //! API error types for the HTTP API server.
 
+use crate::api::janus_api::JanusApiError;
 use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
     Json,
 };
 use serde::Serialize;
-use crate::api::janus_api::JanusApiError;
 
 /// Error response structure.
 #[derive(Debug, Serialize)]

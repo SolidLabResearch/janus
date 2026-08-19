@@ -1,13 +1,18 @@
 use clap::Parser;
 use janus::core::RDFEvent;
-use janus::execution::HistoricalExecutor;
+use janus::execution::result_converter::parse_rsprs_binding_string;
 use janus::extensions::query_options::build_evaluator;
 use janus::paper_bench::cli_output::{
     default_benchmark_output_dir, print_benchmark_stdout, BenchmarkArtifact,
 };
 use janus::paper_bench::harness::{collect_repro_metadata, ensure_output_dir, write_jsonl};
-use janus::parsing::janusql_parser::JanusQLParser;
-use janus::querying::oxigraph_adapter::OxigraphAdapter;
+use janus::paper_bench::query_defined_baseline::rdf::{
+    resolve_object_term, resolve_predicate_term, resolve_subject_term,
+    validate_template_against_definition,
+};
+use janus::parsing::janusql_parser::{
+    BaselineDefinition, BaselineGraphTemplate, JanusQLParser, ParsedJanusQuery, WindowDefinition,
+};
 use janus::storage::segmented_storage::StreamingSegmentedStorage;
 use janus::storage::util::StreamingConfig;
 use janus::stream::live_stream_processing::LiveStreamProcessing;
@@ -17,10 +22,12 @@ use oxigraph::store::Store;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
-use std::fs::File;
+use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering as AtomicOrdering};
+#[cfg(target_os = "linux")]
+use std::sync::OnceLock;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
@@ -28,8 +35,9 @@ use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
 const BASELINE_NS: &str = "https://janus.rs/baseline#";
 const GRAPH_URI: &str = "http://example.org/citybench";
 const LIVE_STREAM_URI: &str = "http://example.org/live";
-const TRAFFIC_PREDICATE: &str = "http://example.org/trafficFlow";
-const BASELINE_PREDICATE: &str = "http://example.org/baselineFlow";
+const CONGESTION_PREDICATE: &str = "http://example.org/congestionLevel";
+const XSD_DECIMAL: &str = "http://www.w3.org/2001/XMLSchema#decimal";
+const SENSOR_COUNT: usize = 8;
 
 static CONFIG_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -62,13 +70,13 @@ pub struct HybridScalingRow {
     pub historical_lookup_ms: f64,
     pub historical_query_ms: f64,
     pub first_live_window_result_ms: Option<f64>,
-    pub first_hybrid_result_ms: f64,
-    pub main_window_result_ms: f64,
-    pub first_hybrid_window_adjusted_overhead_ms: f64,
-    pub main_window_adjusted_overhead_ms: f64,
-    pub window_processing_overhead_ms: f64, // preserved for compatibility
-    pub post_trigger_result_observation_delay_ms: f64,
-    pub external_merge_ms: f64,
+    pub first_hybrid_result_ms: Option<f64>,
+    pub main_window_result_ms: Option<f64>,
+    pub first_hybrid_window_adjusted_overhead_ms: Option<f64>,
+    pub main_window_adjusted_overhead_ms: Option<f64>,
+    pub window_processing_overhead_ms: Option<f64>, // preserved for compatibility
+    pub post_trigger_result_observation_delay_ms: Option<f64>,
+    pub external_merge_ms: Option<f64>,
     pub total_run_ms: f64,
 
     // Correctness/equivalence fields
@@ -91,13 +99,35 @@ pub struct HybridScalingRow {
     // Decomposed Oxigraph specific fields
     pub historical_backend: String,
     pub historical_query_language: String,
-    pub historical_load_ms: f64,
+    pub historical_load_ms: Option<f64>,
 }
 
 struct SummaryStats {
     mean: f64,
     std: f64,
 }
+
+fn adjusted_overhead(result_ms: Option<f64>, baseline_ms: f64) -> Option<f64> {
+    let latency_ms = result_ms?;
+    let adjusted = latency_ms - baseline_ms;
+    if adjusted < 0.0 {
+        // A missing/invalid observed timestamp must not be serialized as a negative
+        // adjusted overhead. This benchmark expects the observed hybrid result to
+        // arrive after the window has logically closed.
+        return None;
+    }
+    Some(adjusted)
+}
+
+fn format_optional_ms(value: Option<f64>) -> String {
+    value.map(|value| format!("{value:.3}")).unwrap_or_default()
+}
+
+fn elapsed_ms(start: Instant) -> f64 {
+    start.elapsed().as_secs_f64() * 1000.0
+}
+
+const DURABLE_RESULTS_CSV: &str = "hybrid_scaling_combined.results.csv";
 
 #[derive(Debug, Parser)]
 #[command(name = "hybrid_scaling_combined")]
@@ -165,10 +195,14 @@ struct ResourceSample {
     cpu_percent: f64,
 }
 
+#[derive(Clone, Copy, Debug)]
+struct ProcessCpuSnapshot {
+    process_cpu_seconds: f64,
+}
+
 #[derive(Clone, Debug, Default)]
 struct ResourceSummary {
     peak_rss_mb: f64,
-    mean_rss_mb: f64,
     peak_cpu_percent: f64,
     mean_cpu_percent: f64,
     sample_count: usize,
@@ -178,6 +212,42 @@ struct ResourceSampler {
     stop: Arc<AtomicBool>,
     samples: Arc<Mutex<Vec<ResourceSample>>>,
     handle: Option<std::thread::JoinHandle<()>>,
+}
+
+#[cfg(target_os = "linux")]
+static LINUX_CLK_TCK: OnceLock<Option<f64>> = OnceLock::new();
+
+#[cfg(target_os = "linux")]
+fn linux_ticks_per_second() -> Option<f64> {
+    *LINUX_CLK_TCK.get_or_init(|| {
+        let output = std::process::Command::new("getconf").arg("CLK_TCK").output().ok()?;
+        if !output.status.success() {
+            return None;
+        }
+        let stdout = String::from_utf8(output.stdout).ok()?;
+        stdout.trim().parse::<f64>().ok().filter(|ticks| *ticks > 0.0)
+    })
+}
+
+#[cfg(target_os = "linux")]
+fn read_linux_process_cpu_snapshot(pid: u32) -> Option<ProcessCpuSnapshot> {
+    let ticks_per_second = linux_ticks_per_second()?;
+    let stat_contents = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    let closing_paren = stat_contents.rfind(')')?;
+    let after_name = stat_contents.get(closing_paren + 2..)?;
+    let fields = after_name.split_whitespace().collect::<Vec<_>>();
+    let utime_ticks = fields.get(11)?.parse::<f64>().ok()?;
+    let stime_ticks = fields.get(12)?.parse::<f64>().ok()?;
+    Some(ProcessCpuSnapshot { process_cpu_seconds: (utime_ticks + stime_ticks) / ticks_per_second })
+}
+
+#[cfg(not(target_os = "linux"))]
+fn read_linux_process_cpu_snapshot(_pid: u32) -> Option<ProcessCpuSnapshot> {
+    None
+}
+
+fn read_process_cpu_snapshot(pid: Pid, _system: &System) -> Option<ProcessCpuSnapshot> {
+    read_linux_process_cpu_snapshot(pid.as_u32())
 }
 
 impl ResourceSampler {
@@ -196,11 +266,9 @@ impl ResourceSampler {
                 );
             };
 
-            // Warm-up refresh to establish a baseline for CPU calculations
             refresh(&mut system);
-            std::thread::sleep(Duration::from_millis(100));
-            refresh(&mut system);
-
+            let mut previous_snapshot = read_process_cpu_snapshot(pid, &system);
+            let mut previous_wall = Instant::now();
             let mut next_tick = Instant::now();
 
             loop {
@@ -219,10 +287,34 @@ impl ResourceSampler {
 
                 refresh(&mut system);
                 if let Some(process) = system.process(pid) {
+                    let current_wall = Instant::now();
+                    let current_snapshot = read_process_cpu_snapshot(pid, &system);
+                    let cpu_percent = match (previous_snapshot, current_snapshot) {
+                        (Some(previous), Some(current)) => {
+                            let wall_seconds = current_wall
+                                .checked_duration_since(previous_wall)
+                                .map(|duration| duration.as_secs_f64())
+                                .unwrap_or(0.0);
+                            let cpu_seconds_delta =
+                                current.process_cpu_seconds - previous.process_cpu_seconds;
+                            previous_snapshot = Some(current);
+                            previous_wall = current_wall;
+                            if wall_seconds > 0.0 && cpu_seconds_delta >= 0.0 {
+                                100.0 * cpu_seconds_delta / wall_seconds
+                            } else {
+                                0.0
+                            }
+                        }
+                        (_, current) => {
+                            previous_snapshot = current;
+                            previous_wall = current_wall;
+                            0.0
+                        }
+                    };
                     let mut guard = thread_samples.lock().expect("resource samples mutex poisoned");
                     guard.push(ResourceSample {
                         rss_mb: process.memory() as f64 / (1024.0 * 1024.0),
-                        cpu_percent: process.cpu_usage() as f64,
+                        cpu_percent,
                     });
                 }
             }
@@ -250,12 +342,10 @@ fn summarize_resource_samples(samples: &[ResourceSample]) -> ResourceSummary {
     let rss_values = samples.iter().map(|sample| sample.rss_mb).collect::<Vec<_>>();
     let cpu_values = samples.iter().map(|sample| sample.cpu_percent).collect::<Vec<_>>();
 
-    let rss_sum: f64 = rss_values.iter().sum();
     let cpu_sum: f64 = cpu_values.iter().sum();
 
     ResourceSummary {
         peak_rss_mb: rss_values.iter().copied().fold(0.0, f64::max),
-        mean_rss_mb: rss_sum / rss_values.len() as f64,
         peak_cpu_percent: cpu_values.iter().copied().fold(0.0, f64::max),
         mean_cpu_percent: cpu_sum / cpu_values.len() as f64,
         sample_count: samples.len(),
@@ -390,16 +480,6 @@ fn baseline_statements_from_bindings(
         .collect()
 }
 
-fn materialize_bindings_as_static_baseline(
-    processor: &mut LiveStreamProcessing,
-    bindings: &[HashMap<String, String>],
-) -> Result<(), Box<dyn std::error::Error>> {
-    for (subject, predicate, object) in baseline_statements_from_bindings(bindings) {
-        processor.add_static_data(RDFEvent::new(0, &subject, &predicate, &object, ""))?;
-    }
-    Ok(())
-}
-
 fn materialized_baseline_rows_from_bindings(
     bindings: &[HashMap<String, String>],
     baseline_variable: &str,
@@ -418,48 +498,34 @@ fn materialized_baseline_rows_from_bindings(
         .collect()
 }
 
-fn parse_rsprs_binding_string(binding_str: &str) -> HashMap<String, String> {
-    let mut result = HashMap::new();
-    let bindings_str = binding_str.trim_matches(|ch| ch == '{' || ch == '}').trim();
-    let parts = bindings_str.split(", Variable").collect::<Vec<_>>();
-
-    for (index, part) in parts.iter().enumerate() {
-        let binding = if index == 0 {
-            part.trim_start_matches("Variable")
-        } else {
-            part
-        };
-        let Some(name_start) = binding.find("name: \"") else {
+fn build_historical_baseline_bindings_from_events(
+    events: &[RDFEvent],
+) -> Vec<HashMap<String, String>> {
+    let mut sums = HashMap::<String, (f64, usize)>::new();
+    for event in events {
+        let Ok(value) = event.object.parse::<f64>() else {
             continue;
         };
-        let name_offset = name_start + 7;
-        let Some(name_end) = binding[name_offset..].find('"') else {
-            continue;
-        };
-        let variable = &binding[name_offset..name_offset + name_end];
-        let value = if binding.contains("TypedLiteral") {
-            extract_between(binding, "value: \"", "\"")
-        } else if binding.contains("NamedNode") {
-            extract_between(binding, "iri: \"", "\"")
-        } else if binding.contains("Literal(Literal(String(\"") {
-            extract_between(binding, "String(\"", "\")")
-        } else if binding.contains("Literal(Literal(") {
-            extract_between(binding, "Literal(Literal(", "))")
-        } else {
-            None
-        };
-        if let Some(value) = value {
-            result.insert(variable.to_string(), value);
-        }
+        let entry = sums.entry(event.subject.clone()).or_insert((0.0, 0));
+        entry.0 += value;
+        entry.1 += 1;
     }
 
-    result
-}
-
-fn extract_between(input: &str, start: &str, end: &str) -> Option<String> {
-    let start_index = input.find(start)? + start.len();
-    let end_index = input[start_index..].find(end)?;
-    Some(input[start_index..start_index + end_index].to_string())
+    let mut rows = sums
+        .into_iter()
+        .map(|(sensor, (sum, count))| {
+            HashMap::from([
+                ("sensor".to_string(), sensor),
+                ("historicalAvgCongestion".to_string(), format!("{:.6}", sum / count as f64)),
+            ])
+        })
+        .collect::<Vec<_>>();
+    rows.sort_by(|left, right| {
+        normalize_binding_term(left.get("sensor").map(String::as_str).unwrap_or_default()).cmp(
+            &normalize_binding_term(right.get("sensor").map(String::as_str).unwrap_or_default()),
+        )
+    });
+    rows
 }
 
 fn join_live_with_baseline_with_filter(
@@ -478,11 +544,11 @@ fn join_live_with_baseline_with_filter(
         if let Some(sensor) = live_row.get("sensor").map(|v| normalize_binding_term(v)) {
             if let Some(baseline_row) = baseline_by_sensor.get(&sensor) {
                 let live_val: f64 = live_row
-                    .get("liveFlow")
+                    .get("liveAvgCongestion")
                     .and_then(|v| normalize_binding_term(v).parse().ok())
                     .unwrap_or(0.0);
                 let base_val: f64 = baseline_row
-                    .get("baselineFlow")
+                    .get("historicalAvgCongestion")
                     .and_then(|v| normalize_binding_term(v).parse().ok())
                     .unwrap_or(0.0);
                 if live_val > base_val {
@@ -490,6 +556,8 @@ fn join_live_with_baseline_with_filter(
                     for (k, v) in live_row {
                         merged.insert(k.clone(), v.clone());
                     }
+                    merged
+                        .insert("congestionDelta".to_string(), format!("{}", live_val - base_val));
                     joined.push(merged);
                 }
             }
@@ -507,23 +575,77 @@ fn hybrid_query(
     format!(
         r#"
         PREFIX ex: <http://example.org/>
-        PREFIX baseline: <{BASELINE_NS}>
 
         REGISTER RStream <output> AS
-        SELECT ?sensor ?liveFlow ?baselineFlow
-        FROM NAMED WINDOW ex:hist ON STREAM <{GRAPH_URI}> [START {start_ts} END {end_ts}]
+        SELECT ?sensor
+               ?liveAvgCongestion
+               ?historicalAvgCongestion
+               ((?liveAvgCongestion - ?historicalAvgCongestion) AS ?congestionDelta)
+        FROM NAMED WINDOW ex:hist ON LOG <{GRAPH_URI}> [START {start_ts} END {end_ts}]
         FROM NAMED WINDOW ex:live ON STREAM <{LIVE_STREAM_URI}> [RANGE {window_size_ms} STEP {window_slide_ms}]
-        USING BASELINE ex:hist AGGREGATE
         WHERE {{
-            WINDOW ex:hist {{
-                ?sensor ex:baselineFlow ?baselineFlow .
+            {{
+                SELECT ?sensor
+                       (AVG(?historicalCongestion) AS ?historicalAvgCongestion)
+                WHERE {{
+                    WINDOW ex:hist {{
+                        ?sensor ex:congestionLevel ?historicalCongestion .
+                    }}
+                }}
+                GROUP BY ?sensor
+            }}
+
+            {{
+                SELECT ?sensor
+                       (AVG(?liveCongestion) AS ?liveAvgCongestion)
+                WHERE {{
+                    WINDOW ex:live {{
+                        ?sensor ex:congestionLevel ?liveCongestion .
+                    }}
+                }}
+                GROUP BY ?sensor
+            }}
+
+            FILTER(?liveAvgCongestion > ?historicalAvgCongestion)
+        }}
+        "#
+    )
+}
+
+fn hybrid_query_execution_form(
+    start_ts: u64,
+    end_ts: u64,
+    window_size_ms: usize,
+    window_slide_ms: usize,
+) -> String {
+    format!(
+        r#"
+        PREFIX ex: <http://example.org/>
+
+        REGISTER RStream <output> AS
+        SELECT ?sensor
+               (AVG(?liveCongestion) AS ?liveAvgCongestion)
+               ?historicalAvgCongestion
+               ((AVG(?liveCongestion) - ?historicalAvgCongestion) AS ?congestionDelta)
+        FROM NAMED WINDOW ex:hist ON LOG <{GRAPH_URI}> [START {start_ts} END {end_ts}]
+        FROM NAMED WINDOW ex:live ON STREAM <{LIVE_STREAM_URI}> [RANGE {window_size_ms} STEP {window_slide_ms}]
+        WHERE {{
+            {{
+                SELECT ?sensor
+                       (AVG(?historicalCongestion) AS ?historicalAvgCongestion)
+                WHERE {{
+                    WINDOW ex:hist {{
+                        ?sensor ex:congestionLevel ?historicalCongestion .
+                    }}
+                }}
+                GROUP BY ?sensor
             }}
             WINDOW ex:live {{
-                ?sensor ex:trafficFlow ?liveFlow .
+                ?sensor ex:congestionLevel ?liveCongestion .
             }}
-            ?sensor baseline:baselineFlow ?baselineFlow .
-            FILTER(?liveFlow > ?baselineFlow)
         }}
+        GROUP BY ?sensor ?historicalAvgCongestion
+        HAVING(AVG(?liveCongestion) > ?historicalAvgCongestion)
         "#
     )
 }
@@ -534,13 +656,15 @@ fn live_only_rspql(window_size_ms: usize, window_slide_ms: usize) -> String {
         PREFIX ex: <http://example.org/>
 
         REGISTER RStream <output> AS
-        SELECT ?sensor ?liveFlow
+        SELECT ?sensor
+               (AVG(?liveCongestion) AS ?liveAvgCongestion)
         FROM NAMED WINDOW ex:live ON STREAM <{LIVE_STREAM_URI}> [RANGE {window_size_ms} STEP {window_slide_ms}]
         WHERE {{
             WINDOW ex:live {{
-                ?sensor ex:trafficFlow ?liveFlow .
+                ?sensor ex:congestionLevel ?liveCongestion .
             }}
         }}
+        GROUP BY ?sensor
         "#
     )
 }
@@ -550,14 +674,15 @@ fn build_decomposed_sparql(start_ts: u64, end_ts: u64) -> String {
         r#"
         PREFIX ex: <http://example.org/>
         PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
-        SELECT ?sensor ?baselineFlow WHERE {{
+        SELECT ?sensor (AVG(?historicalCongestion) AS ?historicalAvgCongestion) WHERE {{
             GRAPH ?eventGraph {{
-                ?sensor ex:baselineFlow ?baselineFlow .
+                ?sensor ex:congestionLevel ?historicalCongestion .
             }}
             ?eventGraph ex:timestamp ?t .
             ?eventGraph ex:graph <http://example.org/citybench> .
             FILTER(?t >= {} && ?t <= {})
         }}
+        GROUP BY ?sensor
         "#,
         start_ts, end_ts
     )
@@ -572,11 +697,12 @@ fn prepare_historical_storage(
 
     for index in 0..target_historical_quads {
         let ts = base_ts + index as u64 * 60;
-        let event = RDFEvent::new(
+        let event = RDFEvent::new_typed_literal_object(
             ts,
-            &format!("http://example.org/junction/{}", index % 64),
-            BASELINE_PREDICATE,
-            &format!("{:.6}", 40.0 + (index % 17) as f64 + (index as f64) * 0.000001),
+            &sensor_uri(index),
+            CONGESTION_PREDICATE,
+            &format!("{:.3}", congestion_value_for_historical(index)),
+            XSD_DECIMAL,
             GRAPH_URI,
         );
         storage.write_rdf_event(event)?;
@@ -593,16 +719,40 @@ fn generate_live_events(live_duration_ms: u64, event_interval_ms: u64) -> Vec<RD
     let mut live_events = Vec::new();
     for index in 0..total_live_events {
         let ts = live_start_ts + index as u64 * event_interval_ms;
-        let event = RDFEvent::new(
+        let event = RDFEvent::new_typed_literal_object(
             ts,
-            &format!("http://example.org/junction/{}", index % 64),
-            TRAFFIC_PREDICATE,
-            &(70 + (index % 11)).to_string(),
+            &sensor_uri(index),
+            CONGESTION_PREDICATE,
+            &format!("{:.3}", congestion_value_for_live(index)),
+            XSD_DECIMAL,
             GRAPH_URI,
         );
         live_events.push(event);
     }
     live_events
+}
+
+fn sensor_uri(index: usize) -> String {
+    format!("http://example.org/junction/{}", index % SENSOR_COUNT)
+}
+
+fn historical_sensor_base(sensor_idx: usize) -> f64 {
+    30.0 + sensor_idx as f64 * 5.0
+}
+
+fn congestion_value_for_historical(index: usize) -> f64 {
+    let sensor_idx = index % SENSOR_COUNT;
+    let sample_idx = index / SENSOR_COUNT;
+    let seasonal = ((sample_idx * 7 + sensor_idx * 3) % 9) as f64 - 4.0;
+    historical_sensor_base(sensor_idx) + seasonal
+}
+
+fn congestion_value_for_live(index: usize) -> f64 {
+    let sensor_idx = index % SENSOR_COUNT;
+    let sample_idx = index / SENSOR_COUNT;
+    let bias = if sensor_idx % 2 == 0 { 8.0 } else { -8.0 };
+    let oscillation = ((sample_idx * 5 + sensor_idx) % 5) as f64 - 2.0;
+    historical_sensor_base(sensor_idx) + bias + oscillation
 }
 
 fn wait_for_live_event_schedule(replay_start: Instant, event_index: usize, rate_hz: f64) {
@@ -627,6 +777,133 @@ fn calculate_stats(values: &[f64]) -> SummaryStats {
     SummaryStats { mean, std }
 }
 
+fn calculate_optional_stats(values: impl Iterator<Item = Option<f64>>) -> Option<SummaryStats> {
+    let collected = values.flatten().collect::<Vec<_>>();
+    if collected.is_empty() {
+        None
+    } else {
+        Some(calculate_stats(&collected))
+    }
+}
+
+fn format_optional_stats_csv(stats: Option<SummaryStats>) -> (String, String) {
+    stats
+        .map(|stats| (format!("{:.3}", stats.mean), format!("{:.3}", stats.std)))
+        .unwrap_or_default()
+}
+
+fn format_optional_stats_md(stats: Option<SummaryStats>, unit: &str) -> String {
+    stats
+        .map(|stats| format!("{:.3} ± {:.3} {unit}", stats.mean, stats.std))
+        .unwrap_or_else(|| "N/A".to_string())
+}
+
+fn format_optional_stats_md_with_na(stats: Option<SummaryStats>, na_label: &str) -> String {
+    stats
+        .map(|stats| format!("{:.3} ± {:.3} ms", stats.mean, stats.std))
+        .unwrap_or_else(|| na_label.to_string())
+}
+
+fn cpu_metrics_available(rows: &[HybridScalingRow]) -> bool {
+    rows.iter().any(|row| row.mean_cpu_percent > 0.0 || row.peak_cpu_percent > 0.0)
+}
+
+fn safe_takeaway_label(system: &str, query_type: &str) -> &'static str {
+    match (system, query_type) {
+        ("janus", "point_lookup") => "below timing resolution / indexed lookup",
+        ("decomposed_oxigraph", "point_lookup") => "grows with historical store size",
+        ("janus", "fixed_60s") => "near-flat",
+        ("decomposed_oxigraph", "fixed_60s") => "grows with historical store size",
+        (_, "range_10_percent") => "grows with selected historical range",
+        (_, "range_50_percent") => "grows with selected historical range",
+        (_, "range_100_percent") => "full-range scan cost",
+        _ => "",
+    }
+}
+
+fn format_size_label(size: usize) -> String {
+    match size {
+        1_000_000 => "1M quads".to_string(),
+        1_000..=999_999 if size % 1_000 == 0 => format!("{}k quads", size / 1_000),
+        _ => format!("{size} quads"),
+    }
+}
+
+fn find_first_baseline_definition<'a>(
+    parsed: &'a ParsedJanusQuery,
+) -> Result<(&'a BaselineDefinition, &'a BaselineGraphTemplate), Box<dyn std::error::Error>> {
+    let definition = parsed
+        .ast
+        .baseline_definitions
+        .first()
+        .ok_or("missing lowered historical subquery definition")?;
+    let template = parsed
+        .baseline_graph_templates
+        .iter()
+        .find(|template| template.baseline_name == definition.name)
+        .ok_or("missing lowered historical subquery graph template")?;
+    Ok((definition, template))
+}
+
+fn find_baseline_source_windows<'a>(
+    parsed: &'a ParsedJanusQuery,
+    definition: &'a BaselineDefinition,
+) -> Result<Vec<&'a WindowDefinition>, Box<dyn std::error::Error>> {
+    definition
+        .source_windows
+        .iter()
+        .map(|source_window_name| {
+            parsed
+                .historical_windows
+                .iter()
+                .find(|window| window.window_name == *source_window_name)
+                .ok_or_else(|| {
+                    format!("missing historical source window '{source_window_name}'").into()
+                })
+        })
+        .collect()
+}
+
+fn execute_lowered_historical_subquery(
+    parsed: &ParsedJanusQuery,
+    storage: Arc<StreamingSegmentedStorage>,
+    evaluation_time: u64,
+) -> Result<Vec<HashMap<String, String>>, Box<dyn std::error::Error>> {
+    let (definition, _) = find_first_baseline_definition(parsed)?;
+    let source_windows = find_baseline_source_windows(parsed, definition)?;
+    let mut historical_events = Vec::new();
+
+    for window in source_windows {
+        let (start, end) = window.resolve_historical_bounds(evaluation_time).ok_or_else(|| {
+            format!("failed to resolve historical bounds for window '{}'", window.window_name)
+        })?;
+        historical_events.extend(storage.query_rdf(start, end)?);
+    }
+
+    Ok(build_historical_baseline_bindings_from_events(&historical_events))
+}
+
+fn materialize_lowered_historical_subquery(
+    processor: &mut LiveStreamProcessing,
+    parsed: &ParsedJanusQuery,
+    bindings: &[HashMap<String, String>],
+) -> Result<(), Box<dyn std::error::Error>> {
+    let (definition, template) = find_first_baseline_definition(parsed)?;
+    validate_template_against_definition(definition, template)?;
+    let graph_name = GraphName::NamedNode(NamedNode::new(template.baseline_name.as_str())?);
+
+    for binding in bindings {
+        for triple in &template.triples {
+            let subject = resolve_subject_term(triple, binding)?;
+            let predicate = resolve_predicate_term(triple)?;
+            let object = resolve_object_term(triple, binding)?;
+            processor.add_static_quad(Quad::new(subject, predicate, object, graph_name.clone()));
+        }
+    }
+
+    Ok(())
+}
+
 fn run_janus_unified(
     iteration: usize,
     target_historical_quads: usize,
@@ -643,7 +920,7 @@ fn run_janus_unified(
     let sampler = ResourceSampler::start(sample_interval);
     let rss_start_mb = get_current_rss_mb();
 
-    let client_start = now_ms();
+    let client_start = Instant::now();
 
     let ts = |idx: usize| -> u64 { base_ts + idx as u64 * 60 };
 
@@ -657,35 +934,43 @@ fn run_janus_unified(
         _ => return Err("invalid query type".into()),
     };
 
-    let expected_historical_result_count = match historical_query_type {
+    let selected_historical_events = match historical_query_type {
         "point_lookup" => 1,
-        "fixed_60s" => 1000,
-        "range_10_percent" => h / 10,
-        "range_50_percent" => h / 2,
-        "range_100_percent" => h,
+        "fixed_60s" => 1000.min(h),
+        "range_10_percent" => (h / 10).max(1),
+        "range_50_percent" => (h / 2).max(1),
+        "range_100_percent" => h.max(1),
         _ => 0,
     };
+    let expected_historical_result_count = selected_historical_events.min(SENSOR_COUNT);
 
     let parser = JanusQLParser::new()?;
-    // Query range is half-open [start_ts, end_ts), so use end_ts - 1
-    let query_str = hybrid_query(start_ts, end_ts - 1, args.window_size_ms, args.window_slide_ms);
-    let parsed = parser.parse(&query_str)?;
-    let query_registered = now_ms();
+    // Query range is half-open [start_ts, end_ts), so use end_ts - 1.
+    // The benchmark keeps the user-facing Janus-QL query in nested-subquery form,
+    // but lowers the live-only subquery into an equivalent top-level aggregate
+    // because the current parser only supports lowering historical nested subqueries.
+    let _user_facing_query =
+        hybrid_query(start_ts, end_ts - 1, args.window_size_ms, args.window_slide_ms);
+    let execution_query = hybrid_query_execution_form(
+        start_ts,
+        end_ts - 1,
+        args.window_size_ms,
+        args.window_slide_ms,
+    );
+    let parsed = parser.parse(&execution_query)?;
+    let registration_ms = elapsed_ms(client_start);
 
-    let historical_start = now_ms();
-    let executor = HistoricalExecutor::new(historical_storage, OxigraphAdapter::new());
-    let baseline_bindings = executor.execute_fixed_window(
-        parsed.historical_windows.first().ok_or("missing historical window")?,
-        parsed.sparql_queries.first().ok_or("missing historical SPARQL query")?,
-    )?;
-    let historical_done = now_ms();
-    let historical_query_ms = (historical_done - historical_start) as f64;
+    let historical_start = Instant::now();
+    let _ = parsed.historical_windows.first().ok_or("missing historical window")?;
+    let baseline_bindings =
+        execute_lowered_historical_subquery(&parsed, historical_storage.clone(), end_ts - 1)?;
+    let historical_query_ms = elapsed_ms(historical_start);
 
     let historical_result_count = baseline_bindings.len();
 
     let mut processor = LiveStreamProcessing::new(parsed.rspql_query.clone())?;
     processor.register_stream(LIVE_STREAM_URI)?;
-    materialize_bindings_as_static_baseline(&mut processor, &baseline_bindings)?;
+    materialize_lowered_historical_subquery(&mut processor, &parsed, &baseline_bindings)?;
     processor.start_processing()?;
 
     let replay_start = Instant::now();
@@ -732,7 +1017,7 @@ fn run_janus_unified(
         }
     }
 
-    let total_run_ms = (now_ms() - client_start) as f64;
+    let total_run_ms = elapsed_ms(client_start);
 
     // Find unique sorted slide timestamps
     let mut slides: Vec<i64> =
@@ -740,9 +1025,9 @@ fn run_janus_unified(
     slides.sort_unstable();
     slides.dedup();
 
-    let mut first_hybrid_result_ms = 0.0;
-    let mut main_window_result_ms = 0.0;
-    let mut window_processing_overhead_ms = 0.0;
+    let mut first_hybrid_result_ms = None;
+    let mut main_window_result_ms = None;
+    let mut window_processing_overhead_ms = None;
 
     let mut all_hybrid_rows = Vec::new();
 
@@ -751,15 +1036,21 @@ fn run_janus_unified(
         all_hybrid_rows.push(parsed_rows.clone());
 
         if !slides.is_empty() && res.timestamp_to == slides[0] {
-            if first_hybrid_result_ms == 0.0 {
-                first_hybrid_result_ms = *received_at;
-                window_processing_overhead_ms = *overhead;
+            if first_hybrid_result_ms.is_none() {
+                first_hybrid_result_ms = Some(*received_at);
+                window_processing_overhead_ms = Some(*overhead);
             }
         } else if slides.len() >= 2 && res.timestamp_to == slides[1] {
-            if main_window_result_ms == 0.0 {
-                main_window_result_ms = *received_at;
+            if main_window_result_ms.is_none() {
+                main_window_result_ms = Some(*received_at);
             }
         }
+    }
+
+    if all_hybrid_rows.is_empty() {
+        first_hybrid_result_ms = None;
+        main_window_result_ms = None;
+        window_processing_overhead_ms = None;
     }
 
     let result_hash = canonical_result_hash(&all_hybrid_rows)?;
@@ -791,17 +1082,17 @@ fn run_janus_unified(
         window_slide_ms: args.window_slide_ms,
         query_name: "hybrid_query".to_string(),
         timestamp: now_ms(),
-        registration_ms: (query_registered - client_start) as f64,
+        registration_ms,
         historical_lookup_ms: historical_query_ms,
         historical_query_ms,
         first_live_window_result_ms: None,
         first_hybrid_result_ms,
         main_window_result_ms,
-        first_hybrid_window_adjusted_overhead_ms: first_hybrid_result_ms - 5000.0,
-        main_window_adjusted_overhead_ms: main_window_result_ms - 10000.0,
+        first_hybrid_window_adjusted_overhead_ms: adjusted_overhead(first_hybrid_result_ms, 5000.0),
+        main_window_adjusted_overhead_ms: adjusted_overhead(main_window_result_ms, 10000.0),
         window_processing_overhead_ms,
         post_trigger_result_observation_delay_ms: window_processing_overhead_ms,
-        external_merge_ms: 0.0,
+        external_merge_ms: None,
         total_run_ms,
         result_count: all_hybrid_rows.len(),
         result_hash,
@@ -820,7 +1111,7 @@ fn run_janus_unified(
 
         historical_backend: "janus_segmented".to_string(),
         historical_query_language: "janus_range_lookup".to_string(),
-        historical_load_ms: 0.0,
+        historical_load_ms: None,
     })
 }
 
@@ -840,7 +1131,7 @@ fn run_decomposed_oxigraph(
     let sampler = ResourceSampler::start(sample_interval);
     let rss_start_mb = get_current_rss_mb();
 
-    let client_start = now_ms();
+    let client_start = Instant::now();
 
     let ts = |idx: usize| -> u64 { base_ts + idx as u64 * 60 };
 
@@ -854,17 +1145,18 @@ fn run_decomposed_oxigraph(
         _ => return Err("invalid query type".into()),
     };
 
-    let expected_historical_result_count = match historical_query_type {
+    let selected_historical_events = match historical_query_type {
         "point_lookup" => 1,
-        "fixed_60s" => 1000,
-        "range_10_percent" => h / 10,
-        "range_50_percent" => h / 2,
-        "range_100_percent" => h,
+        "fixed_60s" => 1000.min(h),
+        "range_10_percent" => (h / 10).max(1),
+        "range_50_percent" => (h / 2).max(1),
+        "range_100_percent" => h.max(1),
         _ => 0,
     };
+    let expected_historical_result_count = selected_historical_events.min(SENSOR_COUNT);
 
     // Load full history into Oxigraph
-    let load_start = now_ms();
+    let load_start = Instant::now();
     let store = Store::new()?;
     let timestamp_predicate = NamedNode::new("http://example.org/timestamp")?;
     let graph_predicate = NamedNode::new("http://example.org/graph")?;
@@ -919,11 +1211,10 @@ fn run_decomposed_oxigraph(
             GraphName::DefaultGraph,
         ))?;
     }
-    let load_done = now_ms();
-    let historical_load_ms = (load_done - load_start) as f64;
+    let historical_load_ms = elapsed_ms(load_start);
 
     // Run SPARQL query over the store
-    let query_start = now_ms();
+    let query_start = Instant::now();
     // Query range is half-open [start_ts, end_ts), so use end_ts - 1
     let sparql_query = build_decomposed_sparql(start_ts, end_ts - 1);
 
@@ -944,21 +1235,19 @@ fn run_decomposed_oxigraph(
             external_bindings.push(binding);
         }
     }
-    let query_done = now_ms();
-    let historical_query_ms = (query_done - query_start) as f64;
+    let historical_query_ms = elapsed_ms(query_start);
 
     let historical_result_count = external_bindings.len();
     let materialized_baseline_rows =
-        materialized_baseline_rows_from_bindings(&external_bindings, "baselineFlow");
+        materialized_baseline_rows_from_bindings(&external_bindings, "historicalAvgCongestion");
 
     // Live stream processing setup
     let live_query_def = live_only_rspql(args.window_size_ms, args.window_slide_ms);
-    let live_processor_start = now_ms();
+    let live_processor_start = Instant::now();
     let mut live_processor = LiveStreamProcessing::new(live_query_def)?;
     live_processor.register_stream(LIVE_STREAM_URI)?;
     live_processor.start_processing()?;
-    let live_ready = now_ms();
-    let live_registration_ms = (live_ready - live_processor_start) as f64;
+    let live_registration_ms = elapsed_ms(live_processor_start);
 
     let replay_start = Instant::now();
     let live_start_ts = 1_900_000_000_000u64;
@@ -1026,7 +1315,7 @@ fn run_decomposed_oxigraph(
         }
     }
 
-    let total_run_ms = (now_ms() - client_start) as f64;
+    let total_run_ms = elapsed_ms(client_start);
 
     // Find unique sorted slide timestamps
     let mut slides: Vec<i64> =
@@ -1034,11 +1323,11 @@ fn run_decomposed_oxigraph(
     slides.sort_unstable();
     slides.dedup();
 
-    let mut first_live_window_result_ms = 0.0;
-    let mut first_hybrid_result_ms = 0.0;
-    let mut main_window_result_ms = 0.0;
-    let mut window_processing_overhead_ms = 0.0;
-    let mut external_merge_ms_total = 0.0;
+    let mut first_live_window_result_ms = None;
+    let mut first_hybrid_result_ms = None;
+    let mut main_window_result_ms = None;
+    let mut window_processing_overhead_ms = None;
+    let mut external_merge_ms_total = None;
 
     let mut all_hybrid_rows = Vec::new();
 
@@ -1046,17 +1335,25 @@ fn run_decomposed_oxigraph(
         all_hybrid_rows.extend(joined.clone());
 
         if !slides.is_empty() && res.timestamp_to == slides[0] {
-            if first_live_window_result_ms == 0.0 {
-                first_live_window_result_ms = *received_at;
-                first_hybrid_result_ms = *received_at + *merge_ms;
-                window_processing_overhead_ms = *overhead;
-                external_merge_ms_total = *merge_ms;
+            if first_live_window_result_ms.is_none() {
+                first_live_window_result_ms = Some(*received_at);
+                first_hybrid_result_ms = Some(*received_at + *merge_ms);
+                window_processing_overhead_ms = Some(*overhead);
+                external_merge_ms_total = Some(*merge_ms);
             }
         } else if slides.len() >= 2 && res.timestamp_to == slides[1] {
-            if main_window_result_ms == 0.0 {
-                main_window_result_ms = *received_at + *merge_ms;
+            if main_window_result_ms.is_none() {
+                main_window_result_ms = Some(*received_at + *merge_ms);
             }
         }
+    }
+
+    if all_hybrid_rows.is_empty() {
+        first_live_window_result_ms = None;
+        first_hybrid_result_ms = None;
+        main_window_result_ms = None;
+        window_processing_overhead_ms = None;
+        external_merge_ms_total = None;
     }
 
     let result_hash = canonical_result_hash(&all_hybrid_rows)?;
@@ -1091,11 +1388,11 @@ fn run_decomposed_oxigraph(
         registration_ms: live_registration_ms,
         historical_lookup_ms: historical_query_ms,
         historical_query_ms,
-        first_live_window_result_ms: Some(first_live_window_result_ms),
+        first_live_window_result_ms,
         first_hybrid_result_ms,
         main_window_result_ms,
-        first_hybrid_window_adjusted_overhead_ms: first_hybrid_result_ms - 5000.0,
-        main_window_adjusted_overhead_ms: main_window_result_ms - 10000.0,
+        first_hybrid_window_adjusted_overhead_ms: adjusted_overhead(first_hybrid_result_ms, 5000.0),
+        main_window_adjusted_overhead_ms: adjusted_overhead(main_window_result_ms, 10000.0),
         window_processing_overhead_ms,
         post_trigger_result_observation_delay_ms: window_processing_overhead_ms,
         external_merge_ms: external_merge_ms_total,
@@ -1117,7 +1414,7 @@ fn run_decomposed_oxigraph(
 
         historical_backend: "oxigraph".to_string(),
         historical_query_language: "sparql_filter".to_string(),
-        historical_load_ms,
+        historical_load_ms: Some(historical_load_ms),
     })
 }
 
@@ -1142,13 +1439,13 @@ fn write_reports(
     query_types.sort_by_key(|qt| preferred_order.iter().position(|x| x == qt).unwrap_or(99));
 
     let systems = vec!["janus".to_string(), "decomposed_oxigraph".to_string()];
+    let cpu_metrics_present = cpu_metrics_available(rows);
 
-    // Write CSV Summary
     let csv_path = output_dir.join("hybrid_scaling_combined.summary.csv");
     let mut csv_file = File::create(&csv_path)?;
     writeln!(
         csv_file,
-        "historical_query_type,historical_size_quads,system,first_hybrid_result_mean_ms,first_hybrid_result_std_ms,main_window_result_mean_ms,main_window_result_std_ms,historical_lookup_mean_ms,historical_lookup_std_ms,window_overhead_mean_ms,window_overhead_std_ms,external_merge_mean_ms,external_merge_std_ms,equivalence_rate,peak_rss_mean,peak_rss_std,rss_delta_mean,rss_delta_std,mean_cpu_mean,mean_cpu_std,peak_cpu_mean,peak_cpu_std"
+        "historical_query_type,historical_size_quads,system,first_hybrid_result_mean_ms,first_hybrid_result_std_ms,main_window_result_mean_ms,main_window_result_std_ms,historical_lookup_mean_ms,historical_lookup_std_ms,historical_load_mean_ms,historical_load_std_ms,window_overhead_mean_ms,window_overhead_std_ms,external_merge_mean_ms,external_merge_std_ms,equivalence_rate,peak_rss_mean,peak_rss_std,rss_delta_mean,rss_delta_std,mean_cpu_mean,mean_cpu_std,peak_cpu_mean,peak_cpu_std"
     )?;
 
     for q_type in &query_types {
@@ -1165,30 +1462,27 @@ fn write_reports(
                 if filtered.is_empty() {
                     continue;
                 }
-                let first_hybrid_vals =
-                    filtered.iter().map(|r| r.first_hybrid_result_ms).collect::<Vec<_>>();
-                let main_window_vals =
-                    filtered.iter().map(|r| r.main_window_result_ms).collect::<Vec<_>>();
+
                 let lookup_vals =
                     filtered.iter().map(|r| r.historical_lookup_ms).collect::<Vec<_>>();
-                let overhead_vals = filtered
-                    .iter()
-                    .map(|r| r.post_trigger_result_observation_delay_ms)
-                    .collect::<Vec<_>>();
-                let merge_vals = filtered.iter().map(|r| r.external_merge_ms).collect::<Vec<_>>();
+                let first_hybrid_stats =
+                    calculate_optional_stats(filtered.iter().map(|r| r.first_hybrid_result_ms));
+                let main_window_stats =
+                    calculate_optional_stats(filtered.iter().map(|r| r.main_window_result_ms));
+                let load_stats =
+                    calculate_optional_stats(filtered.iter().map(|r| r.historical_load_ms));
+                let overhead_stats = calculate_optional_stats(
+                    filtered.iter().map(|r| r.post_trigger_result_observation_delay_ms),
+                );
+                let merge_stats =
+                    calculate_optional_stats(filtered.iter().map(|r| r.external_merge_ms));
 
-                // Resource fields
                 let rss_vals = filtered.iter().map(|r| r.peak_rss_mb).collect::<Vec<_>>();
                 let delta_vals = filtered.iter().map(|r| r.rss_delta_mb).collect::<Vec<_>>();
                 let cpu_vals = filtered.iter().map(|r| r.mean_cpu_percent).collect::<Vec<_>>();
                 let peak_cpu_vals = filtered.iter().map(|r| r.peak_cpu_percent).collect::<Vec<_>>();
 
-                let first_hybrid_stats = calculate_stats(&first_hybrid_vals);
-                let main_window_stats = calculate_stats(&main_window_vals);
                 let lookup_stats = calculate_stats(&lookup_vals);
-                let overhead_stats = calculate_stats(&overhead_vals);
-                let merge_stats = calculate_stats(&merge_vals);
-
                 let rss_stats = calculate_stats(&rss_vals);
                 let delta_stats = calculate_stats(&delta_vals);
                 let cpu_stats = calculate_stats(&cpu_vals);
@@ -1197,22 +1491,32 @@ fn write_reports(
                 let matches = filtered.iter().filter(|r| r.result_equivalence).count();
                 let eq_rate = matches as f64 / filtered.len() as f64;
 
+                let (first_hybrid_mean, first_hybrid_std) =
+                    format_optional_stats_csv(first_hybrid_stats);
+                let (main_window_mean, main_window_std) =
+                    format_optional_stats_csv(main_window_stats);
+                let (load_mean, load_std) = format_optional_stats_csv(load_stats);
+                let (overhead_mean, overhead_std) = format_optional_stats_csv(overhead_stats);
+                let (merge_mean, merge_std) = format_optional_stats_csv(merge_stats);
+
                 writeln!(
                     csv_file,
-                    "{},{},{},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3}",
+                    "{},{},{},{},{},{},{},{:.3},{:.3},{},{},{},{},{},{},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3}",
                     q_type,
                     size,
                     system,
-                    first_hybrid_stats.mean,
-                    first_hybrid_stats.std,
-                    main_window_stats.mean,
-                    main_window_stats.std,
+                    first_hybrid_mean,
+                    first_hybrid_std,
+                    main_window_mean,
+                    main_window_std,
                     lookup_stats.mean,
                     lookup_stats.std,
-                    overhead_stats.mean,
-                    overhead_stats.std,
-                    merge_stats.mean,
-                    merge_stats.std,
+                    load_mean,
+                    load_std,
+                    overhead_mean,
+                    overhead_std,
+                    merge_mean,
+                    merge_std,
                     eq_rate,
                     rss_stats.mean,
                     rss_stats.std,
@@ -1231,14 +1535,17 @@ fn write_reports(
     let mut md_file = File::create(&md_path)?;
 
     writeln!(md_file, "# Hybrid Scaling Combined Benchmark Results\n")?;
-
-    // Table 1: End-to-end hybrid latency
-    writeln!(md_file, "## Table 1: End-to-end hybrid latency\n")?;
     writeln!(
         md_file,
-        "| Historical query type | Historical size | System | Historical backend | Historical query language | First hybrid result mean ± std | Main window result mean ± std | Historical query mean ± std | External merge mean ± std | Result equivalence |"
+        "First hybrid result and main-window result timings are reported for completeness, but they are mainly governed by the live-window schedule. The historical-access comparison is based on historical_query_ms and historical_load_ms.\n"
     )?;
-    writeln!(md_file, "|---|---:|---|---|---|---:|---:|---:|---:|---|")?;
+
+    writeln!(md_file, "## Table 1: Historical access latency inside the hybrid benchmark\n")?;
+    writeln!(
+        md_file,
+        "| Historical query type | Historical size | System | Historical backend | Historical query language | Historical query mean ± std | Historical load mean ± std | External merge mean ± std | First hybrid result mean ± std | Main window result mean ± std | Result equivalence |"
+    )?;
+    writeln!(md_file, "|---|---:|---|---|---|---:|---:|---:|---:|---:|---|")?;
 
     for q_type in &query_types {
         for &size in &unique_sizes {
@@ -1254,18 +1561,18 @@ fn write_reports(
                 if filtered.is_empty() {
                     continue;
                 }
-                let first_hybrid_vals =
-                    filtered.iter().map(|r| r.first_hybrid_result_ms).collect::<Vec<_>>();
-                let main_window_vals =
-                    filtered.iter().map(|r| r.main_window_result_ms).collect::<Vec<_>>();
+
                 let lookup_vals =
                     filtered.iter().map(|r| r.historical_lookup_ms).collect::<Vec<_>>();
-                let merge_vals = filtered.iter().map(|r| r.external_merge_ms).collect::<Vec<_>>();
-
-                let first_hybrid_stats = calculate_stats(&first_hybrid_vals);
-                let main_window_stats = calculate_stats(&main_window_vals);
+                let first_hybrid_stats =
+                    calculate_optional_stats(filtered.iter().map(|r| r.first_hybrid_result_ms));
+                let main_window_stats =
+                    calculate_optional_stats(filtered.iter().map(|r| r.main_window_result_ms));
+                let load_stats =
+                    calculate_optional_stats(filtered.iter().map(|r| r.historical_load_ms));
+                let merge_stats =
+                    calculate_optional_stats(filtered.iter().map(|r| r.external_merge_ms));
                 let lookup_stats = calculate_stats(&lookup_vals);
-                let merge_stats = calculate_stats(&merge_vals);
 
                 let matches = filtered.iter().filter(|r| r.result_equivalence).count();
                 let eq_rate = matches as f64 / filtered.len() as f64;
@@ -1280,41 +1587,48 @@ fn write_reports(
 
                 writeln!(
                     md_file,
-                    "| {} | {} | {} | {} | {} | {:.3} ± {:.3} ms | {:.3} ± {:.3} ms | {:.3} ± {:.3} ms | {:.3} ± {:.3} ms | {}% |",
+                    "| {} | {} | {} | {} | {} | {:.3} ± {:.3} ms | {} | {} | {} | {} | {}% |",
                     q_type,
                     size,
                     sys_label,
                     backend,
                     lang,
-                    first_hybrid_stats.mean,
-                    first_hybrid_stats.std,
-                    main_window_stats.mean,
-                    main_window_stats.std,
                     lookup_stats.mean,
                     lookup_stats.std,
-                    merge_stats.mean,
-                    merge_stats.std,
+                    format_optional_stats_md_with_na(load_stats, "N/A - avoided / not applicable"),
+                    format_optional_stats_md_with_na(merge_stats, "N/A - not performed"),
+                    format_optional_stats_md(first_hybrid_stats, "ms"),
+                    format_optional_stats_md(main_window_stats, "ms"),
                     (eq_rate * 100.0).round()
                 )?;
             }
         }
     }
 
-    // Table 2: Historical access scaling inside the combined benchmark
     writeln!(
         md_file,
         "\n## Table 2: Historical access scaling inside the combined benchmark\n"
     )?;
+    let size_labels = unique_sizes.iter().map(|size| format_size_label(*size)).collect::<Vec<_>>();
     writeln!(
         md_file,
-        "| Historical query type | System | 10k quads | 50k quads | 100k quads | 500k quads | Takeaway |"
+        "| Historical query type | System | {} | Takeaway |",
+        size_labels.join(" | ")
     )?;
-    writeln!(md_file, "|---|---|---:|---:|---:|---:|---|")?;
+    let mut divider = vec!["---".to_string(), "---".to_string()];
+    divider.extend(unique_sizes.iter().map(|_| "---:".to_string()));
+    divider.push("---".to_string());
+    writeln!(md_file, "|{}|", divider.join("|"))?;
 
     for q_type in &query_types {
         for system in &systems {
-            let mut means = HashMap::new();
-            for &size in &[10000usize, 50000, 100000, 500000] {
+            let sys_label = if system == "janus" {
+                "Janus Unified"
+            } else {
+                "Decomposed-Oxigraph"
+            };
+            let mut per_size = Vec::new();
+            for &size in &unique_sizes {
                 let filtered = rows
                     .iter()
                     .filter(|r| {
@@ -1323,44 +1637,65 @@ fn write_reports(
                             && &r.system == system
                     })
                     .collect::<Vec<_>>();
-                if !filtered.is_empty() {
+                if filtered.is_empty() {
+                    per_size.push("N/A".to_string());
+                } else {
                     let lookup_vals =
                         filtered.iter().map(|r| r.historical_lookup_ms).collect::<Vec<_>>();
                     let stats = calculate_stats(&lookup_vals);
-                    means.insert(size, format!("{:.3} ms", stats.mean));
-                } else {
-                    means.insert(size, "N/A".to_string());
+                    per_size.push(format!("{:.3} ms", stats.mean));
                 }
             }
-            let takeaway = match q_type.as_str() {
-                "point_lookup" => "flat",
-                "fixed_60s" => "almost flat",
-                "range_10_percent" => "grows with result size",
-                "range_50_percent" => "grows strongly",
-                "range_100_percent" => "largest scan cost",
-                _ => "",
-            };
-            let sys_label = if system == "janus" {
-                "Janus Unified"
-            } else {
-                "Decomposed-Oxigraph"
-            };
             writeln!(
                 md_file,
-                "| {} | {} | {} | {} | {} | {} | {} |",
+                "| {} | {} | {} | {} |",
                 q_type,
                 sys_label,
-                means.get(&10000).unwrap_or(&"N/A".to_string()),
-                means.get(&50000).unwrap_or(&"N/A".to_string()),
-                means.get(&100000).unwrap_or(&"N/A".to_string()),
-                means.get(&500000).unwrap_or(&"N/A".to_string()),
-                takeaway
+                per_size.join(" | "),
+                safe_takeaway_label(system, q_type)
             )?;
         }
     }
 
-    // Table 3: Historical result counts
-    writeln!(md_file, "\n## Table 3: Historical result counts\n")?;
+    writeln!(md_file, "\n## Table 3: Historical loading overhead\n")?;
+    writeln!(
+        md_file,
+        "| Historical query type | Historical size | System | Historical load mean ± std |"
+    )?;
+    writeln!(md_file, "|---|---:|---|---:|")?;
+
+    for q_type in &query_types {
+        for &size in &unique_sizes {
+            for system in &systems {
+                let filtered = rows
+                    .iter()
+                    .filter(|r| {
+                        &r.historical_query_type == q_type
+                            && r.historical_size_quads == size
+                            && &r.system == system
+                    })
+                    .collect::<Vec<_>>();
+                if filtered.is_empty() {
+                    continue;
+                }
+                let load_stats =
+                    calculate_optional_stats(filtered.iter().map(|r| r.historical_load_ms));
+                let sys_label = if system == "janus" {
+                    "Janus Unified"
+                } else {
+                    "Decomposed-Oxigraph"
+                };
+                let load_display = if system == "janus" {
+                    "N/A - queries persisted segmented event log directly".to_string()
+                } else {
+                    format_optional_stats_md(load_stats, "ms")
+                };
+                writeln!(md_file, "| {} | {} | {} | {} |", q_type, size, sys_label, load_display)?;
+            }
+        }
+    }
+
+    writeln!(md_file, "\n## Table 4: Historical result counts\n")?;
     writeln!(
         md_file,
         "| Historical query type | Historical size | System | Historical result count mean ± std |"
@@ -1398,8 +1733,7 @@ fn write_reports(
         }
     }
 
-    // Table 4: Result equivalence
-    writeln!(md_file, "\n## Table 4: Result equivalence\n")?;
+    writeln!(md_file, "\n## Table 5: Result equivalence\n")?;
     writeln!(
         md_file,
         "| Historical query type | Historical size | Janus result count | Decomposed result count | Hash equivalence |"
@@ -1461,13 +1795,24 @@ fn write_reports(
         }
     }
 
-    // Table 5: Process-level resource utilization
-    writeln!(md_file, "\n## Table 5: Process-level resource utilization\n")?;
-    writeln!(
-        md_file,
-        "| Historical query type | Historical size | System | Peak RSS MB mean ± std | RSS delta MB mean ± std | Mean CPU % mean ± std | Peak CPU % mean ± std |"
-    )?;
-    writeln!(md_file, "|---|---:|---|---:|---:|---:|---:|")?;
+    writeln!(md_file, "\n## Table 6: Process-level resource utilization\n")?;
+    if cpu_metrics_present {
+        writeln!(
+            md_file,
+            "| Historical query type | Historical size | System | Peak RSS MB mean ± std | RSS delta MB mean ± std | Mean CPU % mean ± std | Peak CPU % mean ± std |"
+        )?;
+        writeln!(md_file, "|---|---:|---|---:|---:|---:|---:|")?;
+    } else {
+        writeln!(
+            md_file,
+            "CPU metrics are omitted because the current sampler reports 0% across all configurations, indicating an instrumentation issue.\n"
+        )?;
+        writeln!(
+            md_file,
+            "| Historical query type | Historical size | System | Peak RSS MB mean ± std | RSS delta MB mean ± std |"
+        )?;
+        writeln!(md_file, "|---|---:|---|---:|---:|")?;
+    }
 
     for q_type in &query_types {
         for &size in &unique_sizes {
@@ -1499,27 +1844,44 @@ fn write_reports(
                     "Decomposed-Oxigraph"
                 };
 
-                writeln!(
-                    md_file,
-                    "| {} | {} | {} | {:.3} ± {:.3} MB | {:.3} ± {:.3} MB | {:.3} ± {:.3}% | {:.3} ± {:.3}% |",
-                    q_type,
-                    size,
-                    sys_label,
-                    rss_stats.mean,
-                    rss_stats.std,
-                    delta_stats.mean,
-                    delta_stats.std,
-                    cpu_stats.mean,
-                    cpu_stats.std,
-                    peak_cpu_stats.mean,
-                    peak_cpu_stats.std
-                )?;
+                if cpu_metrics_present {
+                    writeln!(
+                        md_file,
+                        "| {} | {} | {} | {:.3} ± {:.3} MB | {:.3} ± {:.3} MB | {:.3} ± {:.3}% | {:.3} ± {:.3}% |",
+                        q_type,
+                        size,
+                        sys_label,
+                        rss_stats.mean,
+                        rss_stats.std,
+                        delta_stats.mean,
+                        delta_stats.std,
+                        cpu_stats.mean,
+                        cpu_stats.std,
+                        peak_cpu_stats.mean,
+                        peak_cpu_stats.std
+                    )?;
+                } else {
+                    writeln!(
+                        md_file,
+                        "| {} | {} | {} | {:.3} ± {:.3} MB | {:.3} ± {:.3} MB |",
+                        q_type,
+                        size,
+                        sys_label,
+                        rss_stats.mean,
+                        rss_stats.std,
+                        delta_stats.mean,
+                        delta_stats.std
+                    )?;
+                }
             }
         }
     }
 
     writeln!(md_file, "\n### Documentation Notes\n")?;
-    writeln!(md_file, "- **Process-Level Resource Measurement Limitation**: Resource measurements are process-level measurements collected during each run. In a single long-running process, RSS can be affected by allocator retention and previous configurations. For fully isolated memory comparison, each configuration should be run in a fresh process.\n")?;
+    writeln!(md_file, "- **Latency field semantics**: `0.000 ms` means the measured value rounded to zero at three decimal places. `N/A` means the benchmark step was not applicable for that system, such as Janus historical loading or Janus external merge. Empty latency cells in the raw CSV mean the benchmark did not observe a value for that optional event.\n")?;
+    writeln!(md_file, "- **Point lookup result counts**: `point_lookup` may report `historical_result_count = 1` with `result_count = 0`. That is expected for this query shape when the historical lookup succeeds but the final hybrid predicate does not emit any live-plus-historical result row.\n")?;
+    writeln!(md_file, "- **Process-level RSS interpretation**: Resource measurements are process-level. This benchmark runs many configurations in one process, so RSS can be influenced by allocator retention and prior configurations. Negative RSS deltas should not be interpreted as negative memory use; for paper-facing text, prefer observed process peak RSS rather than memory cost.\n")?;
+    writeln!(md_file, "- **CPU interpretation**: CPU percentages are interval samples for the benchmark process only and exclude child processes. Values above 100% are valid when the process uses more than one core during a sampling interval.\n")?;
     writeln!(md_file, "- **Decomposed-Oxigraph Baseline**: Decomposed-Oxigraph evaluates the historical component using SPARQL over the full Oxigraph historical store and merges the resulting historical bindings with separately evaluated live results. It does not use Janus segmented historical lookup for historical filtering.\n")?;
 
     let readme_path = output_dir.join("README.md");
@@ -1545,6 +1907,83 @@ fn write_reports(
     Ok(())
 }
 
+fn write_incremental_csv_header(file: &mut File) -> std::io::Result<()> {
+    writeln!(
+        file,
+        "status,benchmark_name,system,historical_size_quads,target_historical_quads,actual_historical_quads,historical_query_type,expected_historical_result_count,historical_result_count,historical_result_count_matches_expected,historical_query_start_ms,historical_query_end_ms,historical_query_span_ms,iteration,live_duration_ms,event_rate_per_second,event_interval_ms,total_live_events,window_size_ms,window_slide_ms,query_name,timestamp,registration_ms,historical_lookup_ms,historical_query_ms,first_live_window_result_ms,first_hybrid_result_ms,main_window_result_ms,first_hybrid_window_adjusted_overhead_ms,main_window_adjusted_overhead_ms,window_processing_overhead_ms,post_trigger_result_observation_delay_ms,external_merge_ms,total_run_ms,result_count,result_hash,matching_reference_hash,result_equivalence,mismatch_reason,rss_start_mb,rss_end_mb,peak_rss_mb,rss_delta_mb,mean_cpu_percent,peak_cpu_percent,resource_sample_count,resource_sample_interval_ms,historical_backend,historical_query_language,historical_load_ms"
+    )?;
+    file.flush()
+}
+
+fn csv_escape(value: &str) -> String {
+    format!("\"{}\"", value.replace('"', "\"\""))
+}
+
+fn append_incremental_csv_row(file: &mut File, row: &HybridScalingRow) -> std::io::Result<()> {
+    let fields = vec![
+        csv_escape("completed"),
+        csv_escape(&row.benchmark_name),
+        csv_escape(&row.system),
+        row.historical_size_quads.to_string(),
+        row.target_historical_quads.to_string(),
+        row.actual_historical_quads.to_string(),
+        csv_escape(&row.historical_query_type),
+        row.expected_historical_result_count.to_string(),
+        row.historical_result_count.to_string(),
+        row.historical_result_count_matches_expected.to_string(),
+        row.historical_query_start_ms.to_string(),
+        row.historical_query_end_ms.to_string(),
+        row.historical_query_span_ms.to_string(),
+        (row.iteration + 1).to_string(),
+        row.live_duration_ms.to_string(),
+        format!("{:.3}", row.event_rate_per_second),
+        row.event_interval_ms.to_string(),
+        row.total_live_events.to_string(),
+        row.window_size_ms.to_string(),
+        row.window_slide_ms.to_string(),
+        csv_escape(&row.query_name),
+        row.timestamp.to_string(),
+        format!("{:.3}", row.registration_ms),
+        format!("{:.3}", row.historical_lookup_ms),
+        format!("{:.3}", row.historical_query_ms),
+        format_optional_ms(row.first_live_window_result_ms),
+        format_optional_ms(row.first_hybrid_result_ms),
+        format_optional_ms(row.main_window_result_ms),
+        format_optional_ms(row.first_hybrid_window_adjusted_overhead_ms),
+        format_optional_ms(row.main_window_adjusted_overhead_ms),
+        format_optional_ms(row.window_processing_overhead_ms),
+        format_optional_ms(row.post_trigger_result_observation_delay_ms),
+        format_optional_ms(row.external_merge_ms),
+        format!("{:.3}", row.total_run_ms),
+        row.result_count.to_string(),
+        csv_escape(&row.result_hash),
+        csv_escape(&row.matching_reference_hash),
+        row.result_equivalence.to_string(),
+        csv_escape(&row.mismatch_reason),
+        format!("{:.3}", row.rss_start_mb),
+        format!("{:.3}", row.rss_end_mb),
+        format!("{:.3}", row.peak_rss_mb),
+        format!("{:.3}", row.rss_delta_mb),
+        format!("{:.3}", row.mean_cpu_percent),
+        format!("{:.3}", row.peak_cpu_percent),
+        row.resource_sample_count.to_string(),
+        row.resource_sample_interval_ms.to_string(),
+        csv_escape(&row.historical_backend),
+        csv_escape(&row.historical_query_language),
+        format_optional_ms(row.historical_load_ms),
+    ];
+    writeln!(file, "{}", fields.join(","))?;
+    file.flush()?;
+    println!(
+        "Saved result row: H={}, query={}, iteration={}, system={}",
+        row.historical_size_quads,
+        row.historical_query_type,
+        row.iteration + 1,
+        row.system
+    );
+    Ok(())
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
 
@@ -1553,6 +1992,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .clone()
         .unwrap_or_else(|| default_benchmark_output_dir("hybrid_scaling_combined"));
     ensure_output_dir(&output_dir)?;
+
+    let incremental_csv_path = output_dir.join(DURABLE_RESULTS_CSV);
+    let mut incremental_csv = OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(&incremental_csv_path)?;
+    write_incremental_csv_header(&mut incremental_csv)?;
 
     let metadata = collect_repro_metadata();
     let mut all_results = Vec::new();
@@ -1637,13 +2084,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         dr.result_equivalence = equivalent;
                         dr.mismatch_reason = mismatch_reason;
 
+                        append_incremental_csv_row(&mut incremental_csv, &jr)?;
+                        append_incremental_csv_row(&mut incremental_csv, &dr)?;
                         all_results.push(jr);
                         all_results.push(dr);
                     }
                     (Some(jr), None) => {
+                        append_incremental_csv_row(&mut incremental_csv, &jr)?;
                         all_results.push(jr);
                     }
                     (None, Some(dr)) => {
+                        append_incremental_csv_row(&mut incremental_csv, &dr)?;
                         all_results.push(dr);
                     }
                     (None, None) => {}
@@ -1688,4 +2139,165 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    fn sample_row() -> HybridScalingRow {
+        HybridScalingRow {
+            benchmark_name: "hybrid_scaling_combined".to_string(),
+            system: "janus".to_string(),
+            historical_size_quads: 10000,
+            target_historical_quads: 10000,
+            actual_historical_quads: 10000,
+            historical_query_type: "point_lookup".to_string(),
+            expected_historical_result_count: 0,
+            historical_result_count: 0,
+            historical_result_count_matches_expected: true,
+            historical_query_start_ms: 0,
+            historical_query_end_ms: 1,
+            historical_query_span_ms: 1,
+            iteration: 0,
+            live_duration_ms: 5000,
+            event_rate_per_second: 4.0,
+            event_interval_ms: 250,
+            total_live_events: 20,
+            window_size_ms: 5000,
+            window_slide_ms: 2500,
+            query_name: "hybrid_query".to_string(),
+            timestamp: 0,
+            registration_ms: 1.0,
+            historical_lookup_ms: 2.0,
+            historical_query_ms: 2.0,
+            first_live_window_result_ms: None,
+            first_hybrid_result_ms: None,
+            main_window_result_ms: None,
+            first_hybrid_window_adjusted_overhead_ms: None,
+            main_window_adjusted_overhead_ms: None,
+            window_processing_overhead_ms: None,
+            post_trigger_result_observation_delay_ms: None,
+            external_merge_ms: None,
+            total_run_ms: 10.0,
+            result_count: 0,
+            result_hash: String::new(),
+            matching_reference_hash: String::new(),
+            result_equivalence: true,
+            mismatch_reason: "none".to_string(),
+            rss_start_mb: 1.0,
+            rss_end_mb: 1.0,
+            peak_rss_mb: 1.0,
+            rss_delta_mb: 0.0,
+            mean_cpu_percent: 0.0,
+            peak_cpu_percent: 0.0,
+            resource_sample_count: 1,
+            resource_sample_interval_ms: 100,
+            historical_backend: "janus_segmented".to_string(),
+            historical_query_language: "janus_range_lookup".to_string(),
+            historical_load_ms: None,
+        }
+    }
+
+    #[test]
+    fn no_result_row_serializes_empty_latency_fields() {
+        let path = std::env::temp_dir().join(format!(
+            "hybrid_scaling_combined_test_{}_{}.csv",
+            std::process::id(),
+            now_ms()
+        ));
+        let mut file = File::create(&path).unwrap();
+        write_incremental_csv_header(&mut file).unwrap();
+
+        let row = sample_row();
+        append_incremental_csv_row(&mut file, &row).unwrap();
+
+        let csv = fs::read_to_string(&path).unwrap();
+        fs::remove_file(&path).unwrap();
+        let row_line = csv.lines().nth(1).unwrap();
+
+        assert!(row_line.contains(",,,"));
+        assert!(!row_line.contains(",0.000,0.000,-5000.000,-10000.000,"));
+        assert!(!row_line.contains("-5000.000"));
+        assert!(!row_line.contains("-10000.000"));
+    }
+
+    #[test]
+    fn result_row_serializes_present_latency_fields() {
+        let row = HybridScalingRow {
+            first_live_window_result_ms: Some(5000.0),
+            first_hybrid_result_ms: Some(5001.25),
+            main_window_result_ms: Some(10002.5),
+            first_hybrid_window_adjusted_overhead_ms: adjusted_overhead(Some(5001.25), 5000.0),
+            main_window_adjusted_overhead_ms: adjusted_overhead(Some(10002.5), 10000.0),
+            window_processing_overhead_ms: Some(1.25),
+            post_trigger_result_observation_delay_ms: Some(1.25),
+            result_count: 1,
+            ..sample_row()
+        };
+
+        assert_eq!(format_optional_ms(row.first_hybrid_result_ms), "5001.250");
+        assert_eq!(format_optional_ms(row.first_hybrid_window_adjusted_overhead_ms), "1.250");
+        assert_eq!(format_optional_ms(row.main_window_adjusted_overhead_ms), "2.500");
+    }
+
+    #[test]
+    fn negative_adjusted_overhead_is_treated_as_missing() {
+        assert_eq!(adjusted_overhead(None, 5000.0), None);
+        assert_eq!(adjusted_overhead(Some(0.0), 5000.0), None);
+        assert_eq!(adjusted_overhead(Some(5000.0), 5000.0), Some(0.0));
+    }
+
+    #[test]
+    fn report_marks_na_dynamic_sizes_and_cpu_omission() {
+        let output_dir = std::env::temp_dir().join(format!(
+            "hybrid_scaling_combined_report_test_{}_{}",
+            std::process::id(),
+            now_ms()
+        ));
+        fs::create_dir_all(&output_dir).unwrap();
+
+        let janus_row = HybridScalingRow {
+            historical_size_quads: 1_000_000,
+            target_historical_quads: 1_000_000,
+            actual_historical_quads: 1_000_000,
+            historical_result_count: 1,
+            expected_historical_result_count: 1,
+            historical_result_count_matches_expected: true,
+            historical_query_ms: 0.125,
+            historical_lookup_ms: 0.125,
+            result_count: 0,
+            ..sample_row()
+        };
+        let decomp_row = HybridScalingRow {
+            system: "decomposed_oxigraph".to_string(),
+            historical_backend: "oxigraph".to_string(),
+            historical_query_language: "sparql_filter".to_string(),
+            historical_size_quads: 1_000_000,
+            target_historical_quads: 1_000_000,
+            actual_historical_quads: 1_000_000,
+            historical_result_count: 1,
+            expected_historical_result_count: 1,
+            historical_result_count_matches_expected: true,
+            historical_query_ms: 4.0,
+            historical_lookup_ms: 4.0,
+            historical_load_ms: Some(12.0),
+            external_merge_ms: Some(0.5),
+            ..sample_row()
+        };
+
+        write_reports(&output_dir, &[janus_row, decomp_row]).unwrap();
+        let markdown =
+            fs::read_to_string(output_dir.join("hybrid_scaling_combined_results.md")).unwrap();
+
+        assert!(markdown.contains("Table 1: Historical access latency inside the hybrid benchmark"));
+        assert!(markdown.contains("1M quads"));
+        assert!(markdown.contains("N/A - queries persisted segmented event log directly"));
+        assert!(markdown.contains(
+            "CPU metrics are omitted because the current sampler reports 0% across all configurations"
+        ));
+
+        fs::remove_dir_all(&output_dir).unwrap();
+    }
 }

@@ -160,11 +160,7 @@ fn test_materialize_query_defined_baseline_preserves_string_and_language_literal
         where_clause: "WHERE { ?sensor ?p ?o . }".to_string(),
         group_by_clause: None,
         having_clause: None,
-        output_variables: vec![
-            "?sensor".to_string(),
-            "?label".to_string(),
-            "?note".to_string(),
-        ],
+        output_variables: vec!["?sensor".to_string(), "?label".to_string(), "?note".to_string()],
         materialization_kind: HistoricalMaterializationKind::ExplicitBaseline,
     };
     let bindings = vec![HashMap::from([
@@ -385,9 +381,7 @@ fn test_materialize_query_defined_baseline_uses_template_predicate_not_variable_
         baseline_name: "http://example.org/dayBaseline".to_string(),
         triples: vec![TripleTemplate {
             subject: GraphTermTemplate::Variable("sensor".to_string()),
-            predicate: GraphTermTemplate::Iri(
-                "http://example.org/customBaselineValue".to_string(),
-            ),
+            predicate: GraphTermTemplate::Iri("http://example.org/customBaselineValue".to_string()),
             object: GraphTermTemplate::Variable("dayAvgValue".to_string()),
         }],
     };
@@ -669,20 +663,8 @@ fn test_query_defined_baseline_static_graph_can_drive_live_group_by_having() {
         .add_events(
             "http://example.org/stream",
             vec![
-                RDFEvent::new(
-                    1,
-                    "http://example.org/s1",
-                    "http://example.org/hasValue",
-                    "30",
-                    "",
-                ),
-                RDFEvent::new(
-                    2,
-                    "http://example.org/s1",
-                    "http://example.org/hasValue",
-                    "32",
-                    "",
-                ),
+                RDFEvent::new(1, "http://example.org/s1", "http://example.org/hasValue", "30", ""),
+                RDFEvent::new(2, "http://example.org/s1", "http://example.org/hasValue", "32", ""),
             ],
         )
         .unwrap();
@@ -736,7 +718,7 @@ fn test_sliding_query_defined_baseline_snapshots_change_with_live_evaluation_tim
         StreamingSegmentedStorage::new(config).expect("Failed to create segmented storage"),
     );
 
-    for (timestamp, value) in [(86_340_002, "10"), (86_400_000, "20")] {
+    for (timestamp, value) in [(86_400_002, "10"), (86_460_000, "20")] {
         storage
             .write_rdf(
                 timestamp,
@@ -748,7 +730,7 @@ fn test_sliding_query_defined_baseline_snapshots_change_with_live_evaluation_tim
             .expect("Failed to write historical RDF event");
     }
     storage.flush().expect("Failed to flush storage");
-    for (timestamp, value) in [(86_400_002, "30"), (86_460_000, "50")] {
+    for (timestamp, value) in [(86_460_002, "30"), (86_520_000, "50")] {
         storage
             .write_rdf(
                 timestamp,
@@ -802,14 +784,14 @@ HAVING(AVG(?value) > ?yesterdayAvgValue)
     let latest_rows = Arc::new(RwLock::new(HashMap::new()));
     assert_eq!(
         storage
-            .query_rdf(86_340_000, 86_400_000)
+            .query_rdf(86_400_001, 86_460_001)
             .expect("first historical range should query")
             .len(),
         2
     );
     assert_eq!(
         storage
-            .query_rdf(86_400_001, 86_460_001)
+            .query_rdf(86_460_001, 86_520_001)
             .expect("second historical range should query")
             .len(),
         2
@@ -879,9 +861,7 @@ HAVING(AVG(?value) > ?yesterdayAvgValue)
                         value,
                         NamedNode::new("http://www.w3.org/2001/XMLSchema#decimal").unwrap(),
                     ),
-                    GraphName::NamedNode(
-                        NamedNode::new("http://example.org/liveMinute").unwrap(),
-                    ),
+                    GraphName::NamedNode(NamedNode::new("http://example.org/liveMinute").unwrap()),
                 ))
                 .expect("live quad should insert");
         }
@@ -905,10 +885,7 @@ HAVING(AVG(?value) > ?yesterdayAvgValue)
 
         let mut row = HashMap::new();
         for (variable, term) in solution.iter() {
-            row.insert(
-                variable.as_str().to_string(),
-                normalize_binding_term(&term.to_string()),
-            );
+            row.insert(variable.as_str().to_string(), normalize_binding_term(&term.to_string()));
         }
         row
     };
@@ -933,8 +910,8 @@ HAVING(AVG(?value) > ?yesterdayAvgValue)
     let second_snapshot = baseline_registry
         .get_snapshot("http://example.org/yesterdayBaseline", 172_860_001)
         .expect("expected snapshot at second evaluation time");
-    assert_eq!(first_snapshot.window_start, 86_340_001);
-    assert_eq!(first_snapshot.window_end, 86_400_001);
-    assert_eq!(second_snapshot.window_start, 86_400_001);
-    assert_eq!(second_snapshot.window_end, 86_460_001);
+    assert_eq!(first_snapshot.window_start, 86_400_001);
+    assert_eq!(first_snapshot.window_end, 86_460_001);
+    assert_eq!(second_snapshot.window_start, 86_460_001);
+    assert_eq!(second_snapshot.window_end, 86_520_001);
 }
