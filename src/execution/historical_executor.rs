@@ -435,10 +435,7 @@ impl<'a> Iterator for SlidingWindowIterator<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         let window_start = self.current_start;
-        let window_end = match window_start.checked_add(self.width) {
-            Some(window_end) => window_end,
-            None => return None,
-        };
+        let window_end = window_start.checked_add(self.width)?;
 
         if window_end > self.evaluation_time {
             return None;

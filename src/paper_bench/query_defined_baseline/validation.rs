@@ -1,3 +1,5 @@
+#![allow(clippy::implicit_hasher)]
+
 use std::collections::{BTreeMap, HashMap};
 
 use super::rdf::{normalize_binding_term, parse_numeric};

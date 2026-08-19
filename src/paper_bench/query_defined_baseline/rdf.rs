@@ -1,3 +1,5 @@
+#![allow(clippy::implicit_hasher)]
+
 use oxigraph::model::{BlankNode, GraphName, NamedNode, NamedOrBlankNode, Quad, Term};
 use std::collections::{HashMap, HashSet};
 

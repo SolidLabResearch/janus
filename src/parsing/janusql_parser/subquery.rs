@@ -6,6 +6,7 @@ use crate::parsing::janusql_parser::ast::{
 };
 use crate::parsing::janusql_parser::{JanusQLParser, JANUS_HISTORICAL_MATERIALIZED_SUBQUERY_NS};
 use std::collections::HashMap;
+use std::fmt::Write;
 
 #[derive(Debug, Clone)]
 pub(crate) struct NestedSubqueryPlanningResult {
@@ -115,7 +116,7 @@ impl JanusQLParser {
         rewritten_where.push_str(&ast.where_clause[cursor..]);
         lowered.where_clause = rewritten_where;
         lowered.where_windows = self.extract_where_windows(&lowered.where_clause);
-        lowered.nested_subqueries = ast.nested_subqueries.clone();
+        lowered.nested_subqueries.clone_from(&ast.nested_subqueries);
         lowered.baseline_graph_templates =
             self.extract_baseline_graph_templates(&lowered.where_clause, prefixes)?;
 
@@ -475,7 +476,8 @@ impl JanusQLParser {
             };
             let graph_name = self.wrap_iri(&self.unwrap_iri(identifier, prefixes), prefixes);
             let body = inner[body_start..body_end].trim();
-            rewritten.push_str(&format!("GRAPH {} {{\n    {}\n  }}", graph_name, body));
+            write!(rewritten, "GRAPH {} {{\n    {}\n  }}", graph_name, body)
+                .expect("writing to a String cannot fail");
             offset = body_end + 1;
         }
 

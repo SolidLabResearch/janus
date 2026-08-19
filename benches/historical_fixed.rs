@@ -17,8 +17,8 @@ fn setup(n: usize) -> (Arc<StreamingSegmentedStorage>, WindowDefinition) {
     populate_storage(&storage, n, 1_000, 1, GRAPH_URI);
     let window = WindowDefinition {
         window_name: "w".to_string(),
-        source_kind: SourceKind::Stream,
-        stream_name: GRAPH_URI.to_string(),
+        source_kind: SourceKind::Log,
+        source_name: GRAPH_URI.to_string(),
         width: n as u64,
         slide: n as u64,
         offset: None,

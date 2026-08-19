@@ -209,5 +209,5 @@ fn congestion_value_for_live(index: usize) -> f64 {
 }
 
 fn historical_end_timestamp(start_ts: u64, events: usize) -> u64 {
-    start_ts + events.saturating_sub(1) as u64 * HISTORICAL_INTERVAL_MS
+    start_ts + events.max(1) as u64 * HISTORICAL_INTERVAL_MS
 }

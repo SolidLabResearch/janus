@@ -1,3 +1,5 @@
+#![allow(clippy::implicit_hasher)]
+
 use super::types::{
     SustainedRunConfig, TimeMode, BASELINE_NS, CONGESTION_PREDICATE, GRAPH_URI, LIVE_STREAM_URI,
 };
@@ -213,20 +215,19 @@ pub fn hybrid_query(start_ts: u64, end_ts: u64) -> String {
 }
 
 pub fn historical_baseline_sparql_query() -> Result<String, Box<dyn std::error::Error>> {
-    Ok(format!(
-        r#"
+    Ok(r#"
         PREFIX ex: <http://example.org/>
 
         SELECT ?sensor
                (AVG(?historicalCongestion) AS ?historicalAvgCongestion)
-        WHERE {{
-            GRAPH ex:citybench {{
+        WHERE {
+            GRAPH ex:citybench {
                 ?sensor ex:congestionLevel ?historicalCongestion .
-            }}
-        }}
+            }
+        }
         GROUP BY ?sensor
         "#
-    ))
+    .to_string())
 }
 
 pub fn live_only_rspql() -> String {

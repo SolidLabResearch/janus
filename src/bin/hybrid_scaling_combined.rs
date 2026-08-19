@@ -1,3 +1,5 @@
+#![allow(clippy::too_many_arguments)]
+
 use clap::Parser;
 use janus::core::RDFEvent;
 use janus::execution::result_converter::parse_rsprs_binding_string;
@@ -393,9 +395,10 @@ fn normalize_binding_term(raw: &str) -> String {
             return without_prefix[..end].to_string();
         }
     }
-    if trimmed.starts_with('<') && trimmed.ends_with('>') && trimmed.len() > 2 {
-        trimmed[1..trimmed.len() - 1].to_string()
-    } else if trimmed.starts_with('"') && trimmed.ends_with('"') && trimmed.len() > 2 {
+    if ((trimmed.starts_with('<') && trimmed.ends_with('>'))
+        || (trimmed.starts_with('"') && trimmed.ends_with('"')))
+        && trimmed.len() > 2
+    {
         trimmed[1..trimmed.len() - 1].to_string()
     } else {
         trimmed.to_string()
@@ -750,7 +753,11 @@ fn congestion_value_for_historical(index: usize) -> f64 {
 fn congestion_value_for_live(index: usize) -> f64 {
     let sensor_idx = index % SENSOR_COUNT;
     let sample_idx = index / SENSOR_COUNT;
-    let bias = if sensor_idx % 2 == 0 { 8.0 } else { -8.0 };
+    let bias = if sensor_idx.is_multiple_of(2) {
+        8.0
+    } else {
+        -8.0
+    };
     let oscillation = ((sample_idx * 5 + sensor_idx) % 5) as f64 - 2.0;
     historical_sensor_base(sensor_idx) + bias + oscillation
 }
@@ -824,14 +831,14 @@ fn safe_takeaway_label(system: &str, query_type: &str) -> &'static str {
 fn format_size_label(size: usize) -> String {
     match size {
         1_000_000 => "1M quads".to_string(),
-        1_000..=999_999 if size % 1_000 == 0 => format!("{}k quads", size / 1_000),
+        1_000..=999_999 if size.is_multiple_of(1_000) => format!("{}k quads", size / 1_000),
         _ => format!("{size} quads"),
     }
 }
 
-fn find_first_baseline_definition<'a>(
-    parsed: &'a ParsedJanusQuery,
-) -> Result<(&'a BaselineDefinition, &'a BaselineGraphTemplate), Box<dyn std::error::Error>> {
+fn find_first_baseline_definition(
+    parsed: &ParsedJanusQuery,
+) -> Result<(&BaselineDefinition, &BaselineGraphTemplate), Box<dyn std::error::Error>> {
     let definition = parsed
         .ast
         .baseline_definitions
@@ -1040,10 +1047,11 @@ fn run_janus_unified(
                 first_hybrid_result_ms = Some(*received_at);
                 window_processing_overhead_ms = Some(*overhead);
             }
-        } else if slides.len() >= 2 && res.timestamp_to == slides[1] {
-            if main_window_result_ms.is_none() {
-                main_window_result_ms = Some(*received_at);
-            }
+        } else if slides.len() >= 2
+            && res.timestamp_to == slides[1]
+            && main_window_result_ms.is_none()
+        {
+            main_window_result_ms = Some(*received_at);
         }
     }
 
@@ -1172,12 +1180,12 @@ fn run_decomposed_oxigraph(
         {
             Term::NamedNode(NamedNode::new(&event.object)?)
         } else {
-            let literal = if let Ok(_) = event.object.parse::<f64>() {
+            let literal = if event.object.parse::<f64>().is_ok() {
                 oxigraph::model::Literal::new_typed_literal(
                     &event.object,
                     NamedNode::new("http://www.w3.org/2001/XMLSchema#decimal").unwrap(),
                 )
-            } else if let Ok(_) = event.object.parse::<i64>() {
+            } else if event.object.parse::<i64>().is_ok() {
                 oxigraph::model::Literal::new_typed_literal(
                     &event.object,
                     NamedNode::new("http://www.w3.org/2001/XMLSchema#integer").unwrap(),
@@ -1192,7 +1200,7 @@ fn run_decomposed_oxigraph(
         // Quad 2: Event timestamp in Default Graph
         let event_node = NamedNode::new(&event_graph_uri)?;
         let ts_literal = Term::Literal(oxigraph::model::Literal::new_typed_literal(
-            &event.timestamp.to_string(),
+            event.timestamp.to_string(),
             NamedNode::new("http://www.w3.org/2001/XMLSchema#integer").unwrap(),
         ));
         store.insert(&Quad::new(
@@ -1221,7 +1229,7 @@ fn run_decomposed_oxigraph(
     let evaluator = build_evaluator();
     let parsed_query = evaluator
         .parse_query(&sparql_query)
-        .map_err(|e| oxigraph::sparql::QueryEvaluationError::from(e))?;
+        .map_err(oxigraph::sparql::QueryEvaluationError::from)?;
     let results = parsed_query.on_store(&store).execute()?;
 
     let mut external_bindings = Vec::new();
@@ -1341,10 +1349,11 @@ fn run_decomposed_oxigraph(
                 window_processing_overhead_ms = Some(*overhead);
                 external_merge_ms_total = Some(*merge_ms);
             }
-        } else if slides.len() >= 2 && res.timestamp_to == slides[1] {
-            if main_window_result_ms.is_none() {
-                main_window_result_ms = Some(*received_at + *merge_ms);
-            }
+        } else if slides.len() >= 2
+            && res.timestamp_to == slides[1]
+            && main_window_result_ms.is_none()
+        {
+            main_window_result_ms = Some(*received_at + *merge_ms);
         }
     }
 
@@ -1429,7 +1438,7 @@ fn write_reports(
     let mut query_types = rows.iter().map(|r| r.historical_query_type.clone()).collect::<Vec<_>>();
     query_types.sort_unstable();
     query_types.dedup();
-    let preferred_order = vec![
+    let preferred_order = [
         "point_lookup".to_string(),
         "fixed_60s".to_string(),
         "range_10_percent".to_string(),

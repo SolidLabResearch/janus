@@ -128,23 +128,26 @@ current performance guarantee.
 ## Representative benchmark results
 
 The versioned [result-analysis package](./data/result-analysis/) contains the
-CSV summaries and figures behind the following comparison with Oxigraph. The
-historical-access values are mean ± standard deviation; the storage values are
-medians from 35 iterations. They describe the included workloads and should
-not be interpreted as a general-purpose database benchmark.
+figures for the included Janus/Oxigraph workloads. They are workload- and
+machine-dependent, not general-purpose database guarantees.
 
-| Workload | Janus | Oxigraph | Relative result |
-| --- | ---: | ---: | --- |
-| Point lookup, 1M quads | 0.068 ± 0.004 ms | 818.002 ± 8.683 ms | 12,029× lower mean latency |
-| Fixed 60-second range, 1M quads | 1.247 ± 0.060 ms | 845.388 ± 6.130 ms | 678× lower mean latency |
-| 50% historical range, 1M quads | 541.342 ± 6.438 ms | 1,125.296 ± 5.510 ms | 2.08× lower mean latency |
-| Full historical range, 1M quads | 1,075.730 ± 2.685 ms | 1,454.357 ± 8.035 ms | 1.35× lower mean latency |
-| Persistent footprint, 1M events | 23.14 MB | 302.83 MB | 13.1× smaller median footprint |
-| Storage ingestion, 1M events | 1.06M events/s | 0.121M events/s | 8.8× higher median throughput |
+### Historical access latency
 
-See the [historical-access CSV](./data/result-analysis/historical_access_latency_parsed.csv),
-[storage-footprint CSV](./data/result-analysis/storage_footprint_summary.csv),
-and the accompanying [historical-access figure](./data/result-analysis/historical_access_latency_5panel_shared_yaxis.png).
+![Historical access latency comparison](./data/result-analysis/historical_access_latency_5panel_shared_yaxis.png)
+
+### Storage footprint
+
+![Storage footprint comparison](./data/result-analysis/resource_storage_footprint_combined.png)
+
+### Memory and CPU
+
+![Median memory and CPU comparison](./data/result-analysis/memory_cpu_1m_median_side_by_side.png)
+
+![Peak memory comparison](./data/result-analysis/peak_memory_1m_lineplot.png)
+
+![Median peak memory comparison](./data/result-analysis/peak_memory_1m_median_lineplot.png)
+
+![Compact median peak memory comparison](./data/result-analysis/peak_memory_1m_median_lineplot_compact.png)
 
 ## Development
 
