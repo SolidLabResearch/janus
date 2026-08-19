@@ -251,7 +251,7 @@ impl StreamBus {
             .as_ref()
             .ok_or(StreamBusError::ConfigError("MQTT config is not provided".to_string()))?;
 
-        println!("Connecting to the MQTT Server at {}:{}", &mqtt_config.host, mqtt_config.port);
+        println!("Connecting to the MQTT Server at {}:{}", mqtt_config.host, mqtt_config.port);
 
         let mut mqttoptions =
             MqttOptions::new(&mqtt_config.client_id, &mqtt_config.host, mqtt_config.port);
