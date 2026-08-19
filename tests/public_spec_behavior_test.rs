@@ -124,6 +124,43 @@ WHERE {
 }
 "#;
 
+const SPEC_INVALID_STREAM_FIXED_WINDOW_QUERY: &str = r#"
+PREFIX ex: <http://example.org/>
+
+SELECT ?sensor ?value
+FROM NAMED WINDOW ex:historicalWindow ON STREAM ex:stream [START 0 END 86400000]
+WHERE {
+  WINDOW ex:historicalWindow {
+    ?sensor ex:hasValue ?value .
+  }
+}
+"#;
+
+const SPEC_INVALID_STREAM_HISTORICAL_SLIDING_WINDOW_QUERY: &str = r#"
+PREFIX ex: <http://example.org/>
+
+SELECT ?sensor ?value
+FROM NAMED WINDOW ex:historicalWindow ON STREAM ex:stream [OFFSET 86400000 RANGE 3600000 STEP 30000]
+WHERE {
+  WINDOW ex:historicalWindow {
+    ?sensor ex:hasValue ?value .
+  }
+}
+"#;
+
+const SPEC_INVALID_LOG_LIVE_WINDOW_QUERY: &str = r#"
+PREFIX ex: <http://example.org/>
+
+REGISTER RStream ex:output AS
+SELECT ?sensor ?value
+FROM NAMED WINDOW ex:liveWindow ON LOG ex:stream [RANGE 60000 STEP 30000]
+WHERE {
+  WINDOW ex:liveWindow {
+    ?sensor ex:hasValue ?value .
+  }
+}
+"#;
+
 const SPEC_INVALID_ISTREAM_QUERY: &str = r#"
 PREFIX ex: <http://example.org/>
 
@@ -383,6 +420,39 @@ fn spec_invalid_undeclared_window_is_rejected() {
         .expect_err("undeclared WINDOW blocks must be rejected");
 
     assert!(err.to_string().contains("references undeclared window"));
+}
+
+#[test]
+fn spec_invalid_stream_fixed_window_is_rejected() {
+    let parser = JanusQLParser::new().expect("Failed to create parser");
+
+    let err = parser
+        .parse(SPEC_INVALID_STREAM_FIXED_WINDOW_QUERY)
+        .expect_err("historical START/END on STREAM must be rejected");
+
+    assert!(err.to_string().contains("Historical START/END windows must use ON LOG"));
+}
+
+#[test]
+fn spec_invalid_stream_historical_sliding_window_is_rejected() {
+    let parser = JanusQLParser::new().expect("Failed to create parser");
+
+    let err = parser
+        .parse(SPEC_INVALID_STREAM_HISTORICAL_SLIDING_WINDOW_QUERY)
+        .expect_err("historical OFFSET/RANGE/STEP on STREAM must be rejected");
+
+    assert!(err.to_string().contains("Historical OFFSET/RANGE/STEP windows must use ON LOG"));
+}
+
+#[test]
+fn spec_invalid_log_live_window_is_rejected() {
+    let parser = JanusQLParser::new().expect("Failed to create parser");
+
+    let err = parser
+        .parse(SPEC_INVALID_LOG_LIVE_WINDOW_QUERY)
+        .expect_err("live RANGE/STEP on LOG must be rejected");
+
+    assert!(err.to_string().contains("Live RANGE/STEP windows must use ON STREAM"));
 }
 
 #[test]

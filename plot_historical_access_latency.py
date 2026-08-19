@@ -51,6 +51,10 @@ Range 100\% & Oxigraph & $12.331\pm0.156$ & $66.026\pm0.483$ & $134.321\pm1.565$
 QUERY_ORDER = ["Point", "Fixed 60s", "Range 10%", "Range 50%", "Range 100%"]
 SYSTEM_ORDER = ["Janus", "Oxigraph"]
 SIZE_ORDER = ["10k", "50k", "100k", "500k", "1M"]
+SYSTEM_DISPLAY_NAMES = {
+    "Janus": "Janus",
+    "Oxigraph": "Decomposed Baseline",
+}
 
 
 def clean_latex_label(text: str) -> str:
@@ -257,12 +261,12 @@ def plot_shared_yaxis_figure(
                 linewidth=1.2,
                 markersize=3.5,
                 capsize=2,
-                label=system,
+                label=SYSTEM_DISPLAY_NAMES[system],
             )
 
             if query == QUERY_ORDER[0]:
                 handles.append(handle)
-                labels.append(system)
+                labels.append(SYSTEM_DISPLAY_NAMES[system])
 
         ax.set_title(query, fontsize=9)
         ax.set_yscale("log")

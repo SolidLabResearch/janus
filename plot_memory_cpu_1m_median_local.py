@@ -12,8 +12,8 @@ OUTPUT_PREFIX = "memory_cpu_1m_median_side_by_side"
 
 QUERY_ORDER = ["Point", "60s", "10%", "50%", "100%"]
 SYSTEM_STYLES = [
-    ("Janus", "o", "-"),
-    ("Oxigraph", "s", "--"),
+    ("Janus", "Janus", "o", "-"),
+    ("Oxigraph", "Decomposed Baseline", "s", "--"),
 ]
 
 
@@ -63,8 +63,8 @@ def main() -> None:
     ]
 
     for ax, (metric, ylabel, title) in zip(axes, panels):
-        for system, marker, linestyle in SYSTEM_STYLES:
-            subset = ordered_subset(df, system)
+        for system_key, system_label, marker, linestyle in SYSTEM_STYLES:
+            subset = ordered_subset(df, system_key)
 
             ax.plot(
                 x,
@@ -73,7 +73,7 @@ def main() -> None:
                 linestyle=linestyle,
                 linewidth=1.2,
                 markersize=3.5,
-                label=system,
+                label=system_label,
             )
 
         ax.set_title(title, fontsize=8)
