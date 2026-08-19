@@ -2,6 +2,10 @@
 
 This document defines the current benchmark harness for Janus backend work.
 
+> Status: verified against the benchmark targets present in this checkout. It
+> defines how to produce new evidence; it does not endorse older result
+> snapshots as current performance guarantees.
+
 ## Goals
 
 The benchmark suite is split by engine path so regressions are easier to localize:

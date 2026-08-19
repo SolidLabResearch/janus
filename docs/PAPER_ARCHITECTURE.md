@@ -1,41 +1,43 @@
 # Paper Architecture
 
-This file shows the three paper-relevant execution shapes.
+The diagrams show the two benchmark execution shapes. They are architectural
+summaries; the executable benchmark binaries and their raw artifacts are the
+source of performance evidence.
 
-## Unified Janus Execution
-
-```mermaid
-flowchart LR
-    A["Janus-QL query"] --> B["Janus parser"]
-    B --> C["Historical executor"]
-    B --> D["Live stream processor"]
-    C --> E["Static baseline materialization"]
-    E --> D
-    D --> F["Unified joined results"]
-```
-
-## Decomposed Oxigraph Baseline
+## Unified Janus execution
 
 ```mermaid
 flowchart LR
-    A["Janus-QL query"] --> B["Janus parser"]
-    B --> C["Historical RDF events"]
-    C --> D["Oxigraph SPARQL query"]
-    D --> E["Historical bindings"]
-    B --> F["Janus live stream processor"]
-    F --> G["Live results"]
-    E --> H["In-process external join"]
-    G --> H
-    H --> I["Decomposed baseline results"]
+    Q[Janus-QL query] --> P[Janus parser]
+    P --> H[Historical storage query]
+    P --> L[Live RSP-QL path]
+    H --> M[Supported historical materialization]
+    M --> L
+    L --> R[Result stream]
 ```
 
-## Nested Historical Subquery Lowering
+## Decomposed comparison path
+
+```mermaid
+flowchart LR
+    Q[Benchmark workload] --> H[Historical RDF events]
+    H --> O[Oxigraph query]
+    Q --> L[Janus live path]
+    O --> J[In-process merge]
+    L --> J
+    J --> R[Comparison result]
+```
+
+## Nested historical materialization
 
 ```mermaid
 flowchart TD
-    A["Nested historical subquery in Janus-QL"] --> B["Parse and classify windows"]
-    B --> C["Historical materialization lowering"]
-    C --> D["MaterializeHistoricalResult"]
-    D --> E["Rewrite outer query to join against materialized result"]
-    E --> F["Live query execution"]
+    Q[Nested historical SELECT] --> P[Validate and classify windows]
+    P --> S[Historical SPARQL execution]
+    S --> M[Materialize supported bindings]
+    M --> L[Outer live execution]
 ```
+
+See [Query Execution](./QUERY_EXECUTION.md) and
+[PAPER_BENCHMARKING.md](./PAPER_BENCHMARKING.md) for the operational and
+evidence boundaries.

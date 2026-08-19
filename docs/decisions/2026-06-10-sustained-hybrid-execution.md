@@ -6,6 +6,9 @@ Date: 2026-06-10
 
 Accepted
 
+> Historical record. For current runner options and output contracts, use the
+> executable benchmark and the current benchmark guides.
+
 ## Context
 
 The Hybrid Coordination Benchmark sustained-window path evaluates sustained query execution over continuous sliding windows. Unlike the first-result hybrid run, the sustained benchmark must measure latency and data transfer over repeated windows during virtual event-time streaming.

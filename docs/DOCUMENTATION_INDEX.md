@@ -1,103 +1,50 @@
 # Janus Documentation Index
 
-This is the shortest path to understanding the current Janus implementation.
+This index separates current operational documentation from historical design
+records and result templates. Start with the current guides; dated decisions
+are retained for project history, not as statements of present behavior.
 
-## Core Reading Order
+## Start here
 
-1. [../README.md](../README.md)
-2. [../GETTING_STARTED.md](../GETTING_STARTED.md)
-3. [../START_HERE.md](../START_HERE.md)
-4. [JANUSQL.md](./JANUSQL.md)
-5. [QUERY_EXECUTION.md](./QUERY_EXECUTION.md)
-6. [BASELINES.md](./BASELINES.md)
-7. [NESTED_HISTORICAL_SUBQUERIES.md](./NESTED_HISTORICAL_SUBQUERIES.md)
-8. [HTTP_API_CURRENT.md](./HTTP_API_CURRENT.md)
-9. [ANOMALY_DETECTION.md](./ANOMALY_DETECTION.md)
-10. [QUICK_REFERENCE.md](./QUICK_REFERENCE.md)
-11. [PAPER_BENCHMARKING.md](./PAPER_BENCHMARKING.md)
-12. [PAPER_ARTIFACT_MAP.md](./PAPER_ARTIFACT_MAP.md)
-13. [PAPER_ARCHITECTURE.md](./PAPER_ARCHITECTURE.md)
-14. [PAPER_SUBMISSION_PACKAGE.md](./PAPER_SUBMISSION_PACKAGE.md)
+1. [Repository README](../README.md) — scope, prerequisites, and primary commands.
+2. [Getting Started](../GETTING_STARTED.md) — shortest local path.
+3. [Janus-QL](./JANUSQL.md) — the public query surface and validation rules.
+4. [HTTP API](./HTTP_API_CURRENT.md) — current REST and WebSocket endpoints.
+5. [Query Execution](./QUERY_EXECUTION.md) — registration and runtime paths.
+6. [Live Streaming Guide](./LIVE_STREAMING_GUIDE.md) — MQTT and replay setup.
 
-## What Each File Covers
+## Current guides
 
-- [JANUSQL.md](./JANUSQL.md)
-  - query structure
-  - supported window types
-  - `USING BASELINE <window> LAST|AGGREGATE`
-  - how live and historical queries are derived
+| Topic | Canonical document |
+| --- | --- |
+| Query language | [JANUSQL.md](./JANUSQL.md) |
+| Window semantics | [WINDOW_TYPES_EXPLAINED.md](./WINDOW_TYPES_EXPLAINED.md) |
+| Query lifecycle and execution | [QUERY_EXECUTION.md](./QUERY_EXECUTION.md) |
+| REST and WebSocket API | [HTTP_API_CURRENT.md](./HTTP_API_CURRENT.md) |
+| HTTP quick start | [QUICKSTART_HTTP_API.md](./QUICKSTART_HTTP_API.md) |
+| Live MQTT and replay | [LIVE_STREAMING_GUIDE.md](./LIVE_STREAMING_GUIDE.md) |
+| Replay CLI | [STREAM_BUS_CLI.md](./STREAM_BUS_CLI.md) |
+| Historical materialization | [NESTED_HISTORICAL_SUBQUERIES.md](./NESTED_HISTORICAL_SUBQUERIES.md) |
+| Baseline compatibility | [BASELINES.md](./BASELINES.md) |
+| Anomaly-query guidance | [ANOMALY_DETECTION.md](./ANOMALY_DETECTION.md) |
+| Backend benchmarks | [BENCHMARKING.md](./BENCHMARKING.md) |
+| Paper benchmark harnesses | [PAPER_BENCHMARKING.md](./PAPER_BENCHMARKING.md) |
+| Benchmark implementation | [citybench_congestion_hybrid_scaling.md](./benchmarks/citybench_congestion_hybrid_scaling.md) |
 
-- [QUERY_EXECUTION.md](./QUERY_EXECUTION.md)
-  - registration and parsed metadata
-  - `start_query()` flow
-  - historical workers
-  - live workers and MQTT subscription
-  - result multiplexing and runtime status
+## Reference and historical material
 
-- [BASELINES.md](./BASELINES.md)
-  - what baseline bootstrap does
-  - `LAST` vs `AGGREGATE`
-  - async warm-up behavior
-  - what state is and is not retained
+- [BENCHMARK_RESULTS.md](./BENCHMARK_RESULTS.md) and
+  [JANUS_BENCHMARK_RESULTS_SUMMARY.md](./JANUS_BENCHMARK_RESULTS_SUMMARY.md)
+  contain retained historical summaries. They are not current performance
+  guarantees.
+- [PAPER_BENCHMARK_RESULTS_TEMPLATE.md](./PAPER_BENCHMARK_RESULTS_TEMPLATE.md)
+  is a reporting template, not a results claim.
+- [docs/decisions/](./decisions/) contains dated architecture and benchmark
+  decisions. Where a decision conflicts with executable code or a current
+  guide, the current guide and code take precedence.
 
-- [NESTED_HISTORICAL_SUBQUERIES.md](./NESTED_HISTORICAL_SUBQUERIES.md)
-  - nested historical subquery syntax
-  - planning pipeline and diagnostics
-  - supported and rejected shapes
-  - comparison with explicit `DEFINE BASELINE`
-  - microbenchmark runner
+## Compatibility aliases
 
-- [HTTP_API_CURRENT.md](./HTTP_API_CURRENT.md)
-  - current REST endpoints
-  - WebSocket result flow
-  - request and response shapes
-  - persisted query lifecycle status
-
-- [ANOMALY_DETECTION.md](./ANOMALY_DETECTION.md)
-  - when extension functions are enough
-  - when baseline state helps
-  - recommended query patterns
-
-- [PAPER_BENCHMARKING.md](./PAPER_BENCHMARKING.md)
-  - paper-facing benchmark harnesses
-  - current paper claim destinations
-  - benchmark output filenames
-
-- [PAPER_ARTIFACT_MAP.md](./PAPER_ARTIFACT_MAP.md)
-  - claim to benchmark mapping
-  - output files and caveats
-  - figure and table destinations
-
-- [PAPER_ARCHITECTURE.md](./PAPER_ARCHITECTURE.md)
-  - unified execution diagram
-  - decomposed Oxigraph baseline diagram
-  - nested historical subquery lowering diagram
-
-- [PAPER_SUBMISSION_PACKAGE.md](./PAPER_SUBMISSION_PACKAGE.md)
-  - include and exclude lists
-  - benchmark artifacts to preserve
-  - benchmark artifacts to keep local only
-
-- [QUICK_REFERENCE.md](./QUICK_REFERENCE.md)
-  - common local commands
-  - query lifecycle endpoints
-  - replay endpoints
-  - smoke-test flow
-
-## Additional Current Guides
-
-- [STREAM_BUS_CLI.md](./STREAM_BUS_CLI.md)
-- [README_HTTP_API.md](./README_HTTP_API.md)
-- [QUICKSTART_HTTP_API.md](./QUICKSTART_HTTP_API.md)
-
-## Dashboard Boundary
-
-- Maintained dashboard repository: `https://github.com/SolidLabResearch/janus-dashboard`
-
-## Related Code
-
-- [../src/parsing/janusql_parser.rs](../src/parsing/janusql_parser.rs)
-- [../src/api/janus_api.rs](../src/api/janus_api.rs)
-- [../src/http/server.rs](../src/http/server.rs)
-- [../src/stream/live_stream_processing.rs](../src/stream/live_stream_processing.rs)
-- [../src/execution/historical_executor.rs](../src/execution/historical_executor.rs)
+[HTTP_API.md](./HTTP_API.md) and [README_HTTP_API.md](./README_HTTP_API.md)
+are retained as compatibility entry points and direct readers to the current
+HTTP API reference. [README.md](./README.md) is the short in-directory index.

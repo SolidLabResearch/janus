@@ -140,6 +140,46 @@ WebSocket messages are JSON-encoded query results containing:
 - `Historical`
 - `Live`
 
+### Start Replay
+
+`POST /api/replay/start`
+
+Starts replay from an N-Triples or N-Quads input file. The request accepts:
+
+```json
+{
+  "input_file": "data/sensors.nq",
+  "broker_type": "mqtt",
+  "topics": ["sensors"],
+  "rate_of_publishing": 64,
+  "loop_file": false,
+  "add_timestamps": true,
+  "mqtt_config": {
+    "host": "localhost",
+    "port": 1883,
+    "client_id": "janus-replay",
+    "keep_alive_secs": 30
+  }
+}
+```
+
+`broker_type` is `mqtt` or `none`. If omitted, it defaults to `none`; topics,
+rate, and timestamp insertion also have server defaults. Only one replay can
+run at a time.
+
+### Stop Replay
+
+`POST /api/replay/stop`
+
+Stops the active replay. It returns a bad request when no replay is running.
+
+### Replay Status
+
+`GET /api/replay/status`
+
+Returns whether replay is running plus read, published, stored, and error
+counts, events per second, and elapsed seconds.
+
 ## Typical Flow
 
 1. `POST /api/queries`
@@ -149,10 +189,10 @@ WebSocket messages are JSON-encoded query results containing:
 5. `POST /api/queries/:id/stop`
 6. `DELETE /api/queries/:id`
 
-## Notes on Baseline Queries
+## Baseline compatibility
 
-For baseline-backed hybrid queries:
-
-- the query may enter `WarmingBaseline` after start
-- live execution still starts immediately
-- results that depend on baseline joins may appear only after warm-up finishes
+The implementation retains baseline-oriented compatibility behavior. A query
+using that internal path may enter `WarmingBaseline` after start, and
+baseline-dependent joins can produce results only after warm-up completes.
+This is not a public Janus-QL language guarantee; see
+[BASELINES.md](./BASELINES.md) for the boundary.

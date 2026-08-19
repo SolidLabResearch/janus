@@ -6,6 +6,9 @@ Date: 2026-06-10
 
 Accepted
 
+> Historical record. For current metric semantics and output fields, use the
+> executable benchmark and the current benchmark guides.
+
 ## Context
 
 The Hybrid Coordination Benchmark validates Janus unified versus the Decomposed Oxigraph Baseline. To clarify the role of the live-streaming query component and coordinate join stages, the benchmark must clearly delineate the latencies of individual query steps (historical query, live-stream processing, and external join/combination).

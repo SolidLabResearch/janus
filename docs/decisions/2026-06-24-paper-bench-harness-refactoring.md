@@ -6,6 +6,9 @@ Date: 2026-06-24
 
 Accepted
 
+> Historical architecture record. Use `src/paper_bench/harness/` and
+> `docs/PAPER_BENCHMARKING.md` for the current layout and commands.
+
 ## Context
 
 The paper_bench harness (src/paper_bench/harness.rs) currently contains all benchmark execution flows, system configuration detection, data generation helpers, logging/CSV export, and statistics gathering inside a single file exceeding 3200 lines of code. This size makes understanding and maintaining the benchmark harness difficult.

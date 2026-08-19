@@ -6,6 +6,9 @@ Date: 2026-06-24
 
 Accepted
 
+> Historical safety record. Verify any present-day behavior against the current
+> segmented-storage implementation and its regression tests.
+
 ## Context
 
 The segmented storage engine has two primary concurrency and data integrity bugs:

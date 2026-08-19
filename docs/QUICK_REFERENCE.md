@@ -1,132 +1,40 @@
 # Janus Quick Reference
 
-## Setup
+## Common commands
 
 ```bash
-docker-compose up -d mosquitto
-cargo run --bin http_server -- --host 127.0.0.1 --port 8080 --storage-dir ./data/storage
-cargo run --example http_client_example
+make build
+make test
+make check
+cargo run --bin http_server -- --help
+cargo run --bin stream_bus_cli -- --help
+cargo bench --no-run
 ```
 
-## Optional Frontend
-
-The maintained web dashboard lives in the separate `janus-dashboard`
-repository.
-
-## API Endpoints
-
-```bash
-# Health
-GET http://localhost:8080/health
-GET http://localhost:8080/ops/status
-
-# Queries
-POST   /api/queries              # Register
-GET    /api/queries              # List all
-GET    /api/queries/:id          # Details
-POST   /api/queries/:id/start    # Start
-POST   /api/queries/:id/stop     # Stop
-DELETE /api/queries/:id          # Delete stopped query
-WS     /api/queries/:id/results  # Stream
-
-# Replay
-POST /api/replay/start    # Start
-POST /api/replay/stop     # Stop
-GET  /api/replay/status   # Status
-```
-
-## JanusQL Syntax
-
-```sparql
-PREFIX ex: <http://example.org/>
-REGISTER RStream ex:output AS
-SELECT ?vars
-FROM NAMED WINDOW ex:name ON STREAM ex:stream [WINDOW_SPEC]
-WHERE {
-  WINDOW ex:name {
-    # SPARQL patterns
-  }
-}
-```
-
-### Window Specs
-
-```sparql
-[START 1704067200 END 1735689599]         # Historical fixed
-[OFFSET 1704067200 RANGE 10000 STEP 2000] # Historical sliding
-[RANGE 10000 STEP 5000]                   # Live sliding
-```
-
-Historical sliding semantics at live evaluation time `T`:
+## HTTP routes
 
 ```text
-[T - OFFSET - RANGE, T - OFFSET]
+GET    /health
+GET    /ops/status
+POST   /api/queries
+GET    /api/queries
+GET    /api/queries/:id
+POST   /api/queries/:id/start
+POST   /api/queries/:id/stop
+DELETE /api/queries/:id
+GET    /api/queries/:id/results     WebSocket upgrade
+POST   /api/replay/start
+POST   /api/replay/stop
+GET    /api/replay/status
 ```
 
-Query-defined baseline support:
+## Query window forms
 
 ```sparql
-DEFINE BASELINE ex:b ON WINDOW ex:hist AS
-SELECT ?sensor (AVG(?value) AS ?baselineValue)
-WHERE { ?sensor ex:hasValue ?value . }
-GROUP BY ?sensor
-
-USING BASELINE ex:b
+ON LOG ex:log [START 1700000000000 END 1700086400000]
+ON LOG ex:log [OFFSET 86400000 RANGE 3600000 STEP 30000]
+ON STREAM ex:stream [RANGE 60000 STEP 30000]
 ```
 
-Notes:
-
-- query-defined baselines store `SELECT` snapshots separately from the live stream window
-- fixed historical baselines are computed once and reused
-- sliding historical baselines are refreshed per live evaluation timestamp
-- sliding historical baseline `STEP` must match the live `STEP`
-- `CONSTRUCT` baselines are not supported
-
-## cURL Examples
-
-### Register Query
-```bash
-curl -X POST http://localhost:8080/api/queries \
-  -H "Content-Type: application/json" \
-  -d '{"query_id":"q1","janusql":"PREFIX ex: <http://example.org/> REGISTER RStream ex:o AS SELECT ?s ?p ?o FROM NAMED WINDOW ex:w ON LOG ex:s [START 1704067200 END 1735689599] WHERE { WINDOW ex:w { ?s ?p ?o . } }"}'
-```
-
-### Start Replay
-```bash
-curl -X POST http://localhost:8080/api/replay/start \
-  -H "Content-Type: application/json" \
-  -d '{"input_file":"data/sensors.nq","broker_type":"mqtt","topics":["sensors"],"rate_of_publishing":1000,"loop_file":true,"mqtt_config":{"host":"localhost","port":1883,"client_id":"janus","keep_alive_secs":30}}'
-```
-
-## WebSocket (JavaScript)
-
-```javascript
-const ws = new WebSocket('ws://localhost:8080/api/queries/q1/results');
-ws.onmessage = (e) => console.log(JSON.parse(e.data));
-```
-
-## Troubleshooting
-
-```bash
-# Check MQTT
-docker ps | grep mosquitto
-
-# Check server
-curl http://localhost:8080/health
-
-# View MQTT messages
-docker exec -it janus-mosquitto mosquitto_sub -t "sensors" -v
-
-# Restart MQTT
-docker-compose restart mosquitto
-```
-
-## Success Checklist
-
-- [ ] MQTT running: `docker ps | grep mosquitto`
-- [ ] Server running: `curl localhost:8080/health`
-- [ ] Example client runs: `cargo run --example http_client_example`
-
----
-
-**Quick Start:** `cargo run --bin http_server` then `cargo run --example http_client_example`
+Use [Janus-QL](./JANUSQL.md) for supported syntax and
+[HTTP API](./HTTP_API_CURRENT.md) for request and response shapes.

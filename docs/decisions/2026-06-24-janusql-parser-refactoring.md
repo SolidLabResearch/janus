@@ -6,6 +6,10 @@ Date: 2026-06-24
 
 Proposed
 
+> Historical architecture record. The refactoring has since landed; paths in
+> the context describe the pre-refactor state. Use `src/parsing/janusql_parser/`
+> and `docs/JANUSQL.md` for current work.
+
 ## Context
 
 The current implementation of the JanusQL parser is contained within a single file, src/parsing/janusql_parser.rs, which is over 2200 lines long. This file handles multiple distinct tasks:

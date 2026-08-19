@@ -6,6 +6,9 @@ Date: 2026-06-24
 
 Accepted
 
+> Historical architecture record. Paths in the context describe the pre-refactor
+> state; use `src/storage/segmented_storage/` for current implementation work.
+
 ## Context
 
 The current implementation of segmented storage is contained within a single file, src/storage/segmented_storage.rs, which spans over 880 lines. This file manages multiple distinct concerns:

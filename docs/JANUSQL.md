@@ -1,242 +1,136 @@
 # Janus-QL
 
-Janus-QL is the query language Janus uses to describe historical windows, live windows, and hybrid queries.
+Janus-QL is Janus's extension for evaluating RDF queries over historical event
+logs, live streams, or both. It keeps the SPARQL `SELECT`/`WHERE` shape and
+adds named-window declarations plus an optional `REGISTER RStream` wrapper for
+live result streams.
 
-## Query Shape
+This page describes the public, tested query surface. It deliberately does not
+attempt to reproduce all of SPARQL or RSP-QL.
 
-A Janus-QL query typically contains:
-
-- `PREFIX` declarations
-- a `REGISTER` clause
-- one or more `FROM NAMED WINDOW` clauses
-- an optional `USING BASELINE` clause
-- optional `DEFINE BASELINE ... ON WINDOW ... AS SELECT ...` clauses
-- a `WHERE` clause with `WINDOW <name> { ... }` blocks
-
-Example:
+## Query shape
 
 ```sparql
 PREFIX ex: <http://example.org/>
-PREFIX janus: <https://janus.rs/fn#>
-PREFIX baseline: <https://janus.rs/baseline#>
 
-REGISTER RStream ex:out AS
-SELECT ?sensor ?reading
-FROM NAMED WINDOW ex:hist ON LOG ex:store [START 1700000000000 END 1700003600000]
-FROM NAMED WINDOW ex:live ON STREAM ex:stream1 [RANGE 5000 STEP 1000]
-USING BASELINE ex:hist AGGREGATE
+REGISTER RStream ex:output AS
+SELECT ?sensor ?value
+FROM NAMED WINDOW ex:live ON STREAM ex:stream [RANGE 60000 STEP 30000]
+FROM NAMED WINDOW ex:history ON LOG ex:log [START 0 END 86400000]
 WHERE {
-  WINDOW ex:hist {
-    ?sensor ex:mean ?mean .
-    ?sensor ex:sigma ?sigma .
-  }
   WINDOW ex:live {
-    ?sensor ex:hasReading ?reading .
+    ?sensor ex:hasValue ?value .
   }
-  ?sensor baseline:mean ?mean .
-  ?sensor baseline:sigma ?sigma .
-  FILTER(janus:is_outlier(?reading, ?mean, ?sigma, 3))
 }
 ```
 
-## Supported Window Types
+- `PREFIX` declarations are optional, but usually make queries readable.
+- `REGISTER RStream <output> AS` is used for a query that emits live results.
+  `IStream` and `DStream` are rejected.
+- A historical-only `SELECT` query may omit `REGISTER`.
+- Each `WINDOW <name> { … }` in the `WHERE` clause must refer to a declared
+  named window.
 
-### Live Sliding Window
+## Window declarations
 
-Use `ON STREAM` with `RANGE` and `STEP`.
+### Fixed historical window
 
-```sparql
-FROM NAMED WINDOW ex:live ON STREAM ex:stream1 [RANGE 5000 STEP 1000]
-```
-
-This becomes part of the generated RSP-QL query.
-
-### Historical Fixed Window
-
-Use `ON LOG` with `START` and `END`.
+Use `ON LOG` with an explicit, non-empty `[START … END …]` interval:
 
 ```sparql
-FROM NAMED WINDOW ex:hist ON LOG ex:store [START 1700000000000 END 1700003600000]
+FROM NAMED WINDOW ex:history ON LOG ex:log [START 1700000000000 END 1700086400000]
 ```
 
-This becomes a one-shot historical SPARQL execution over storage.
+Janus evaluates this window against the segmented historical event log.
 
-### Historical Sliding Window
+### Sliding historical window
 
-Use `ON LOG` with `OFFSET`, `RANGE`, and `STEP`.
+Use `ON LOG` with `OFFSET`, `RANGE`, and `STEP`:
 
 ```sparql
-FROM NAMED WINDOW ex:hist ON LOG ex:store [OFFSET 3600000 RANGE 300000 STEP 300000]
+FROM NAMED WINDOW ex:previousHour ON LOG ex:log [OFFSET 86400000 RANGE 3600000 STEP 30000]
 ```
 
-At live evaluation time `T`, this resolves to:
+At evaluation time `T`, the window is:
 
 ```text
 [T - OFFSET - RANGE, T - OFFSET]
 ```
 
-Example:
+The range must not exceed the offset; Janus rejects a sliding historical
+window that would extend beyond its evaluation time.
 
-```text
-T = 172800000
-OFFSET = 86400000
-RANGE = 60000
+### Sliding live window
 
-=> [86340000, 86400000]
-```
-
-## Baseline Clause
-
-Janus supports an optional clause:
+Use `ON STREAM` with positive `RANGE` and `STEP` values:
 
 ```sparql
-USING BASELINE ex:hist LAST
+FROM NAMED WINDOW ex:live ON STREAM ex:stream [RANGE 60000 STEP 30000]
 ```
 
-or:
+The stream URI identifies the live source; at the HTTP API layer, live
+execution is MQTT-backed. See [the live streaming guide](./LIVE_STREAMING_GUIDE.md)
+for broker and replay setup.
+
+## Hybrid and nested-historical queries
+
+A query may declare both log and stream windows. The parser lowers historical
+work to one or more SPARQL executions and keeps live windows in the RSP-QL
+execution path.
+
+Historical work can also be expressed as a nested `SELECT` inside the outer
+`WHERE` clause:
 
 ```sparql
-USING BASELINE ex:hist AGGREGATE
-```
+PREFIX ex: <http://example.org/>
 
-Semantics:
-
-- the clause must reference a historical window
-- that historical window is used to bootstrap baseline values for the live query
-- `LAST` and `AGGREGATE` control how historical sliding-window results are collapsed before they are exposed to live evaluation
-
-If the clause is absent, the HTTP/API registration-level `baseline_mode` is used as a fallback.
-
-## Query-Defined Baselines
-
-In Janus terminology, `baseline` refers to explicit `DEFINE BASELINE` / `USING BASELINE` syntax.
-Those query-defined baselines are evaluated over a historical `LOG` window and stored as named
-`SELECT`-result snapshots. During live evaluation, Janus resolves the snapshot that matches the
-current evaluation time and joins it into the live query.
-
-Canonical example:
-
-```sparql
-PREFIX : <http://example.org/>
-
-FROM NAMED WINDOW :liveMinute ON STREAM :stream [RANGE 60000 STEP 1000]
-FROM NAMED WINDOW :historyDay ON LOG :stream [START 0 END 86400000]
-
-DEFINE BASELINE :dayBaseline ON WINDOW :historyDay AS
-SELECT ?sensor
-       (AVG(?value) AS ?dayAvgValue)
+REGISTER RStream ex:output AS
+SELECT ?sensor ?value ?historicalAverage
+FROM NAMED WINDOW ex:live ON STREAM ex:stream [RANGE 60000 STEP 30000]
+FROM NAMED WINDOW ex:history ON LOG ex:log [START 0 END 86400000]
 WHERE {
-  ?sensor :hasValue ?value .
-}
-GROUP BY ?sensor
-
-REGISTER RStream :output AS
-USING BASELINE :dayBaseline
-SELECT ?sensor
-       (AVG(?value) AS ?minuteAvgValue)
-       ?dayAvgValue
-       ((AVG(?value) - ?dayAvgValue) AS ?difference)
-WHERE {
-  WINDOW :liveMinute {
-    ?sensor :hasValue ?value .
+  WINDOW ex:live { ?sensor ex:hasValue ?value . }
+  {
+    SELECT ?sensor (AVG(?oldValue) AS ?historicalAverage)
+    WHERE {
+      WINDOW ex:history { ?sensor ex:hasValue ?oldValue . }
+    }
+    GROUP BY ?sensor
   }
-
-  GRAPH :dayBaseline {
-    ?sensor :dayAvgValue ?dayAvgValue .
-  }
-}
-GROUP BY ?sensor ?dayAvgValue
-HAVING(AVG(?value) > ?dayAvgValue)
-```
-
-Semantics:
-
-- `DEFINE BASELINE :dayBaseline ON WINDOW :historyDay AS SELECT ...` defines the historical
-  binding relation used to build baseline snapshots.
-- `USING BASELINE :dayBaseline` marks that baseline as required for live evaluation.
-- `GRAPH :dayBaseline { ... }` remains the compatibility join shape for the live query.
-- baseline variables such as `?dayAvgValue` are then available to the live query in `SELECT`, `GROUP BY`, `HAVING`, and arithmetic expressions.
-
-## Query-Defined Baseline Materialization
-
-Materialization is template-driven rather than inferred from `SELECT` aliases:
-
-- the `GRAPH :baselineName { ... }` block defines the RDF shape that is inserted
-- the baseline query must project every variable used by that template
-- template predicates must be concrete IRIs
-- template subjects must resolve to an IRI or blank node
-
-Example binding:
-
-- `?sensor = :s1`
-- `?dayAvgValue = 42.0`
-
-becomes:
-
-```trig
-GRAPH :dayBaseline {
-  :s1 :dayAvgValue 42.0 .
+  FILTER(?value > ?historicalAverage)
 }
 ```
 
-## What Janus Generates Internally
+Nested historical materialization is restricted to supported historical
+shapes. A nested query that is live-only, or mixes live and historical windows
+inside the same nested subquery, is rejected. Details and limitations are in
+[Nested Historical Subqueries](./NESTED_HISTORICAL_SUBQUERIES.md).
 
-The parser splits the query into:
+## Validation boundaries
 
-- one live RSP-QL query built from live windows
-- one SPARQL query per historical window
-- one SPARQL query per query-defined baseline
+Janus validates the Janus-specific surface before execution. In particular,
+it rejects:
 
-Important detail:
+- undeclared `WINDOW` names;
+- `START`/`END` bounds on a stream window;
+- `RANGE`/`STEP` live bounds on a log window;
+- zero or invalid window sizes and steps;
+- `IStream` or `DStream` registration; and
+- unsupported property paths and `SERVICE` patterns.
 
-- non-window patterns in the `WHERE` clause are preserved in the live query
-- this is what makes joins such as `GRAPH :dayBaseline { ?sensor :dayAvgValue ?dayAvgValue . }`
-  work during live execution
+The parser is not a claim of general SPARQL or RSP-QL equivalence. Use only
+the syntax exercised by the repository's parser and integration tests.
 
-## Baseline Predicates
+## Implementation compatibility features
 
-Legacy `USING BASELINE <window> LAST|AGGREGATE` values are exposed to the live side as static triples under:
+The implementation retains baseline-oriented compatibility paths used by
+some benchmark and API code. They are not part of the public Janus-QL surface
+described above. Their operational constraints are documented separately in
+[Baselines](./BASELINES.md); do not use them as a portability guarantee.
 
-```text
-https://janus.rs/baseline#<variable_name>
-```
+## Related documentation
 
-So a historical binding:
-
-- `?sensor = ex:s1`
-- `?mean = 21.5`
-
-becomes the static triple:
-
-```text
-ex:s1  <https://janus.rs/baseline#mean>  "21.5"
-```
-
-This is why live queries join on `baseline:*` predicates rather than directly reusing historical bindings.
-
-Query-defined baselines use the baseline name as the graph IRI for the evaluation-local join view:
-
-```trig
-GRAPH :dayBaseline {
-  :s1 :dayAvgValue 42.0 .
-}
-```
-
-The live query must therefore join through `GRAPH :dayBaseline { ... }` rather than through `baseline:*` predicates.
-
-## Limitations
-
-- query-defined baselines support `SELECT` snapshots only
-- `CONSTRUCT` baselines are not supported
-- sliding historical baseline `STEP` must match the live `STEP`
-- the `GRAPH` template predicates must be concrete IRIs
-- template variables must be projected by the baseline query
-- template subjects must resolve to an IRI or blank node
-- the current implementation is tested for projected variables, `AVG`, `GROUP BY`, and arithmetic
-  joins in the live query
-
-## Practical Guidance
-
-- Use fixed historical windows when you want one clean baseline snapshot.
-- Use historical sliding windows only when you really need a baseline derived from multiple historical subwindows.
-- Keep historical baseline queries compact. Prefer one row per anchor such as one row per sensor.
+- [Query Execution](./QUERY_EXECUTION.md)
+- [HTTP API](./HTTP_API_CURRENT.md)
+- [Window Types Explained](./WINDOW_TYPES_EXPLAINED.md)
+- [Nested Historical Subqueries](./NESTED_HISTORICAL_SUBQUERIES.md)

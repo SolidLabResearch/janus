@@ -6,6 +6,9 @@ Date: 2026-06-17
 
 Accepted
 
+> Historical design record. The implemented workload has evolved; the current
+> implementation is documented in `docs/benchmarks/citybench_congestion_hybrid_scaling.md`.
+
 ## Context
 
 Janus needs a combined hybrid historical and live query benchmark that scales the historical store size while running both Janus unified and decomposed baseline executions with the same deterministic live stream trace in realtime.

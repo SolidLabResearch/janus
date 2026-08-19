@@ -1,5 +1,9 @@
 # CityBench-Inspired Congestion Hybrid Scaling Benchmark
 
+> Status: implementation-derived benchmark guide. The executable
+> `hybrid_scaling_combined` remains authoritative if this document and an older
+> design decision diverge.
+
 ## 1. Benchmark purpose
 
 `hybrid_scaling_combined` evaluates historical-live RDF stream processing on a deterministic CityBench-inspired congestion workload. The benchmark compares unified Janus execution against a decomposed Oxigraph baseline while scaling the size of the historical RDF event log.

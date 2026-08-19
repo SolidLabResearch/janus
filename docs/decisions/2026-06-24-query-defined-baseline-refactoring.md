@@ -6,6 +6,9 @@ Date: 2026-06-24
 
 Accepted
 
+> Historical compatibility record. It does not expand the public Janus-QL
+> contract; see `docs/JANUSQL.md` for that contract.
+
 ## Context
 
 The benchmark implementation in src/paper_bench/query_defined_baseline.rs is currently a single large file spanning over 2400 lines. It mixes distinct responsibilities:

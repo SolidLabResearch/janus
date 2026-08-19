@@ -1,73 +1,48 @@
 # Janus HTTP API Quickstart
 
-This is the shortest backend validation flow.
-
 ## 1. Start the server
 
 ```bash
-cargo run --bin http_server
+cargo run --bin http_server -- --host 127.0.0.1 --port 8080 --storage-dir ./data/storage
 ```
 
 ## 2. Check health
 
 ```bash
-curl http://localhost:8080/health
-curl http://localhost:8080/ops/status
+curl http://127.0.0.1:8080/health
 ```
 
-## 3. Register a query
+## 3. Register a historical query
 
 ```bash
-curl -X POST http://localhost:8080/api/queries \
-  -H "Content-Type: application/json" \
+curl -X POST http://127.0.0.1:8080/api/queries \
+  -H 'Content-Type: application/json' \
   -d '{
-    "query_id": "test_query",
-    "janusql": "PREFIX ex: <http://example.org/> SELECT ?s ?p ?o FROM NAMED WINDOW ex:w ON LOG ex:graph1 [START 0 END 9999999999999] WHERE { WINDOW ex:w { ?s ?p ?o . } }"
+    "query_id": "historical_q1",
+    "janusql": "PREFIX ex: <http://example.org/> SELECT ?s ?p ?o FROM NAMED WINDOW ex:w ON LOG ex:log [START 1700000000000 END 1700086400000] WHERE { WINDOW ex:w { ?s ?p ?o . } }"
   }'
 ```
 
-## 4. Start the query
+## 4. Start and observe the query
 
 ```bash
-curl -X POST http://localhost:8080/api/queries/test_query/start
+curl -X POST http://127.0.0.1:8080/api/queries/historical_q1/start
+curl http://127.0.0.1:8080/api/queries/historical_q1
 ```
 
-## 5. Connect to the results WebSocket
+Connect a WebSocket client to:
 
 ```text
-ws://localhost:8080/api/queries/test_query/results
+ws://127.0.0.1:8080/api/queries/historical_q1/results
 ```
 
-## 6. Stop and delete the query
+## 5. Stop and delete it
 
 ```bash
-curl -X POST http://localhost:8080/api/queries/test_query/stop
-curl -X DELETE http://localhost:8080/api/queries/test_query
+curl -X POST http://127.0.0.1:8080/api/queries/historical_q1/stop
+curl -X DELETE http://127.0.0.1:8080/api/queries/historical_q1
 ```
 
-## Replay Example
-
-```bash
-curl -X POST http://localhost:8080/api/replay/start \
-  -H "Content-Type: application/json" \
-  -d '{
-    "input_file": "data/sensors.nq",
-    "broker_type": "none",
-    "topics": ["sensors"],
-    "rate_of_publishing": 1000,
-    "loop_file": false,
-    "add_timestamps": true
-  }'
-```
-
-Check replay metrics:
-
-```bash
-curl http://localhost:8080/api/replay/status
-```
-
-## Optional Frontend
-
-For the maintained frontend, use:
-
-- `https://github.com/SolidLabResearch/janus-dashboard`
+For live streams, first start Mosquitto with `docker-compose up -d mosquitto`
+and use the replay endpoint or [stream-bus CLI](./STREAM_BUS_CLI.md). See the
+[HTTP API reference](./HTTP_API_CURRENT.md) for all endpoints.

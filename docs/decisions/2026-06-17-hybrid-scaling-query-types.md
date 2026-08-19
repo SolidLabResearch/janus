@@ -6,6 +6,9 @@ Date: 2026-06-17
 
 Accepted
 
+> Historical design record. Consult the current benchmark implementation before
+> relying on these parameters or query shapes.
+
 ## Context
 
 The hybrid scaling combined benchmark currently runs with a static queried historical window size of 1,000 events. To evaluate different scaling behaviors under various selectivity patterns inside the hybrid live-plus-historical query, the benchmark needs to support multiple query/access patterns: point_lookup, fixed_60s, range_10_percent, range_50_percent, and range_100_percent.

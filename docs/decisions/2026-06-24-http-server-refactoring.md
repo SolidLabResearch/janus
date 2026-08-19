@@ -6,6 +6,9 @@ Date: 2026-06-24
 
 Accepted
 
+> Historical architecture record. The current module layout and API contract
+> are documented in `src/http/` and `docs/HTTP_API_CURRENT.md`.
+
 ## Context
 
 The current implementation of the Janus HTTP server is contained within a single file, src/http/server.rs, which is over 800 lines long. This file handles multiple distinct concerns:

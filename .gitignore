@@ -9,7 +9,6 @@ test_data/
 server.log
 docker/mosquitto/log/
 docker/mosquitto/data/
-data/
 
 # Python
 *.pyc
@@ -47,3 +46,8 @@ experiments/benchmark-results/
 *.png
 *.csv
 *.pdf
+
+# Generated data stays local, except the versioned benchmark-analysis package.
+data/*
+!data/result-analysis/
+!data/result-analysis/**

@@ -1,0 +1,11 @@
+query_raw,query_label,system_raw,system_label,median_peak_rss_mb,median_mean_cpu_percent,n
+point_lookup,Point,janus,Janus,1141.750,12.539,35
+point_lookup,Point,decomposed_oxigraph,Oxigraph,1837.602,20.741,35
+fixed_60s,60s,janus,Janus,1172.047,12.270,35
+fixed_60s,60s,decomposed_oxigraph,Oxigraph,1834.457,20.827,35
+range_10_percent,10%,janus,Janus,1220.305,12.381,35
+range_10_percent,10%,decomposed_oxigraph,Oxigraph,1836.785,20.760,35
+range_50_percent,50%,janus,Janus,1844.750,12.903,35
+range_50_percent,50%,decomposed_oxigraph,Oxigraph,1844.750,20.703,35
+range_100_percent,100%,janus,Janus,1892.352,13.453,35
+range_100_percent,100%,decomposed_oxigraph,Oxigraph,1892.363,21.032,35
