@@ -270,3 +270,59 @@ fn test_shutdown_race_safety() {
         }
     }
 }
+
+#[test]
+fn opening_persisted_segments_without_dictionary_fails() {
+    let temp_dir = TempDir::new().expect("failed to create temp dir");
+    let storage_dir = temp_dir.path().join("storage");
+    let config = StreamingConfig {
+        segment_base_path: storage_dir.to_string_lossy().into_owned(),
+        max_batch_events: 100,
+        max_batch_age_seconds: 60,
+        max_batch_bytes: 1_000_000,
+        sparse_interval: 1,
+        entries_per_index_block: 2,
+    };
+
+    {
+        let storage = StreamingSegmentedStorage::new(config.clone()).unwrap();
+        storage.write_rdf(1_000, "http://a", "http://b", "value", "http://g").unwrap();
+        storage.flush().unwrap();
+    }
+
+    fs::remove_file(storage_dir.join("dictionary.bin")).unwrap();
+    let err = match StreamingSegmentedStorage::new(config) {
+        Ok(_) => panic!("missing dictionary must fail"),
+        Err(err) => err,
+    };
+    assert!(err.to_string().contains("persisted segment data"));
+    assert!(err.to_string().contains("dictionary"));
+}
+
+#[test]
+fn opening_persisted_segments_with_corrupt_dictionary_fails() {
+    let temp_dir = TempDir::new().expect("failed to create temp dir");
+    let storage_dir = temp_dir.path().join("storage");
+    let config = StreamingConfig {
+        segment_base_path: storage_dir.to_string_lossy().into_owned(),
+        max_batch_events: 100,
+        max_batch_age_seconds: 60,
+        max_batch_bytes: 1_000_000,
+        sparse_interval: 1,
+        entries_per_index_block: 2,
+    };
+
+    {
+        let storage = StreamingSegmentedStorage::new(config.clone()).unwrap();
+        storage.write_rdf(1_000, "http://a", "http://b", "value", "http://g").unwrap();
+        storage.flush().unwrap();
+    }
+
+    fs::write(storage_dir.join("dictionary.bin"), b"not a dictionary").unwrap();
+    let err = match StreamingSegmentedStorage::new(config) {
+        Ok(_) => panic!("corrupt dictionary must fail"),
+        Err(err) => err,
+    };
+    assert!(err.to_string().contains("persisted segment data"));
+    assert!(err.to_string().contains("readable dictionary"));
+}

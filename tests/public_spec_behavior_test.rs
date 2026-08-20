@@ -327,7 +327,7 @@ fn spec_hybrid_historical_sliding_query_parses() {
 }
 
 #[test]
-fn spec_historical_sliding_bounds_follow_t_minus_offset_plus_range_formula() {
+fn spec_historical_sliding_bounds_follow_t_minus_offset_minus_range_formula() {
     let window = WindowDefinition {
         window_name: "http://example.org/previousHour".to_string(),
         source_kind: SourceKind::Log,
@@ -341,8 +341,8 @@ fn spec_historical_sliding_bounds_follow_t_minus_offset_plus_range_formula() {
     };
 
     let evaluation_time = 200_000_000;
-    let expected_start = evaluation_time - 86_400_000;
-    let expected_end = expected_start + 3_600_000;
+    let expected_end = evaluation_time - 86_400_000;
+    let expected_start = expected_end - 3_600_000;
 
     assert_eq!(
         window.resolve_historical_bounds(evaluation_time),

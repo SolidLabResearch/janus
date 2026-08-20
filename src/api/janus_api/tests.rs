@@ -718,7 +718,7 @@ fn test_sliding_query_defined_baseline_snapshots_change_with_live_evaluation_tim
         StreamingSegmentedStorage::new(config).expect("Failed to create segmented storage"),
     );
 
-    for (timestamp, value) in [(86_400_002, "10"), (86_460_000, "20")] {
+    for (timestamp, value) in [(86_340_002, "10"), (86_400_000, "20")] {
         storage
             .write_rdf(
                 timestamp,
@@ -730,7 +730,7 @@ fn test_sliding_query_defined_baseline_snapshots_change_with_live_evaluation_tim
             .expect("Failed to write historical RDF event");
     }
     storage.flush().expect("Failed to flush storage");
-    for (timestamp, value) in [(86_460_002, "30"), (86_520_000, "50")] {
+    for (timestamp, value) in [(86_400_002, "30"), (86_460_000, "50")] {
         storage
             .write_rdf(
                 timestamp,
@@ -784,14 +784,14 @@ HAVING(AVG(?value) > ?yesterdayAvgValue)
     let latest_rows = Arc::new(RwLock::new(HashMap::new()));
     assert_eq!(
         storage
-            .query_rdf(86_400_001, 86_460_001)
+            .query_rdf(86_340_001, 86_400_001)
             .expect("first historical range should query")
             .len(),
         2
     );
     assert_eq!(
         storage
-            .query_rdf(86_460_001, 86_520_001)
+            .query_rdf(86_400_001, 86_460_001)
             .expect("second historical range should query")
             .len(),
         2
@@ -910,8 +910,8 @@ HAVING(AVG(?value) > ?yesterdayAvgValue)
     let second_snapshot = baseline_registry
         .get_snapshot("http://example.org/yesterdayBaseline", 172_860_001)
         .expect("expected snapshot at second evaluation time");
-    assert_eq!(first_snapshot.window_start, 86_400_001);
-    assert_eq!(first_snapshot.window_end, 86_460_001);
-    assert_eq!(second_snapshot.window_start, 86_460_001);
-    assert_eq!(second_snapshot.window_end, 86_520_001);
+    assert_eq!(first_snapshot.window_start, 86_340_001);
+    assert_eq!(first_snapshot.window_end, 86_400_001);
+    assert_eq!(second_snapshot.window_start, 86_400_001);
+    assert_eq!(second_snapshot.window_end, 86_460_001);
 }
