@@ -385,7 +385,11 @@ fn sync_tree(root: &Path) -> Result<(), BoxError> {
         let metadata = entry.metadata()?;
         if metadata.is_file() {
             let file = File::open(&path)?;
-            file.sync_all()?;
+            if let Err(err) = file.sync_all() {
+                if err.kind() != std::io::ErrorKind::PermissionDenied {
+                    return Err(err.into());
+                }
+            }
         } else if metadata.is_dir() {
             sync_tree(&path)?;
         }
