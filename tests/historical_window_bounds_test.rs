@@ -31,13 +31,13 @@ fn fixed_window() -> WindowDefinition {
 #[test]
 fn resolves_sliding_historical_bounds_for_first_evaluation() {
     let window = sliding_window();
-    assert_eq!(window.resolve_historical_bounds(172_800_000), Some((86_400_000, 86_460_000)));
+    assert_eq!(window.resolve_historical_bounds(172_800_000), Some((86_340_000, 86_400_000)));
 }
 
 #[test]
 fn resolves_sliding_historical_bounds_for_next_evaluation() {
     let window = sliding_window();
-    assert_eq!(window.resolve_historical_bounds(172_860_000), Some((86_460_000, 86_520_000)));
+    assert_eq!(window.resolve_historical_bounds(172_860_000), Some((86_400_000, 86_460_000)));
 }
 
 #[test]
@@ -45,6 +45,21 @@ fn sliding_historical_bounds_return_none_when_first_window_would_cross_evaluatio
     let mut window = sliding_window();
     window.width = 90_000_000;
     assert_eq!(window.resolve_historical_bounds(172_800_000), None);
+}
+
+#[test]
+fn sliding_historical_bounds_return_none_on_underflow() {
+    let window = sliding_window();
+    assert_eq!(window.resolve_historical_bounds(86_400_000), None);
+}
+
+#[test]
+fn sliding_historical_bounds_have_the_configured_width() {
+    let window = sliding_window();
+    let (start, end) = window.resolve_historical_bounds(172_800_000).unwrap();
+    assert_eq!(end, 172_800_000 - 86_400_000);
+    assert_eq!(start, end - 60_000);
+    assert_eq!(end - start, 60_000);
 }
 
 #[test]

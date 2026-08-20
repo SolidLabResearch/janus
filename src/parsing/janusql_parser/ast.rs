@@ -74,8 +74,9 @@ impl WindowDefinition {
                     return None;
                 }
 
-                let historical_start = evaluation_time.saturating_sub(offset);
-                let historical_end = historical_start.checked_add(range)?;
+                // Historical sliding intervals are [T - OFFSET - RANGE, T - OFFSET].
+                let historical_end = evaluation_time.checked_sub(offset)?;
+                let historical_start = historical_end.checked_sub(range)?;
                 Some((historical_start, historical_end))
             }
         }

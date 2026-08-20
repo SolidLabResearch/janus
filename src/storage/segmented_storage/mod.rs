@@ -35,14 +35,39 @@ impl StreamingSegmentedStorage {
 
         // Load or create dictionary
         let dict_path = std::path::Path::new(&config.segment_base_path).join("dictionary.bin");
+        let has_persisted_segments = std::fs::read_dir(&config.segment_base_path)?.any(|entry| {
+            entry.ok().is_some_and(|entry| {
+                entry.file_type().map(|kind| kind.is_file()).unwrap_or(false)
+                    && entry
+                        .file_name()
+                        .to_str()
+                        .is_some_and(|name| name.starts_with("segment-") && name.ends_with(".log"))
+            })
+        });
         let dictionary = if dict_path.exists() {
             match Dictionary::load_from_file(&dict_path) {
                 Ok(dict) => dict,
                 Err(e) => {
-                    eprintln!("Warning: Failed to load dictionary: {}, creating new one", e);
+                    if has_persisted_segments {
+                        return Err(std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            format!(
+                                "Cannot open persisted segment data without a readable dictionary '{}': {e}",
+                                dict_path.display()
+                            ),
+                        ));
+                    }
                     Dictionary::new()
                 }
             }
+        } else if has_persisted_segments {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!(
+                    "Cannot open persisted segment data because dictionary '{}' is missing",
+                    dict_path.display()
+                ),
+            ));
         } else {
             Dictionary::new()
         };
@@ -158,9 +183,7 @@ impl StreamingSegmentedStorage {
     /// This is useful when you need to ensure data is persisted immediately.
     pub fn flush(&self) -> std::io::Result<()> {
         self.ensure_background_flush_healthy()?;
-        self.flush_batch_buffer_to_segment()?;
-        self.save_dictionary()?;
-        Ok(())
+        self.flush_batch_buffer_to_segment()
     }
 
     /// Shutdown the storage system gracefully, ensuring all data is flushed to disk.

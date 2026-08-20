@@ -77,7 +77,7 @@ fn test_historical_sliding_window_with_real_iris() {
 
     let mut operator = HistoricalSlidingWindowOperator::new(storage.clone(), window_def);
 
-    // Window 1: [now-500, now-300]
+    // Window 1: [now-700, now-500]
     let w1 = operator.next().unwrap();
     assert!(w1.len() >= 2); // At least 2 events (type + value for first sensor)
 
@@ -90,11 +90,11 @@ fn test_historical_sliding_window_with_real_iris() {
         first_event.timestamp
     );
 
-    // Window 2: [now-400, now-200]
+    // Window 2: [now-600, now-400]
     let w2 = operator.next().unwrap();
     assert!(w2.len() >= 2);
 
-    // Window 3: [now-300, now-100]
+    // Window 3: [now-500, now-300]
     let w3 = operator.next().unwrap();
     assert!(w3.len() >= 2);
 }

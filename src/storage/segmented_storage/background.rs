@@ -77,55 +77,26 @@ impl StreamingSegmentedStorage {
             events
         };
 
-        let events_ref = &mut events_to_flush;
         let flush_result = (|| -> std::io::Result<()> {
-            let new_segment = Self::write_segment_files(&config, events_ref)?;
-
-            {
-                let mut segments = segments.write().unwrap();
-                segments.push(new_segment);
-                segments.sort_by_key(|s| s.start_timstamp);
-            }
-
+            // The dictionary must be durable before a segment referencing its IDs is committed.
             let dict_path = std::path::Path::new(&config.segment_base_path).join("dictionary.bin");
             let dict = dictionary.read().unwrap();
             dict.save_to_file(&dict_path)?;
+
+            let new_segment = Self::write_segment_files(&config, &mut events_to_flush)?;
+
+            let mut segments = segments.write().unwrap();
+            segments.push(new_segment);
+            segments.sort_by_key(|s| s.start_timstamp);
 
             Ok(())
         })();
 
         if let Err(err) = flush_result {
-            Self::restore_failed_background_flush(&batch_buffer, &events_to_flush);
+            Self::restore_failed_flush(&batch_buffer, &events_to_flush);
             return Err(err);
         }
 
         Ok(())
-    }
-
-    fn restore_failed_background_flush(batch_buffer: &Arc<RwLock<BatchBuffer>>, events: &[Event]) {
-        if events.is_empty() {
-            return;
-        }
-
-        let mut buffer = batch_buffer.write().unwrap();
-        for event in events.iter().rev().cloned() {
-            buffer.events.push_front(event);
-            buffer.total_bytes += std::mem::size_of::<Event>();
-        }
-
-        let restored_oldest = events.first().map(|event| event.timestamp);
-        let restored_newest = events.last().map(|event| event.timestamp);
-
-        buffer.oldest_timestamp_bound = match (buffer.oldest_timestamp_bound, restored_oldest) {
-            (Some(existing), Some(restored)) => Some(existing.min(restored)),
-            (None, restored) => restored,
-            (existing, None) => existing,
-        };
-
-        buffer.newest_timestamp_bound = match (buffer.newest_timestamp_bound, restored_newest) {
-            (Some(existing), Some(restored)) => Some(existing.max(restored)),
-            (None, restored) => restored,
-            (existing, None) => existing,
-        };
     }
 }

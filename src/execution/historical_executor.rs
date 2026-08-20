@@ -19,7 +19,6 @@ use crate::parsing::janusql_parser::WindowDefinition;
 use crate::querying::oxigraph_adapter::OxigraphAdapter;
 use crate::storage::segmented_storage::StreamingSegmentedStorage;
 use crate::stream::operators::historical_fixed_window::HistoricalFixedWindowOperator;
-use crate::stream::operators::historical_sliding_window::HistoricalSlidingWindowOperator;
 use oxigraph::model::{GraphName, NamedNode, Quad};
 use rsp_rs::QuadContainer;
 use std::collections::{HashMap, HashSet};
@@ -166,23 +165,16 @@ impl HistoricalExecutor {
         window: &WindowDefinition,
         sparql_query: &'a str,
     ) -> impl Iterator<Item = Result<Vec<HashMap<String, String>>, JanusApiError>> + 'a {
-        let offset = window.offset.unwrap_or(0);
-        let width = window.width;
-        let slide = window.slide;
-
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis() as u64;
 
-        let start_time = now.saturating_sub(offset);
-
         SlidingWindowIterator {
             executor: self,
-            current_start: start_time,
-            evaluation_time: now,
-            width,
-            slide,
+            window: window.clone(),
+            current_evaluation_time: now,
+            latest_evaluation_time: now,
             sparql_query: sparql_query.to_string(),
         }
     }
@@ -397,36 +389,29 @@ impl HistoricalExecutor {
         &self,
         window: &WindowDefinition,
     ) -> Result<(u64, u64), JanusApiError> {
-        // For fixed windows: use explicit start/end
-        if let (Some(start), Some(end)) = (window.start, window.end) {
-            return Ok((start, end));
-        }
-
-        // For sliding windows: calculate from offset and width
-        if let Some(offset) = window.offset {
-            let now = std::time::SystemTime::now()
+        let evaluation_time = if window.offset.is_some() {
+            std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map_err(|e| JanusApiError::ExecutionError(format!("System time error: {}", e)))?
-                .as_millis() as u64;
+                .as_millis() as u64
+        } else {
+            window.end.unwrap_or_default()
+        };
 
-            let start = now.saturating_sub(offset);
-            let end = start + window.width;
-            return Ok((start, end));
-        }
-
-        Err(JanusApiError::ExecutionError(
-            "Window definition must have either (start, end) or (offset, width)".to_string(),
-        ))
+        window.resolve_historical_bounds(evaluation_time).ok_or_else(|| {
+            JanusApiError::ExecutionError(
+                "Window definition cannot resolve complete historical bounds".to_string(),
+            )
+        })
     }
 }
 
 /// Iterator for sliding windows that queries storage directly
 struct SlidingWindowIterator<'a> {
     executor: &'a HistoricalExecutor,
-    current_start: u64,
-    evaluation_time: u64,
-    width: u64,
-    slide: u64,
+    window: WindowDefinition,
+    current_evaluation_time: u64,
+    latest_evaluation_time: u64,
     sparql_query: String,
 }
 
@@ -434,10 +419,10 @@ impl<'a> Iterator for SlidingWindowIterator<'a> {
     type Item = Result<Vec<HashMap<String, String>>, JanusApiError>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let window_start = self.current_start;
-        let window_end = window_start.checked_add(self.width)?;
+        let (window_start, window_end) =
+            self.window.resolve_historical_bounds(self.current_evaluation_time)?;
 
-        if window_end > self.evaluation_time {
+        if window_end > self.latest_evaluation_time {
             return None;
         }
 
@@ -453,7 +438,8 @@ impl<'a> Iterator for SlidingWindowIterator<'a> {
         let result = self.executor.execute_sparql_on_events(&events, &self.sparql_query);
 
         // Advance window
-        self.current_start += self.slide;
+        self.current_evaluation_time =
+            self.current_evaluation_time.checked_add(self.window.slide)?;
 
         Some(result)
     }
@@ -557,7 +543,7 @@ mod tests {
             .execute_sliding_windows(&window, "SELECT ?s WHERE { ?s ?p ?o }")
             .collect::<Vec<_>>();
 
-        assert_eq!(results.len(), 4);
+        assert_eq!(results.len(), 6);
         assert!(results.iter().all(|result| result.is_ok()));
     }
 
@@ -586,7 +572,7 @@ mod tests {
             .execute_sliding_windows(&window, "SELECT ?s WHERE { ?s ?p ?o }")
             .collect::<Vec<_>>();
 
-        assert_eq!(results.len(), 2);
+        assert_eq!(results.len(), 3);
         assert!(results.iter().all(|result| result.is_ok()));
     }
 

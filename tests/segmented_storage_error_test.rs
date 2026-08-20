@@ -50,3 +50,32 @@ fn test_background_flush_failure_surfaces_as_storage_error() {
         "unexpected shutdown error: {shutdown_err}"
     );
 }
+
+#[test]
+fn synchronous_flush_does_not_commit_a_segment_when_dictionary_persistence_fails() {
+    let temp_dir = TempDir::new().expect("failed to create temp dir");
+    let storage_dir = temp_dir.path().join("storage");
+    let storage = StreamingSegmentedStorage::new(StreamingConfig {
+        segment_base_path: storage_dir.to_string_lossy().into_owned(),
+        max_batch_events: 100,
+        max_batch_age_seconds: 60,
+        max_batch_bytes: 1024 * 1024,
+        sparse_interval: 1,
+        entries_per_index_block: 2,
+    })
+    .unwrap();
+
+    fs::create_dir(storage_dir.join("dictionary.bin")).unwrap();
+    storage.write_rdf(1_000, "http://a", "http://b", "value", "http://g").unwrap();
+    assert!(storage.flush().is_err());
+    assert!(fs::read_dir(&storage_dir).unwrap().all(|entry| !entry
+        .unwrap()
+        .file_name()
+        .to_string_lossy()
+        .ends_with(".log")));
+    assert_eq!(storage.query(0, 2_000).unwrap().len(), 1);
+
+    fs::remove_dir(storage_dir.join("dictionary.bin")).unwrap();
+    storage.flush().unwrap();
+    assert_eq!(storage.query(0, 2_000).unwrap().len(), 1);
+}
