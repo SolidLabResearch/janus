@@ -327,7 +327,7 @@ fn spec_hybrid_historical_sliding_query_parses() {
 }
 
 #[test]
-fn spec_historical_sliding_bounds_follow_t_minus_offset_plus_range_formula() {
+fn spec_historical_sliding_bounds_follow_offset_then_range_formula() {
     let window = WindowDefinition {
         window_name: "http://example.org/previousHour".to_string(),
         source_kind: SourceKind::Log,
@@ -371,7 +371,9 @@ fn spec_historical_sliding_log_window_rejects_range_greater_than_offset() {
         .parse(&invalid_query)
         .expect_err("historical sliding log window should reject RANGE > OFFSET");
 
-    assert!(err.to_string().contains("first window would extend beyond the evaluation time"));
+    assert!(err
+        .to_string()
+        .contains("the historical window would extend beyond the evaluation time"));
 }
 
 #[test]

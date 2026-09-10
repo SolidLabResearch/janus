@@ -135,7 +135,9 @@ fn test_register_rejects_historical_sliding_window_when_range_exceeds_offset() {
         .register_query("invalid_hist_sliding".into(), janusql)
         .expect_err("historical sliding window should be rejected during registration");
 
-    assert!(err.to_string().contains("first window would extend beyond the evaluation time"));
+    assert!(err
+        .to_string()
+        .contains("the historical window would extend beyond the evaluation time"));
 }
 
 #[test]

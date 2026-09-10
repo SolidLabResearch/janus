@@ -11,6 +11,23 @@ use crate::{
 use super::StreamingSegmentedStorage;
 
 impl StreamingSegmentedStorage {
+    /// Query events in the half-open timestamp interval `[start, end)`.
+    ///
+    /// The underlying storage query API is inclusive at both ends for
+    /// compatibility with fixed historical ranges and point lookups. Historical
+    /// sliding windows use this adapter so their resolved end remains exclusive.
+    pub fn query_half_open(
+        &self,
+        start_timestamp: u64,
+        end_timestamp: u64,
+    ) -> std::io::Result<Vec<Event>> {
+        self.ensure_background_flush_healthy()?;
+        if start_timestamp >= end_timestamp {
+            return Ok(Vec::new());
+        }
+        self.query(start_timestamp, end_timestamp - 1)
+    }
+
     /// Query events within a timestamp range from the storage system but result in encoded Events and not RDFEvents.
     pub fn query(&self, start_timestamp: u64, end_timestamp: u64) -> std::io::Result<Vec<Event>> {
         self.ensure_background_flush_healthy()?;
@@ -50,6 +67,17 @@ impl StreamingSegmentedStorage {
     ) -> std::io::Result<Vec<RDFEvent>> {
         self.ensure_background_flush_healthy()?;
         let encoded_events = self.query(start_timestamp, end_timestamp)?;
+        let dict = self.dictionary.read().unwrap();
+        Ok(encoded_events.into_iter().map(|event| event.decode(&dict)).collect())
+    }
+
+    /// Query RDF events in the half-open timestamp interval `[start, end)`.
+    pub fn query_rdf_half_open(
+        &self,
+        start_timestamp: u64,
+        end_timestamp: u64,
+    ) -> std::io::Result<Vec<RDFEvent>> {
+        let encoded_events = self.query_half_open(start_timestamp, end_timestamp)?;
         let dict = self.dictionary.read().unwrap();
         Ok(encoded_events.into_iter().map(|event| event.decode(&dict)).collect())
     }
@@ -123,7 +151,7 @@ impl StreamingSegmentedStorage {
             let mut buffer = vec![0u8; block_size];
             index_file.read_exact(&mut buffer)?;
 
-            for chunk in buffer.chunks_exact(16) {
+            for chunk in buffer.chunks(16) {
                 let timestamp = u64::from_le_bytes(chunk[0..8].try_into().unwrap());
                 let offset = u64::from_be_bytes(chunk[8..16].try_into().unwrap());
                 sparse_entries.push((timestamp, offset));

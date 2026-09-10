@@ -17,8 +17,10 @@ Evaluates once over a persisted event-log interval. `END` must be later than
 FROM NAMED WINDOW ex:previousHour ON LOG ex:log [OFFSET 86400000 RANGE 3600000 STEP 30000]
 ```
 
-At time `T`, Janus evaluates `[T - OFFSET - RANGE, T - OFFSET]`. The range
-cannot exceed the offset.
+At time `T`, Janus evaluates the half-open interval
+`[T - OFFSET, T - OFFSET + RANGE)`. `OFFSET` determines the historical start
+relative to `T`, and `RANGE` determines the interval duration. The range cannot
+exceed the offset, which keeps the interval end at or before `T`.
 
 ## Live sliding
 

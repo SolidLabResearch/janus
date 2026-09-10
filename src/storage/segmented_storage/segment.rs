@@ -1,6 +1,7 @@
 use std::{
-    io::{BufWriter, Seek, Write},
+    io::{BufWriter, Read, Seek, SeekFrom, Write},
     sync::atomic::{AtomicU64, Ordering},
+    sync::{Arc, RwLock},
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -9,7 +10,7 @@ use crate::{
         encoding::{encode_record, RECORD_SIZE},
         Event,
     },
-    storage::util::{EnhancedSegmentMetadata, IndexBlock, StreamingConfig},
+    storage::util::{BatchBuffer, EnhancedSegmentMetadata, IndexBlock, StreamingConfig},
 };
 
 use super::StreamingSegmentedStorage;
@@ -43,16 +44,48 @@ impl StreamingSegmentedStorage {
             events
         };
 
-        let segment = Self::write_segment_files(&self.config, &mut events_to_flush)?;
+        // The dictionary must be durable before a segment referencing its IDs is committed.
+        let flush_result = (|| -> std::io::Result<()> {
+            self.save_dictionary()?;
+            let segment = Self::write_segment_files(&self.config, &mut events_to_flush)?;
 
-        {
             let mut segments = self.segments.write().unwrap();
             segments.push(segment);
             segments.sort_by_key(|s| s.start_timstamp);
+            Ok(())
+        })();
+
+        if let Err(err) = flush_result {
+            Self::restore_failed_flush(&self.batch_buffer, &events_to_flush);
+            return Err(err);
         }
 
-        self.save_dictionary()?;
         Ok(())
+    }
+
+    pub(super) fn restore_failed_flush(batch_buffer: &Arc<RwLock<BatchBuffer>>, events: &[Event]) {
+        if events.is_empty() {
+            return;
+        }
+
+        let mut buffer = batch_buffer.write().unwrap();
+        for event in events.iter().rev().cloned() {
+            buffer.events.push_front(event);
+            buffer.total_bytes += std::mem::size_of::<Event>();
+        }
+
+        let restored_oldest = events.iter().map(|event| event.timestamp).min();
+        let restored_newest = events.iter().map(|event| event.timestamp).max();
+        buffer.oldest_timestamp_bound = match (buffer.oldest_timestamp_bound, restored_oldest) {
+            (Some(existing), Some(restored)) => Some(existing.min(restored)),
+            (None, restored) => restored,
+            (existing, None) => existing,
+        };
+        buffer.newest_timestamp_bound = match (buffer.newest_timestamp_bound, restored_newest) {
+            (Some(existing), Some(restored)) => Some(existing.max(restored)),
+            (None, restored) => restored,
+            (existing, None) => existing,
+        };
     }
 
     pub(crate) fn write_segment_files(
@@ -222,13 +255,25 @@ impl StreamingSegmentedStorage {
                             let index_path = format!("{}/segment-{}.idx", segment_dir, segment_id);
 
                             if let Ok(_metadata) = fs::metadata(&data_path) {
-                                let (index_directory, start_ts, end_ts, record_count) =
-                                    if fs::metadata(&index_path).is_ok() {
-                                        Self::load_index_directory_from_file(&index_path)
-                                            .unwrap_or_else(|_| (Vec::new(), 0, u64::MAX, 0))
-                                    } else {
-                                        (Vec::new(), 0, u64::MAX, 0)
-                                    };
+                                let (start_ts, end_ts, record_count) =
+                                    Self::load_segment_log_metadata(&data_path)?;
+                                let mut index_directory = if fs::metadata(&index_path).is_ok() {
+                                    Self::load_index_directory_from_file(
+                                        &index_path,
+                                        self.config.entries_per_index_block,
+                                    )?
+                                } else {
+                                    Vec::new()
+                                };
+
+                                for block_index in 0..index_directory.len() {
+                                    index_directory[block_index].max_timestamp =
+                                        if block_index + 1 < index_directory.len() {
+                                            index_directory[block_index + 1].min_timestamp
+                                        } else {
+                                            end_ts
+                                        };
+                                }
 
                                 let segment = EnhancedSegmentMetadata {
                                     start_timstamp: start_ts,
@@ -256,50 +301,72 @@ impl StreamingSegmentedStorage {
         Ok(())
     }
 
+    fn load_segment_log_metadata(data_path: &str) -> std::io::Result<(u64, u64, u64)> {
+        let mut file = std::fs::File::open(data_path)?;
+        let byte_len = file.metadata()?.len();
+        if byte_len == 0 || byte_len % RECORD_SIZE as u64 != 0 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("Segment log '{data_path}' is empty or truncated"),
+            ));
+        }
+
+        let record_count = byte_len / RECORD_SIZE as u64;
+        let mut record = [0u8; RECORD_SIZE];
+        file.read_exact(&mut record)?;
+        let (start_timestamp, ..) = crate::core::encoding::decode_record(&record);
+        file.seek(SeekFrom::Start((record_count - 1) * RECORD_SIZE as u64))?;
+        file.read_exact(&mut record)?;
+        let (end_timestamp, ..) = crate::core::encoding::decode_record(&record);
+        Ok((start_timestamp, end_timestamp, record_count))
+    }
+
     pub(super) fn load_index_directory_from_file(
         index_path: &str,
-    ) -> std::io::Result<(Vec<IndexBlock>, u64, u64, u64)> {
-        use std::io::Read;
-
+        entries_per_index_block: usize,
+    ) -> std::io::Result<Vec<IndexBlock>> {
+        const INDEX_ENTRY_SIZE: usize = 16;
+        if entries_per_index_block == 0 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "entries_per_index_block must be greater than zero",
+            ));
+        }
         let mut file = std::fs::File::open(index_path)?;
         let mut buffer = Vec::new();
         file.read_to_end(&mut buffer)?;
 
         if buffer.is_empty() {
-            return Ok((Vec::new(), 0, u64::MAX, 0));
+            return Ok(Vec::new());
+        }
+        if buffer.len() % INDEX_ENTRY_SIZE != 0 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("Sparse index '{index_path}' is truncated"),
+            ));
         }
 
         let mut index_directory = Vec::new();
         let mut file_offset = 0u64;
-        let mut global_min_ts = u64::MAX;
-        let mut global_max_ts = 0u64;
-        let mut total_records = 0u64;
-
-        let entries_per_block = 1000;
         let mut current_block_start = 0;
 
         while current_block_start < buffer.len() {
-            let block_size =
-                std::cmp::min(entries_per_block * 16, buffer.len() - current_block_start);
+            let block_size = std::cmp::min(
+                entries_per_index_block * INDEX_ENTRY_SIZE,
+                buffer.len() - current_block_start,
+            );
             let block_end = current_block_start + block_size;
             let block_entries = block_end - current_block_start;
-            let entry_count = (block_entries / 16) as u32;
-
-            if entry_count == 0 {
-                break;
-            }
+            let entry_count = (block_entries / INDEX_ENTRY_SIZE) as u32;
 
             let first_ts = u64::from_le_bytes(
                 buffer[current_block_start..current_block_start + 8].try_into().unwrap(),
             );
-            let last_entry_start = current_block_start + ((entry_count - 1) as usize * 16);
+            let last_entry_start =
+                current_block_start + ((entry_count - 1) as usize * INDEX_ENTRY_SIZE);
             let last_ts = u64::from_le_bytes(
                 buffer[last_entry_start..last_entry_start + 8].try_into().unwrap(),
             );
-
-            global_min_ts = global_min_ts.min(first_ts);
-            global_max_ts = global_max_ts.max(last_ts);
-            total_records += entry_count as u64;
 
             index_directory.push(IndexBlock {
                 min_timestamp: first_ts,
@@ -312,6 +379,50 @@ impl StreamingSegmentedStorage {
             current_block_start = block_end;
         }
 
-        Ok((index_directory, global_min_ts, global_max_ts, total_records))
+        Ok(index_directory)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    #[test]
+    fn recovery_uses_log_metadata_and_configured_index_block_size() {
+        let temp_dir = TempDir::new().unwrap();
+        let config = StreamingConfig {
+            segment_base_path: temp_dir.path().to_string_lossy().into_owned(),
+            max_batch_events: 100,
+            max_batch_age_seconds: 60,
+            max_batch_bytes: 1_000_000,
+            sparse_interval: 2,
+            entries_per_index_block: 2,
+        };
+
+        {
+            let storage = StreamingSegmentedStorage::new(config.clone()).unwrap();
+            for timestamp in (10..=70).step_by(10) {
+                storage
+                    .write(Event { timestamp, subject: 0, predicate: 0, object: 0, graph: 0 })
+                    .unwrap();
+            }
+            storage.flush().unwrap();
+        }
+
+        let storage = StreamingSegmentedStorage::new(config).unwrap();
+        let segments = storage.segments.read().unwrap();
+        assert_eq!(segments.len(), 1);
+        let segment = &segments[0];
+        assert_eq!(segment.record_count, 7);
+        assert_eq!(segment.start_timstamp, 10);
+        assert_eq!(segment.end_timestamp, 70);
+        assert_eq!(segment.index_directory.len(), 2);
+        assert_eq!(segment.index_directory.last().unwrap().max_timestamp, 70);
+        drop(segments);
+
+        let tail = storage.query(70, 70).unwrap();
+        assert_eq!(tail.len(), 1);
+        assert_eq!(tail[0].timestamp, 70);
     }
 }

@@ -784,14 +784,14 @@ HAVING(AVG(?value) > ?yesterdayAvgValue)
     let latest_rows = Arc::new(RwLock::new(HashMap::new()));
     assert_eq!(
         storage
-            .query_rdf(86_400_001, 86_460_001)
+            .query_rdf_half_open(86_400_001, 86_460_001)
             .expect("first historical range should query")
             .len(),
         2
     );
     assert_eq!(
         storage
-            .query_rdf(86_460_001, 86_520_001)
+            .query_rdf_half_open(86_460_001, 86_520_001)
             .expect("second historical range should query")
             .len(),
         2

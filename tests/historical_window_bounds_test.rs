@@ -1,4 +1,7 @@
 use janus::parsing::janusql_parser::{SourceKind, WindowDefinition, WindowType};
+use janus::storage::segmented_storage::StreamingSegmentedStorage;
+use janus::storage::util::StreamingConfig;
+use tempfile::TempDir;
 
 fn sliding_window() -> WindowDefinition {
     WindowDefinition {
@@ -29,7 +32,7 @@ fn fixed_window() -> WindowDefinition {
 }
 
 #[test]
-fn resolves_sliding_historical_bounds_for_first_evaluation() {
+fn resolves_sliding_historical_bounds_with_range_less_than_offset() {
     let window = sliding_window();
     assert_eq!(window.resolve_historical_bounds(172_800_000), Some((86_400_000, 86_460_000)));
 }
@@ -41,10 +44,68 @@ fn resolves_sliding_historical_bounds_for_next_evaluation() {
 }
 
 #[test]
-fn sliding_historical_bounds_return_none_when_first_window_would_cross_evaluation_time() {
+fn sliding_historical_bounds_reject_range_greater_than_offset() {
     let mut window = sliding_window();
-    window.width = 90_000_000;
+    window.width = 86_400_001;
     assert_eq!(window.resolve_historical_bounds(172_800_000), None);
+}
+
+#[test]
+fn sliding_historical_bounds_return_none_when_evaluation_precedes_offset() {
+    let window = sliding_window();
+    assert_eq!(window.resolve_historical_bounds(86_399_999), None);
+}
+
+#[test]
+fn sliding_historical_bounds_have_the_configured_width() {
+    let window = sliding_window();
+    let (start, end) = window.resolve_historical_bounds(172_800_000).unwrap();
+    assert_eq!(start, 172_800_000 - 86_400_000);
+    assert_eq!(end, start + 60_000);
+    assert_eq!(end - start, 60_000);
+}
+
+#[test]
+fn sliding_historical_bounds_end_at_evaluation_time_when_range_equals_offset() {
+    let mut window = sliding_window();
+    window.width = 86_400_000;
+
+    assert_eq!(window.resolve_historical_bounds(172_800_000), Some((86_400_000, 172_800_000)));
+}
+
+#[test]
+fn sliding_historical_storage_query_is_half_open() {
+    let temp_dir = TempDir::new().expect("failed to create temporary storage directory");
+    let storage = StreamingSegmentedStorage::new(StreamingConfig {
+        segment_base_path: temp_dir.path().to_string_lossy().into_owned(),
+        ..StreamingConfig::default()
+    })
+    .expect("failed to create storage");
+
+    for timestamp in [100, 150] {
+        storage
+            .write_rdf(
+                timestamp,
+                "http://example.org/sensor",
+                "http://example.org/value",
+                &timestamp.to_string(),
+                "http://example.org/graph",
+            )
+            .expect("failed to write event");
+    }
+    storage.flush().expect("failed to flush storage");
+
+    let mut window = sliding_window();
+    window.width = 50;
+    window.offset = Some(100);
+    let (start, end) = window.resolve_historical_bounds(200).expect("bounds should resolve");
+    assert_eq!((start, end), (100, 150));
+
+    let events = storage
+        .query_rdf_half_open(start, end)
+        .expect("half-open historical query should succeed");
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].timestamp, start);
 }
 
 #[test]
