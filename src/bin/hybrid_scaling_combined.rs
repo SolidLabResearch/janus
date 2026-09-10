@@ -14,6 +14,7 @@ use janus::paper_bench::query_defined_baseline::rdf::{
 };
 use janus::parsing::janusql_parser::{
     BaselineDefinition, BaselineGraphTemplate, JanusQLParser, ParsedJanusQuery, WindowDefinition,
+    WindowType,
 };
 use janus::storage::segmented_storage::StreamingSegmentedStorage;
 use janus::storage::util::StreamingConfig;
@@ -884,7 +885,11 @@ fn execute_lowered_historical_subquery(
         let (start, end) = window.resolve_historical_bounds(evaluation_time).ok_or_else(|| {
             format!("failed to resolve historical bounds for window '{}'", window.window_name)
         })?;
-        historical_events.extend(storage.query_rdf(start, end)?);
+        historical_events.extend(if window.window_type == WindowType::HistoricalSliding {
+            storage.query_rdf_half_open(start, end)?
+        } else {
+            storage.query_rdf(start, end)?
+        });
     }
 
     Ok(build_historical_baseline_bindings_from_events(&historical_events))

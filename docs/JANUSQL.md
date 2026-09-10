@@ -54,11 +54,13 @@ FROM NAMED WINDOW ex:previousHour ON LOG ex:log [OFFSET 86400000 RANGE 3600000 S
 At evaluation time `T`, the window is:
 
 ```text
-[T - OFFSET - RANGE, T - OFFSET]
+[T - OFFSET, T - OFFSET + RANGE)
 ```
 
-The range must not exceed the offset; Janus rejects a sliding historical
-window that would extend beyond its evaluation time.
+`OFFSET` determines how far before `T` the historical window starts, and
+`RANGE` determines its duration. The range must not exceed the offset; Janus
+rejects a sliding historical window that would extend beyond its evaluation
+time.
 
 ### Sliding live window
 

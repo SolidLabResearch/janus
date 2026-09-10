@@ -11,7 +11,7 @@ use std::sync::Arc;
 use support::{populate_storage, recent_base_timestamp, unique_config, GRAPH_URI};
 
 // Window config: OFFSET=10_000ms, RANGE=2_000ms, SLIDE=1_000ms
-// SlidingWindowIterator scans [now-10000, now] with 8 overlapping windows.
+// SlidingWindowIterator covers [now-10000, now) with 9 overlapping windows.
 // Data is written at [now-8000, now-2000] — solidly within the scan range.
 const OFFSET_MS: u64 = 10_000;
 const RANGE_MS: u64 = 2_000;

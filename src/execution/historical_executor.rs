@@ -102,6 +102,24 @@ impl HistoricalExecutor {
         self.execute_sparql_on_events(&events, sparql_query)
     }
 
+    /// Execute a query over an explicitly supplied half-open historical range.
+    ///
+    /// Fixed historical ranges retain the storage API's inclusive end behavior;
+    /// this variant is for resolved sliding-window bounds.
+    pub fn execute_window_bounds_half_open(
+        &self,
+        start: u64,
+        end: u64,
+        sparql_query: &str,
+    ) -> Result<Vec<HashMap<String, String>>, JanusApiError> {
+        let events = self
+            .storage
+            .query_half_open(start, end)
+            .map_err(|e| JanusApiError::StorageError(format!("Failed to query storage: {}", e)))?;
+
+        self.execute_sparql_on_events(&events, sparql_query)
+    }
+
     /// Execute one historical materialized result over one or more historical windows by
     /// loading each window into a synthetic named graph keyed by the JanusQL window name.
     pub fn execute_materialized_historical_subquery(
@@ -121,9 +139,21 @@ impl HistoricalExecutor {
                         window.window_name
                     ))
                 })?;
-            let events = self.storage.query(start, end).map_err(|e| {
-                JanusApiError::StorageError(format!("Failed to query storage: {}", e))
-            })?;
+            let events = match window.window_type {
+                crate::parsing::janusql_parser::WindowType::HistoricalSliding => {
+                    self.storage.query_half_open(start, end)
+                }
+                crate::parsing::janusql_parser::WindowType::HistoricalFixed => {
+                    self.storage.query(start, end)
+                }
+                crate::parsing::janusql_parser::WindowType::Live => {
+                    return Err(JanusApiError::ExecutionError(format!(
+                        "Window '{}' is not historical",
+                        window.window_name
+                    )))
+                }
+            }
+            .map_err(|e| JanusApiError::StorageError(format!("Failed to query storage: {}", e)))?;
             timestamps.extend(events.iter().map(|event| event.timestamp));
             let rdf_events = self.decode_events(&events)?;
             quads.extend(
@@ -427,7 +457,7 @@ impl<'a> Iterator for SlidingWindowIterator<'a> {
         }
 
         // Query storage
-        let events = match self.executor.storage.query(window_start, window_end) {
+        let events = match self.executor.storage.query_half_open(window_start, window_end) {
             Ok(events) => events,
             Err(e) => {
                 return Some(Err(JanusApiError::StorageError(format!("Query failed: {}", e))))
@@ -543,7 +573,7 @@ mod tests {
             .execute_sliding_windows(&window, "SELECT ?s WHERE { ?s ?p ?o }")
             .collect::<Vec<_>>();
 
-        assert_eq!(results.len(), 6);
+        assert_eq!(results.len(), 4);
         assert!(results.iter().all(|result| result.is_ok()));
     }
 
@@ -572,7 +602,7 @@ mod tests {
             .execute_sliding_windows(&window, "SELECT ?s WHERE { ?s ?p ?o }")
             .collect::<Vec<_>>();
 
-        assert_eq!(results.len(), 3);
+        assert_eq!(results.len(), 2);
         assert!(results.iter().all(|result| result.is_ok()));
     }
 

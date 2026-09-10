@@ -45,7 +45,7 @@ impl Iterator for HistoricalSlidingWindowOperator {
             return None;
         }
 
-        let events_result = self.storage.query(window_start, window_end);
+        let events_result = self.storage.query_half_open(window_start, window_end);
 
         match events_result {
             Ok(events) => {

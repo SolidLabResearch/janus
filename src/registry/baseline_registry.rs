@@ -73,8 +73,8 @@ mod tests {
             baseline_id: "http://example.org/yesterdayBaseline".to_string(),
             valid_at,
             source_window: "http://example.org/sameMinuteYesterday".to_string(),
-            window_start: 86_340_000,
-            window_end: 86_400_000,
+            window_start: 86_400_000,
+            window_end: 86_460_000,
             variables: vec!["?sensor".to_string(), "?yesterdayAvgValue".to_string()],
             rows: vec![HashMap::from([
                 ("sensor".to_string(), "http://example.org/sensor1".to_string()),

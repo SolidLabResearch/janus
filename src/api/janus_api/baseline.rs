@@ -253,11 +253,19 @@ pub(crate) fn load_or_compute_baseline_snapshot(
                         definition.name, source_window.window_name
                     ))
                 })?;
-            executor.execute_window_bounds(
-                window_start,
-                window_end,
-                &generated_query.sparql_query,
-            )?
+            if source_window.window_type == WindowType::HistoricalSliding {
+                executor.execute_window_bounds_half_open(
+                    window_start,
+                    window_end,
+                    &generated_query.sparql_query,
+                )?
+            } else {
+                executor.execute_window_bounds(
+                    window_start,
+                    window_end,
+                    &generated_query.sparql_query,
+                )?
+            }
         }
         _ => executor.execute_materialized_historical_subquery(
             &source_windows,

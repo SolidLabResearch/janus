@@ -487,7 +487,9 @@ fn test_sliding_historical_log_window_rejects_range_greater_than_offset() {
     "#;
 
     let err = parser.parse(query).expect_err("range greater than offset should be rejected");
-    assert!(err.to_string().contains("first window would extend beyond the evaluation time"));
+    assert!(err
+        .to_string()
+        .contains("the historical window would extend beyond the evaluation time"));
 }
 
 #[test]

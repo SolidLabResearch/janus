@@ -346,7 +346,7 @@ impl JanusQLParser {
                     })?;
                     if window.width > offset {
                         return Err(self.parse_error(format!(
-                            "Historical sliding window '{}' has RANGE {} greater than OFFSET {}; the first window would extend beyond the evaluation time",
+                            "Historical sliding window '{}' has RANGE {} greater than OFFSET {}; the historical window would extend beyond the evaluation time",
                             window.window_name, window.width, offset
                         )));
                     }
