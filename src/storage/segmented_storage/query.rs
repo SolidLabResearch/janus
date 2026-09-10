@@ -151,7 +151,7 @@ impl StreamingSegmentedStorage {
             let mut buffer = vec![0u8; block_size];
             index_file.read_exact(&mut buffer)?;
 
-            for chunk in buffer.chunks_exact(16) {
+            for chunk in buffer.chunks(16) {
                 let timestamp = u64::from_le_bytes(chunk[0..8].try_into().unwrap());
                 let offset = u64::from_be_bytes(chunk[8..16].try_into().unwrap());
                 sparse_entries.push((timestamp, offset));

@@ -36,7 +36,7 @@ impl StreamingSegmentedStorage {
         // Load or create dictionary
         let dict_path = std::path::Path::new(&config.segment_base_path).join("dictionary.bin");
         let has_persisted_segments = std::fs::read_dir(&config.segment_base_path)?.any(|entry| {
-            entry.ok().is_some_and(|entry| {
+            entry.is_ok_and(|entry| {
                 entry.file_type().map(|kind| kind.is_file()).unwrap_or(false)
                     && entry
                         .file_name()
