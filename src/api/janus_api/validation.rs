@@ -9,7 +9,7 @@ use std::collections::HashSet;
 pub(crate) fn validate_query_defined_baseline_access(
     parsed: &ParsedJanusQuery,
 ) -> Result<(), JanusApiError> {
-    for baseline_use in &parsed.ast.baseline_uses {
+    for baseline_use in &parsed.lowered.baseline_uses {
         let template = parsed
             .baseline_graph_templates
             .iter()
@@ -21,7 +21,7 @@ pub(crate) fn validate_query_defined_baseline_access(
                 ))
             })?;
         let definition = parsed
-            .ast
+            .lowered
             .baseline_definitions
             .iter()
             .find(|definition| definition.name == baseline_use.name)
@@ -52,7 +52,7 @@ pub(crate) fn validate_query_defined_baseline_step_alignment(
         ));
     }
 
-    for definition in &parsed.ast.baseline_definitions {
+    for definition in &parsed.lowered.baseline_definitions {
         for source_window_name in &definition.source_windows {
             let Some(source_window) = parsed
                 .historical_windows

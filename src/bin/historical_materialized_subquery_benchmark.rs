@@ -139,7 +139,7 @@ fn execute_generated_materialization(
     parsed: &ParsedJanusQuery,
 ) -> Result<Vec<std::collections::HashMap<String, String>>, Box<dyn std::error::Error>> {
     let definition = parsed
-        .ast
+        .lowered
         .baseline_definitions
         .first()
         .ok_or("expected one baseline definition")?;

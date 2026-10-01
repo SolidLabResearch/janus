@@ -25,7 +25,7 @@ pub fn materialize_query_defined_baseline_quads(
     bindings: &[HashMap<String, String>],
 ) -> Result<Vec<Quad>, Box<dyn std::error::Error>> {
     let definition = parsed
-        .ast
+        .lowered
         .baseline_definitions
         .iter()
         .find(|definition| definition.name == BASELINE_QUERY_NAME)

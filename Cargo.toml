@@ -28,6 +28,7 @@ futures-util = "0.3"
 sha2 = "0.10"
 plotters = "0.3.7"
 sysinfo = "0.31.4"
+janusql-parser = { path = "../janusql-parser/crates/janusql-parser" }
 
 [lib]
 name = "janus"

@@ -1,7 +1,7 @@
 use std::{
     collections::VecDeque,
     sync::{Arc, Mutex, RwLock},
-    thread::JoinHandle,
+    thread::JoinHandle, time::Duration,
 };
 
 use crate::{
@@ -15,6 +15,46 @@ use crate::{
 mod background;
 mod query;
 mod segment;
+
+/// Actual work performed by a storage access path.
+///
+/// `records_examined` is the number of fixed-size event records decoded and
+/// inspected by storage, `records_matched` is the subset satisfying its
+/// timestamp predicate (and subject predicate for subject-aware access), and
+/// `records_returned` is the RDF-row cardinality returned by storage.  These
+/// are deliberately distinct from any later aggregate or operator output.
+/// `segments_touched` counts `.log` files from which at least one record was
+/// read, never merely candidate segments. `index_entries_examined` counts
+/// `.sidx` entries actually inspected by the lookup algorithm.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct AccessMetrics {
+    pub records_examined: u64,
+    pub records_matched: u64,
+    pub records_returned: u64,
+    pub index_entries_examined: u64,
+    pub index_seek_count: u64,
+    pub log_seek_count: u64,
+    /// Exclusive `.sidx` lookup time and exclusive selected-log read/decode time.
+    pub index_lookup: Duration,
+    pub log_read_decode: Duration,
+    pub segments_touched: u64,
+    /// True only when every queried persisted segment used a valid `.sidx`.
+    pub subject_index_used: bool,
+}
+
+/// Explicit lookup algorithms over the unchanged sorted `.sidx` format.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SubjectAccessMode { Linear, Binary }
+
+/// Byte-accurate persisted storage accounting; see
+/// [`StreamingSegmentedStorage::storage_size_accounting`].
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct StorageSizeAccounting {
+    pub base_storage_bytes: u64,
+    pub subject_index_bytes: u64,
+    pub total_storage_bytes: u64,
+    pub index_entry_count: u64,
+}
 
 /// Struct for the Implementation of the Segmented Storage of RDF Streams.
 pub struct StreamingSegmentedStorage {
@@ -124,6 +164,33 @@ impl StreamingSegmentedStorage {
     /// Return the most recent background flush error, if one has occurred.
     pub fn background_flush_error(&self) -> Option<String> {
         self.background_flush_error.lock().unwrap().clone()
+    }
+
+    /// Exact on-disk storage accounting. Base storage is `dictionary.bin`,
+    /// segment `.log` files and ordinary `.idx` files; subject indexes are
+    /// `.sidx` files only.
+    pub fn storage_size_accounting(&self) -> std::io::Result<StorageSizeAccounting> {
+        let mut sizes = StorageSizeAccounting::default();
+        for entry in std::fs::read_dir(&self.config.segment_base_path)? {
+            let entry = entry?;
+            if !entry.file_type()?.is_file() {
+                continue;
+            }
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            let bytes = entry.metadata()?.len();
+            if name == "dictionary.bin"
+                || (name.starts_with("segment-")
+                    && (name.ends_with(".log") || name.ends_with(".idx")))
+            {
+                sizes.base_storage_bytes += bytes;
+            } else if name.starts_with("segment-") && name.ends_with(".sidx") {
+                sizes.subject_index_bytes += bytes;
+                sizes.index_entry_count += bytes / 12;
+            }
+        }
+        sizes.total_storage_bytes = sizes.base_storage_bytes + sizes.subject_index_bytes;
+        Ok(sizes)
     }
 
     pub(super) fn ensure_background_flush_healthy(&self) -> std::io::Result<()> {

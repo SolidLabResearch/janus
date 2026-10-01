@@ -841,7 +841,7 @@ fn find_first_baseline_definition(
     parsed: &ParsedJanusQuery,
 ) -> Result<(&BaselineDefinition, &BaselineGraphTemplate), Box<dyn std::error::Error>> {
     let definition = parsed
-        .ast
+        .lowered
         .baseline_definitions
         .first()
         .ok_or("missing lowered historical subquery definition")?;

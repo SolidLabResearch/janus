@@ -267,6 +267,17 @@ pub struct WhereWindowClause {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+/// One top-level group graph pattern participating in a SPARQL `UNION`.
+///
+/// The body excludes the group's outer braces.  Window blocks remain structured
+/// separately so consumers can preserve the branch boundary while resolving
+/// each named window.
+pub struct UnionBranch {
+    pub body: String,
+    pub where_windows: Vec<WhereWindowClause>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum GraphTermTemplate {
     Variable(String),
     Iri(String),
@@ -289,8 +300,10 @@ pub struct BaselineGraphTemplate {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-/// Abstract syntax tree for a JanusQL query.
-pub struct JanusQueryAst {
+/// Janus execution-lowering input and compatibility metadata.
+///
+/// Core syntax is represented exclusively by `janusql_parser::JanusQueryAst`.
+pub struct JanusLoweredQuery {
     pub prefixes: Vec<PrefixDeclaration>,
     pub register: Option<RegisterClause>,
     pub baseline: Option<BaselineClause>,
@@ -300,17 +313,20 @@ pub struct JanusQueryAst {
     pub windows: Vec<WindowClause>,
     pub where_clause: String,
     pub where_windows: Vec<WhereWindowClause>,
+    pub union_branches: Vec<UnionBranch>,
     pub nested_subqueries: Vec<NestedSubquery>,
     pub baseline_graph_templates: Vec<BaselineGraphTemplate>,
     pub group_by_clause: Option<String>,
     pub having_clause: Option<String>,
 }
 
-/// Parsed JanusQL query structure containing all components extracted from the query.
+/// Engine-specific lowering of a standalone Core `JanusQueryAst`.
 #[derive(Debug, Clone)]
 pub struct ParsedJanusQuery {
-    /// Structured AST representation of the parsed JanusQL query.
-    pub ast: JanusQueryAst,
+    /// Canonical syntax AST produced by the standalone parser.
+    pub ast: janusql_parser::JanusQueryAst,
+    /// Janus-only generation, planning, and legacy compatibility metadata.
+    pub lowered: JanusLoweredQuery,
     /// Optional baseline clause selecting a historical window and bootstrap mode.
     pub baseline: Option<BaselineClause>,
     /// R2S operator if present

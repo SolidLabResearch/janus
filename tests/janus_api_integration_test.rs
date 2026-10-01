@@ -3,7 +3,7 @@
 //! Tests the complete flow of registering and executing JanusQL queries
 //! with both historical and live processing.
 
-use janus::api::janus_api::{ExecutionStatus, JanusApi, ResultSource};
+use janus::api::janus_api::{ExecutionStatus, JanusApi, JanusApiError, ResultSource};
 use janus::parsing::janusql_parser::JanusQLParser;
 use janus::registry::query_registry::QueryRegistry;
 use janus::storage::segmented_storage::StreamingSegmentedStorage;
@@ -135,9 +135,8 @@ fn test_register_rejects_historical_sliding_window_when_range_exceeds_offset() {
         .register_query("invalid_hist_sliding".into(), janusql)
         .expect_err("historical sliding window should be rejected during registration");
 
-    assert!(err
-        .to_string()
-        .contains("the historical window would extend beyond the evaluation time"));
+    assert!(matches!(&err, JanusApiError::ParseError(_)), "{err}");
+    assert!(err.to_string().contains("historical sliding RANGE must not exceed OFFSET"));
 }
 
 #[test]
@@ -168,7 +167,8 @@ fn test_register_rejects_historical_start_end_on_stream() {
         .register_query("invalid_hist_stream".into(), janusql)
         .expect_err("historical START/END on STREAM should be rejected during registration");
 
-    assert!(err.to_string().contains("Historical START/END windows must use ON LOG"));
+    assert!(matches!(&err, JanusApiError::ParseError(_)), "{err}");
+    assert!(err.to_string().contains("historical START/END windows must use ON LOG"));
 }
 
 #[test]
@@ -200,7 +200,8 @@ fn test_register_rejects_live_range_step_on_log() {
         .register_query("invalid_live_log".into(), janusql)
         .expect_err("live RANGE/STEP on LOG should be rejected during registration");
 
-    assert!(err.to_string().contains("Live RANGE/STEP windows must use ON STREAM"));
+    assert!(matches!(&err, JanusApiError::ParseError(_)), "{err}");
+    assert!(err.to_string().contains("live RANGE/STEP windows must use ON STREAM"));
 }
 
 #[test]
@@ -818,8 +819,8 @@ HAVING(AVG(?value) > ?dayAvgValue)
     assert!(metadata.parsed.generated_baseline_queries[0]
         .sparql_query
         .contains("GRAPH ?__janus_log_graph"));
-    assert_eq!(metadata.parsed.ast.baseline_uses.len(), 1);
-    assert_eq!(metadata.parsed.ast.baseline_uses[0].name, "http://example.org/dayBaseline");
+    assert_eq!(metadata.parsed.lowered.baseline_uses.len(), 1);
+    assert_eq!(metadata.parsed.lowered.baseline_uses[0].name, "http://example.org/dayBaseline");
     assert!(metadata.parsed.select_clause.contains("?difference"));
     assert!(!metadata.parsed.where_clause.contains("DEFINE BASELINE"));
     assert!(metadata.parsed.where_clause.contains("GRAPH ex:dayBaseline"));
@@ -963,8 +964,8 @@ GROUP BY ?sensor ?dayAvgValue
 
     assert_eq!(metadata.parsed.historical_materialized_subqueries.len(), 1);
     assert_eq!(metadata.parsed.planned_subqueries.len(), 1);
-    assert_eq!(metadata.parsed.ast.baseline_definitions.len(), 1);
-    assert_eq!(metadata.parsed.ast.baseline_uses.len(), 1);
+    assert_eq!(metadata.parsed.lowered.baseline_definitions.len(), 1);
+    assert_eq!(metadata.parsed.lowered.baseline_uses.len(), 1);
     assert_eq!(metadata.parsed.planning_statistics.historical_materialized_subqueries, 1);
     assert!(metadata
         .parsed

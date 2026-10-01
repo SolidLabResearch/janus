@@ -223,9 +223,9 @@ fn spec_canonical_live_historical_nested_query_parses() {
     assert_eq!(parsed.live_windows.len(), 1);
     assert_eq!(parsed.historical_windows.len(), 1);
     assert_eq!(parsed.historical_materialized_subqueries.len(), 1);
-    assert_eq!(parsed.ast.nested_subqueries.len(), 1);
-    assert_eq!(parsed.ast.baseline_definitions.len(), 1);
-    assert_eq!(parsed.ast.baseline_uses.len(), 1);
+    assert_eq!(parsed.lowered.nested_subqueries.len(), 1);
+    assert_eq!(parsed.lowered.baseline_definitions.len(), 1);
+    assert_eq!(parsed.lowered.baseline_uses.len(), 1);
 }
 
 #[test]
@@ -373,7 +373,7 @@ fn spec_historical_sliding_log_window_rejects_range_greater_than_offset() {
 
     assert!(err
         .to_string()
-        .contains("the historical window would extend beyond the evaluation time"));
+        .contains("historical sliding RANGE must not exceed OFFSET"));
 }
 
 #[test]
@@ -384,7 +384,7 @@ fn spec_invalid_undeclared_window_is_rejected() {
         .parse(SPEC_INVALID_UNDECLARED_WINDOW_QUERY)
         .expect_err("undeclared WINDOW blocks must be rejected");
 
-    assert!(err.to_string().contains("references undeclared window"));
+    assert!(err.to_string().contains("undeclared window"));
 }
 
 #[test]
@@ -451,7 +451,7 @@ WHERE {
 
     let err = parser.parse(query).expect_err("live-only nested subqueries must be rejected");
 
-    assert!(err.to_string().contains("Live-only nested subqueries"));
+    assert!(err.to_string().contains("nested subqueries must not be live-only"));
 }
 
 #[test]
@@ -488,7 +488,7 @@ WHERE {
         .parse(query)
         .expect_err("mixed live/historical nested subqueries must be rejected");
 
-    assert!(err.to_string().contains("LiveHistoricalJoin"));
+    assert!(err.to_string().contains("nested subqueries must not mix live and historical windows"));
 }
 
 #[test]

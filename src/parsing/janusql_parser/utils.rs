@@ -25,14 +25,6 @@ impl JanusQLParser {
         None
     }
 
-    pub(crate) fn brace_balance(&self, input: &str) -> isize {
-        input.chars().fold(0isize, |depth, ch| match ch {
-            '{' => depth + 1,
-            '}' => depth - 1,
-            _ => depth,
-        })
-    }
-
     pub(crate) fn extract_variables(&self, input: &str) -> Vec<String> {
         let mut variables = Vec::new();
         let chars = input.chars().collect::<Vec<_>>();
@@ -100,33 +92,6 @@ impl JanusQLParser {
         }
 
         items
-    }
-
-    pub(crate) fn extract_output_variables(&self, select_clause: &str) -> Vec<String> {
-        let trimmed = select_clause.trim();
-        let content = trimmed
-            .strip_prefix("SELECT")
-            .or_else(|| trimmed.strip_prefix("select"))
-            .map_or(trimmed, str::trim);
-
-        self.extract_projection_items(content)
-            .into_iter()
-            .filter_map(|item| {
-                let trimmed_item = item.trim();
-                if trimmed_item.starts_with('?') {
-                    Some(trimmed_item.to_string())
-                } else if let Some(as_pos) = trimmed_item.rfind(" AS ") {
-                    let alias = trimmed_item[as_pos + 4..].trim().trim_end_matches(')').trim();
-                    if alias.starts_with('?') {
-                        Some(alias.to_string())
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                }
-            })
-            .collect()
     }
 
     pub(crate) fn select_baseline_anchor_variable(

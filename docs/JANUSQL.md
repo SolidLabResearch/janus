@@ -125,10 +125,15 @@ the syntax exercised by the repository's parser and integration tests.
 
 ## Implementation compatibility features
 
-The implementation retains baseline-oriented compatibility paths used by
-some benchmark and API code. They are not part of the public Janus-QL surface
-described above. Their operational constraints are documented separately in
-[Baselines](./BASELINES.md); do not use them as a portability guarantee.
+Janus-QL Core syntax, typed AST construction, validation, and window
+normalization are provided by the standalone `janusql-parser` crate. Janus
+lowers that AST into engine windows and execution plans, and owns RSP-QL/
+SPARQL generation, materialization, storage, and execution.
+
+`DEFINE BASELINE` and `USING BASELINE` remain Janus implementation
+compatibility syntax used by benchmark and API paths. They are isolated before
+Core parsing and are not portable Janus-QL Core. Their operational constraints
+are documented separately in [Baselines](./BASELINES.md).
 
 ## Related documentation
 

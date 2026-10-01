@@ -1,6 +1,6 @@
 use crate::parsing::janusql_parser::ast::{
     BaselineDefinition, BaselineUse, HistoricalMaterializationKind, HistoricalMaterializedSubquery,
-    JanusQueryAst, LogicalSubqueryPlan, NamedWindowRef, NestedSubquery, PhysicalSubqueryPlan,
+    JanusLoweredQuery, LogicalSubqueryPlan, NamedWindowRef, NestedSubquery, PhysicalSubqueryPlan,
     PlannedSubquery, QueryPlanningStatistics, SourceKind, SubqueryExecutionMode,
     SubqueryPlanningDiagnostics, SubqueryWindowDependencies, WindowClause, WindowType,
 };
@@ -18,7 +18,7 @@ pub(crate) struct NestedSubqueryPlanningResult {
 impl JanusQLParser {
     pub(crate) fn plan_nested_subqueries(
         &self,
-        ast: &JanusQueryAst,
+        ast: &JanusLoweredQuery,
         prefixes: &HashMap<String, String>,
     ) -> Result<NestedSubqueryPlanningResult, Box<dyn std::error::Error>> {
         let windows_by_name = ast
@@ -89,10 +89,10 @@ impl JanusQLParser {
 
     pub(crate) fn lower_nested_subqueries(
         &self,
-        ast: &JanusQueryAst,
+        ast: &JanusLoweredQuery,
         planning: &NestedSubqueryPlanningResult,
         prefixes: &HashMap<String, String>,
-    ) -> Result<JanusQueryAst, Box<dyn std::error::Error>> {
+    ) -> Result<JanusLoweredQuery, Box<dyn std::error::Error>> {
         if ast.nested_subqueries.is_empty() {
             return Ok(ast.clone());
         }
@@ -126,7 +126,7 @@ impl JanusQLParser {
     pub(crate) fn lower_physical_subquery_plan(
         &self,
         planned: &PlannedSubquery,
-        ast: &JanusQueryAst,
+        ast: &JanusLoweredQuery,
         prefixes: &HashMap<String, String>,
     ) -> Result<(String, BaselineDefinition, BaselineUse), Box<dyn std::error::Error>> {
         match planned.physical_plan {
@@ -162,7 +162,7 @@ impl JanusQLParser {
     pub(crate) fn build_historical_materialized_definition(
         &self,
         analysis: &HistoricalMaterializedSubquery,
-        ast: &JanusQueryAst,
+        ast: &JanusLoweredQuery,
         prefixes: &HashMap<String, String>,
     ) -> Result<BaselineDefinition, Box<dyn std::error::Error>> {
         let windows_by_name = ast
@@ -486,41 +486,5 @@ impl JanusQLParser {
         }
 
         Ok(format!("WHERE {{\n  {}\n}}", rewritten.trim()))
-    }
-
-    pub(crate) fn extract_nested_subqueries(
-        &self,
-        where_clause: &str,
-    ) -> Result<Vec<NestedSubquery>, Box<dyn std::error::Error>> {
-        let where_start = where_clause
-            .find('{')
-            .ok_or_else(|| self.parse_error("WHERE clause must contain an opening '{'"))?;
-        let where_end = self
-            .find_matching_brace(where_clause, where_start)
-            .ok_or_else(|| self.parse_error("WHERE clause must contain a closing '}'"))?;
-        let mut nested = Vec::new();
-        let mut cursor = where_start + 1;
-
-        while cursor < where_end {
-            let remainder = &where_clause[cursor..where_end];
-            let Some(relative_open) = remainder.find('{') else {
-                break;
-            };
-            let block_start = cursor + relative_open;
-            let Some(block_end) = self.find_matching_brace(where_clause, block_start) else {
-                return Err(self.parse_error("Unclosed nested block in WHERE clause"));
-            };
-            if block_end > where_end {
-                break;
-            }
-
-            let body = where_clause[block_start + 1..block_end].trim();
-            if body.to_uppercase().starts_with("SELECT") {
-                nested.push(self.parse_nested_subquery(where_clause, block_start, block_end)?);
-            }
-            cursor = block_end + 1;
-        }
-
-        Ok(nested)
     }
 }

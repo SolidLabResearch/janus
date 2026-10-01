@@ -94,7 +94,7 @@ pub(crate) fn initialize_fixed_query_defined_baselines(
     baseline_registry: &Arc<BaselineRegistry>,
     latest_rows: &Arc<RwLock<HashMap<String, Vec<HashMap<String, String>>>>>,
 ) -> Result<(), JanusApiError> {
-    for definition in &parsed.ast.baseline_definitions {
+    for definition in &parsed.lowered.baseline_definitions {
         let source_windows = find_baseline_source_windows(parsed, definition)?;
         if source_windows
             .iter()
@@ -149,13 +149,13 @@ pub(crate) fn resolve_query_defined_baseline_quads_at(
     let mut materialized = Vec::new();
     let mut seen = HashSet::new();
 
-    for baseline_use in &parsed.ast.baseline_uses {
+    for baseline_use in &parsed.lowered.baseline_uses {
         if !seen.insert(baseline_use.name.clone()) {
             continue;
         }
 
         let definition = parsed
-            .ast
+            .lowered
             .baseline_definitions
             .iter()
             .find(|definition| definition.name == baseline_use.name)
@@ -499,7 +499,7 @@ pub(crate) fn materialize_query_defined_baseline_quads(
     let mut materialized = Vec::new();
     let mut seen = HashSet::new();
 
-    for baseline_use in &parsed.ast.baseline_uses {
+    for baseline_use in &parsed.lowered.baseline_uses {
         if !seen.insert(baseline_use.name.clone()) {
             continue;
         }
@@ -508,7 +508,7 @@ pub(crate) fn materialize_query_defined_baseline_quads(
         // SELECT alias heuristics because the template explicitly states the RDF
         // shape that should be injected into the live static store.
         let definition = parsed
-            .ast
+            .lowered
             .baseline_definitions
             .iter()
             .find(|definition| definition.name == baseline_use.name)

@@ -4,9 +4,24 @@
 //! R2S operators, and query generation.
 
 use janus::parsing::janusql_parser::{
-    BaselineBootstrapMode, GraphTermTemplate, HistoricalWindowSpec, JanusQLParser,
-    LogicalSubqueryPlan, PhysicalSubqueryPlan, SourceKind, SubqueryExecutionMode, WindowSpec,
+    BaselineBootstrapMode, GraphTermTemplate, HistoricalMaterializationKind, HistoricalWindowSpec,
+    JanusQLParser,
+    LogicalSubqueryPlan, PhysicalSubqueryPlan, SourceKind, SubqueryExecutionMode,
 };
+use janusql_parser::{SourceKind as CoreSourceKind, WindowSpec as CoreWindowSpec};
+
+fn standalone_diagnostic_code<'a>(
+    error: &'a (dyn std::error::Error + 'static),
+) -> Option<&'a str> {
+    error
+        .downcast_ref::<janusql_parser::JanusQLError>()
+        .and_then(|error| error.diagnostics().first())
+        .map(|diagnostic| diagnostic.code.as_str())
+}
+
+fn is_property_path_diagnostic(error: &(dyn std::error::Error + 'static)) -> bool {
+    matches!(standalone_diagnostic_code(error), Some("JQL001" | "JQL112"))
+}
 
 #[test]
 fn test_basic_live_window() {
@@ -125,14 +140,92 @@ fn test_parse_ast_exposes_structured_window_specs() {
 
     let ast = parser.parse_ast(query).unwrap();
     assert_eq!(ast.windows.len(), 2);
-    assert_eq!(ast.where_windows.len(), 2);
+    assert_eq!(ast.where_patterns().len(), 2);
     assert_eq!(ast.prefixes.len(), 1);
 
-    assert!(matches!(ast.windows[0].spec, WindowSpec::LiveSliding { range: 500, step: 100 }));
+    assert!(matches!(ast.windows[0].spec, CoreWindowSpec::LiveSliding { range: 500, step: 100 }));
     assert!(matches!(
         ast.windows[1].spec,
-        WindowSpec::HistoricalFixed { start: 1000, end: 2000 }
+        CoreWindowSpec::HistoricalFixed { start: 1000, end: 2000 }
     ));
+}
+
+#[test]
+fn facade_delegates_core_ast_to_standalone_parser() {
+    let source = r#"
+        PREFIX ex: <http://example.org/>
+        FROM NAMED WINDOW ex:live ON STREAM ex:stream [RANGE 500 STEP 100]
+        REGISTER RStream ex:out AS
+        SELECT ?sensor
+        WHERE { WINDOW ex:live { ?sensor ex:value ?value . } }
+    "#;
+    let direct = janusql_parser::parse(source).unwrap();
+    let via_janus = JanusQLParser::new().unwrap().parse_ast(source).unwrap();
+    assert_eq!(via_janus, direct);
+}
+
+#[test]
+fn legacy_baseline_isolated_before_typed_graph_lowering() {
+    let source = r#"
+        PREFIX ex: <http://example.org/>
+        FROM NAMED WINDOW ex:live ON STREAM ex:stream [RANGE 500 STEP 100]
+        FROM NAMED WINDOW ex:history ON LOG ex:store [START 0 END 10]
+        DEFINE BASELINE ex:dayBaseline ON WINDOW ex:history AS
+        SELECT ?sensor
+        WHERE { ?sensor ex:value ?value . }
+        REGISTER RStream ex:out AS
+        USING BASELINE ex:dayBaseline
+        SELECT ?sensor
+        WHERE {
+          WINDOW ex:live { ?sensor ex:value ?value . }
+          GRAPH ex:dayBaseline { ?sensor ex:dayValue ?value . }
+        }
+    "#;
+    assert!(janusql_parser::parse(source).is_err());
+    let parsed = JanusQLParser::new().unwrap().parse(source).unwrap();
+    assert!(parsed.ast.where_patterns().iter().any(|pattern| matches!(
+        pattern,
+        janusql_parser::GraphPattern::Graph { graph }
+            if graph.graph.lexical == "ex:dayBaseline"
+    )));
+    assert_eq!(parsed.lowered.baseline_uses.len(), 1);
+    assert_eq!(parsed.baseline_graph_templates.len(), 1);
+    let definition = &parsed.lowered.baseline_definitions[0];
+    assert_eq!(definition.name, "http://example.org/dayBaseline");
+    assert_eq!(definition.source_window, "http://example.org/history");
+    assert_eq!(definition.source_windows, vec!["http://example.org/history"]);
+    assert_eq!(definition.output_variables, vec!["?sensor"]);
+    assert_eq!(
+        definition.materialization_kind,
+        HistoricalMaterializationKind::ExplicitBaseline
+    );
+    assert_eq!(
+        parsed.generated_baseline_queries[0].sparql_query,
+        "PREFIX ex: <http://example.org/>\n\nSELECT ?sensor\n\nWHERE {\n  GRAPH ?__janus_log_graph {\n    ?sensor ex:value ?value .\n  }\n}"
+    );
+}
+
+#[test]
+fn top_level_union_preserves_independent_window_branches() {
+    let parser = JanusQLParser::new().unwrap();
+    let query = r#"
+        PREFIX ex: <http://example.org/>
+        REGISTER RStream ex:out AS
+        SELECT ?sensor ?value
+        FROM NAMED WINDOW ex:one ON STREAM ex:oneStream [RANGE 500 STEP 100]
+        FROM NAMED WINDOW ex:two ON STREAM ex:twoStream [RANGE 500 STEP 100]
+        WHERE {
+          { WINDOW ex:one { ?sensor ex:value ?value . } FILTER(?value > 1) }
+          UNION
+          { WINDOW ex:two { ?sensor ex:value ?value . } FILTER(?value > 1) }
+        }
+    "#;
+
+    let parsed = parser.parse(query).unwrap();
+    assert_eq!(parsed.ast.union_branches.len(), 2);
+    assert!(parsed.ast.union_branches[0].raw.contains("WINDOW ex:one"));
+    assert!(parsed.ast.union_branches[1].raw.contains("WINDOW ex:two"));
+    assert!(parsed.rspql_query.contains("UNION"));
 }
 
 #[test]
@@ -151,7 +244,7 @@ fn test_parse_ast_register_clause_is_structured() {
     let ast = parser.parse_ast(query).unwrap();
     let register = ast.register.expect("expected register clause");
     assert_eq!(register.operator, "RStream");
-    assert_eq!(register.name, "http://example.org/out");
+    assert_eq!(register.name.resolved.as_deref(), Some("http://example.org/out"));
 }
 
 #[test]
@@ -171,7 +264,7 @@ fn test_parse_ast_multiline_window_clause_is_supported() {
     assert_eq!(ast.windows.len(), 1);
     assert!(matches!(
         ast.windows[0].spec,
-        WindowSpec::HistoricalFixed { start: 1000, end: 2000 }
+        CoreWindowSpec::HistoricalFixed { start: 1000, end: 2000 }
     ));
 }
 
@@ -189,10 +282,10 @@ fn test_parse_ast_on_log_historical_sliding_window() {
 
     let ast = parser.parse_ast(query).unwrap();
     assert_eq!(ast.windows.len(), 1);
-    assert_eq!(ast.windows[0].source_kind, SourceKind::Log);
+    assert_eq!(ast.windows[0].source_kind, CoreSourceKind::Log);
     assert!(matches!(
         ast.windows[0].spec,
-        WindowSpec::HistoricalSliding { offset: 3000, range: 1000, step: 250 }
+        CoreWindowSpec::HistoricalSliding { offset: 3000, range: 1000, step: 250 }
     ));
 }
 
@@ -211,7 +304,7 @@ fn test_historical_start_end_on_stream_is_rejected() {
     let err = parser
         .parse(query)
         .expect_err("historical START/END on STREAM must be rejected");
-    assert!(err.to_string().contains("Historical START/END windows must use ON LOG"));
+    assert!(err.to_string().contains("historical START/END windows must use ON LOG"));
 }
 
 #[test]
@@ -227,7 +320,7 @@ fn test_live_range_step_on_log_is_rejected() {
     "#;
 
     let err = parser.parse(query).expect_err("live RANGE/STEP on LOG must be rejected");
-    assert!(err.to_string().contains("Live RANGE/STEP windows must use ON STREAM"));
+    assert!(err.to_string().contains("live RANGE/STEP windows must use ON STREAM"));
 }
 
 #[test]
@@ -244,7 +337,8 @@ fn test_top_level_window_reference_must_exist() {
     "#;
 
     let err = parser.parse(query).expect_err("undeclared top-level WINDOW must be rejected");
-    assert!(err.to_string().contains("references undeclared window"));
+    assert_eq!(standalone_diagnostic_code(err.as_ref()), Some("JQL111"));
+    assert!(err.to_string().contains("undeclared window"));
 }
 
 #[test]
@@ -347,7 +441,7 @@ fn test_fixed_historical_log_window_rejects_equal_start_end() {
     "#;
 
     let err = parser.parse(query).expect_err("equal START/END must be rejected");
-    assert!(err.to_string().contains("START less than END"));
+    assert!(err.to_string().contains("START must be less than END"));
 }
 
 #[test]
@@ -363,7 +457,7 @@ fn test_fixed_historical_log_window_rejects_start_after_end() {
     "#;
 
     let err = parser.parse(query).expect_err("START greater than END must be rejected");
-    assert!(err.to_string().contains("START less than END"));
+    assert!(err.to_string().contains("START must be less than END"));
 }
 
 #[test]
@@ -380,7 +474,7 @@ fn test_live_window_rejects_zero_range() {
     "#;
 
     let err = parser.parse(query).expect_err("zero RANGE must be rejected");
-    assert!(err.to_string().contains("RANGE greater than 0"));
+    assert!(err.to_string().contains("live RANGE must be greater than 0"));
 }
 
 #[test]
@@ -397,7 +491,7 @@ fn test_live_window_rejects_zero_step() {
     "#;
 
     let err = parser.parse(query).expect_err("zero STEP must be rejected");
-    assert!(err.to_string().contains("STEP greater than 0"));
+    assert!(err.to_string().contains("live STEP must be greater than 0"));
 }
 
 #[test]
@@ -413,7 +507,7 @@ fn test_historical_sliding_window_rejects_zero_range() {
     "#;
 
     let err = parser.parse(query).expect_err("historical sliding RANGE 0 must be rejected");
-    assert!(err.to_string().contains("RANGE greater than 0"));
+    assert!(err.to_string().contains("historical sliding RANGE must be greater than 0"));
 }
 
 #[test]
@@ -429,7 +523,7 @@ fn test_historical_sliding_window_rejects_zero_step() {
     "#;
 
     let err = parser.parse(query).expect_err("historical sliding STEP 0 must be rejected");
-    assert!(err.to_string().contains("STEP greater than 0"));
+    assert!(err.to_string().contains("historical sliding STEP must be greater than 0"));
 }
 
 #[test]
@@ -489,7 +583,7 @@ fn test_sliding_historical_log_window_rejects_range_greater_than_offset() {
     let err = parser.parse(query).expect_err("range greater than offset should be rejected");
     assert!(err
         .to_string()
-        .contains("the historical window would extend beyond the evaluation time"));
+        .contains("historical sliding RANGE must not exceed OFFSET"));
 }
 
 #[test]
@@ -510,9 +604,12 @@ fn test_parse_ast_extracts_window_body_with_nested_braces() {
     "#;
 
     let ast = parser.parse_ast(query).unwrap();
-    assert_eq!(ast.where_windows.len(), 1);
-    assert!(ast.where_windows[0].body.contains("FILTER(EXISTS"));
-    assert!(ast.where_windows[0].body.contains("?sensor ex:meta ?meta"));
+    assert_eq!(ast.where_patterns().len(), 1);
+    let janusql_parser::GraphPattern::Window { window } = &ast.where_patterns()[0] else {
+        panic!("expected typed window pattern");
+    };
+    assert!(window.raw.contains("FILTER(EXISTS"));
+    assert!(window.raw.contains("?sensor ex:meta ?meta"));
 }
 
 #[test]
@@ -552,7 +649,7 @@ fn test_property_path_with_slash_is_rejected() {
     "#;
 
     let err = parser.parse(query).expect_err("slash property path must be rejected");
-    assert!(err.to_string().contains("does not support property paths"));
+    assert!(is_property_path_diagnostic(err.as_ref()));
 }
 
 #[test]
@@ -571,7 +668,7 @@ fn test_property_path_with_star_is_rejected() {
     "#;
 
     let err = parser.parse(query).expect_err("star property path must be rejected");
-    assert!(err.to_string().contains("does not support property paths"));
+    assert!(is_property_path_diagnostic(err.as_ref()));
 }
 
 #[test]
@@ -590,7 +687,7 @@ fn test_property_path_with_plus_is_rejected() {
     "#;
 
     let err = parser.parse(query).expect_err("plus property path must be rejected");
-    assert!(err.to_string().contains("does not support property paths"));
+    assert!(is_property_path_diagnostic(err.as_ref()));
 }
 
 #[test]
@@ -609,7 +706,7 @@ fn test_property_path_with_optional_is_rejected() {
     "#;
 
     let err = parser.parse(query).expect_err("optional property path must be rejected");
-    assert!(err.to_string().contains("does not support property paths"));
+    assert!(err.to_string().contains("does not support property paths"), "{err}");
 }
 
 #[test]
@@ -628,7 +725,7 @@ fn test_property_path_with_inverse_is_rejected() {
     "#;
 
     let err = parser.parse(query).expect_err("inverse property path must be rejected");
-    assert!(err.to_string().contains("does not support property paths"));
+    assert!(is_property_path_diagnostic(err.as_ref()));
 }
 
 #[test]
@@ -750,8 +847,8 @@ fn parse_define_baseline_with_avg_count() {
     "#;
 
     let parsed = parser.parse(query).unwrap();
-    assert_eq!(parsed.ast.baseline_definitions.len(), 1);
-    let definition = &parsed.ast.baseline_definitions[0];
+    assert_eq!(parsed.lowered.baseline_definitions.len(), 1);
+    let definition = &parsed.lowered.baseline_definitions[0];
     assert_eq!(definition.name, "http://example.org/dayBaseline");
     assert_eq!(definition.source_window, "http://example.org/historyDay");
     assert_eq!(definition.output_variables, vec!["?sensor", "?dayAvgValue", "?dayCount"]);
@@ -778,7 +875,7 @@ fn test_define_baseline_parser_exposes_name_window_and_projection() {
     "#;
 
     let parsed = parser.parse(query).unwrap();
-    let definition = &parsed.ast.baseline_definitions[0];
+    let definition = &parsed.lowered.baseline_definitions[0];
     assert_eq!(definition.name, "http://example.org/yesterdayBaseline");
     assert_eq!(definition.source_window, "http://example.org/sameMinuteYesterday");
     assert!(definition.output_variables.contains(&"?sensor".to_string()));
@@ -814,8 +911,8 @@ fn test_using_baseline_parser_tracks_named_baseline_use() {
     "#;
 
     let parsed = parser.parse(query).unwrap();
-    assert_eq!(parsed.ast.baseline_uses.len(), 1);
-    assert_eq!(parsed.ast.baseline_uses[0].name, "http://example.org/yesterdayBaseline");
+    assert_eq!(parsed.lowered.baseline_uses.len(), 1);
+    assert_eq!(parsed.lowered.baseline_uses[0].name, "http://example.org/yesterdayBaseline");
 }
 
 #[test]
@@ -846,7 +943,7 @@ fn baseline_select_does_not_override_main_select() {
     assert!(parsed.select_clause.contains("?minuteAvgValue"));
     assert!(!parsed.select_clause.contains("?dayCount"));
     assert_eq!(
-        parsed.ast.baseline_definitions[0].select_clause,
+        parsed.lowered.baseline_definitions[0].select_clause,
         "SELECT ?sensor (AVG(?value) AS ?dayAvgValue)"
     );
 }
@@ -883,9 +980,9 @@ fn using_baseline_is_parsed_after_register() {
         "DEFINE BASELINE ex:dayBaseline ON WINDOW ex:historyDay AS\n        SELECT ?sensor\n        WHERE {\n          ?sensor ex:hasValue ?value .\n        }\n        GROUP BY ?sensor\n        DEFINE BASELINE ex:weekBaseline ON WINDOW ex:historyDay AS\n        SELECT ?sensor\n        WHERE {\n          ?sensor ex:hasValue ?value .\n        }\n        GROUP BY ?sensor",
     );
     let parsed = parser.parse(&query).unwrap();
-    assert_eq!(parsed.ast.baseline_uses.len(), 2);
-    assert_eq!(parsed.ast.baseline_uses[0].name, "http://example.org/dayBaseline");
-    assert_eq!(parsed.ast.baseline_uses[1].name, "http://example.org/weekBaseline");
+    assert_eq!(parsed.lowered.baseline_uses.len(), 2);
+    assert_eq!(parsed.lowered.baseline_uses[0].name, "http://example.org/dayBaseline");
+    assert_eq!(parsed.lowered.baseline_uses[1].name, "http://example.org/weekBaseline");
 }
 
 #[test]
@@ -968,9 +1065,9 @@ fn nested_historical_subquery_is_lowered_to_historical_materialization() {
     let parsed = parser.parse(query).unwrap();
     assert_eq!(parsed.historical_materialized_subqueries.len(), 1);
     assert_eq!(parsed.planned_subqueries.len(), 1);
-    assert_eq!(parsed.ast.nested_subqueries.len(), 1);
-    assert_eq!(parsed.ast.baseline_definitions.len(), 1);
-    assert_eq!(parsed.ast.baseline_uses.len(), 1);
+    assert_eq!(parsed.lowered.nested_subqueries.len(), 1);
+    assert_eq!(parsed.lowered.baseline_definitions.len(), 1);
+    assert_eq!(parsed.lowered.baseline_uses.len(), 1);
     assert_eq!(parsed.generated_baseline_queries.len(), 1);
     assert_eq!(parsed.planning_statistics.historical_materialized_subqueries, 1);
     assert_eq!(parsed.planning_statistics.live_subqueries, 0);
@@ -990,7 +1087,7 @@ fn nested_historical_subquery_is_lowered_to_historical_materialization() {
     assert!(diag.summary.contains("Logical plan:"));
     assert!(diag.summary.contains("Physical plan:"));
 
-    let baseline = &parsed.ast.baseline_definitions[0];
+    let baseline = &parsed.lowered.baseline_definitions[0];
     assert_eq!(baseline.source_window, "http://example.org/historyDay");
     assert_eq!(baseline.output_variables, vec!["?sensor", "?dayAvgValue"]);
     assert_eq!(baseline.having_clause.as_deref(), Some("HAVING(AVG(?histValue) > 0)"));
@@ -1031,7 +1128,7 @@ fn nested_historical_subquery_must_reference_historical_log_window() {
     "#;
 
     let err = parser.parse(query).unwrap_err().to_string();
-    assert!(err.contains("Live-only nested subqueries require LiveSubquery planning"));
+    assert!(err.contains("nested subqueries must not be live-only"));
 }
 
 #[test]
@@ -1073,8 +1170,8 @@ fn nested_historical_subquery_supports_multiple_historical_windows() {
         parsed.planned_subqueries[0].physical_plan,
         PhysicalSubqueryPlan::MaterializeHistoricalResult
     );
-    assert_eq!(parsed.ast.baseline_definitions.len(), 1);
-    let definition = &parsed.ast.baseline_definitions[0];
+    assert_eq!(parsed.lowered.baseline_definitions.len(), 1);
+    let definition = &parsed.lowered.baseline_definitions[0];
     assert_eq!(definition.source_windows.len(), 2);
     assert!(definition.source_windows.contains(&"http://example.org/historyDay".to_string()));
     assert!(definition
@@ -1110,7 +1207,7 @@ fn mixed_live_historical_nested_subquery_is_rejected_cleanly() {
     "#;
 
     let err = parser.parse(query).unwrap_err().to_string();
-    assert!(err.contains("LiveHistoricalJoin planning"));
+    assert!(err.contains("nested subqueries must not mix live and historical windows"));
 }
 
 #[test]
@@ -1155,7 +1252,7 @@ fn unknown_window_reference_in_nested_subquery_is_rejected_cleanly() {
 
     let err = parser.parse(query).unwrap_err().to_string();
     assert!(
-        err.contains("references undeclared window") || err.contains("references unknown window")
+        err.contains("undeclared window"), "{err}"
     );
 }
 
@@ -1273,7 +1370,7 @@ fn main_select_can_compute_difference_between_live_avg_and_baseline_avg() {
 
     let parsed = parser.parse(query).unwrap();
     assert!(parsed.select_clause.contains("?difference"));
-    assert_eq!(parsed.ast.baseline_uses.len(), 1);
+    assert_eq!(parsed.lowered.baseline_uses.len(), 1);
     assert!(parsed.where_clause.contains("GROUP BY ?sensor ?dayAvgValue"));
     assert!(parsed.where_clause.contains("HAVING(AVG(?value) > ?dayAvgValue)"));
 }

@@ -797,7 +797,7 @@ HAVING(AVG(?value) > ?yesterdayAvgValue)
         2
     );
     let definition = parsed
-        .ast
+        .lowered
         .baseline_definitions
         .iter()
         .find(|definition| definition.name == "http://example.org/yesterdayBaseline")

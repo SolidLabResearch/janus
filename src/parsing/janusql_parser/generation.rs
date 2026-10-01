@@ -40,7 +40,7 @@ impl JanusQLParser {
 
         if !parsed.where_clause.is_empty() {
             let adapted_where = self.adapt_where_clause_for_live(
-                &parsed.ast.where_windows,
+                &parsed.lowered.where_windows,
                 &parsed.where_clause,
                 &parsed.live_windows,
                 &parsed.prefixes,
@@ -76,14 +76,14 @@ impl JanusQLParser {
             lines.push(String::new());
 
             if self
-                .find_window_body(&parsed.ast.where_windows, window, &parsed.prefixes)
+                .find_window_body(&parsed.lowered.where_windows, window, &parsed.prefixes)
                 .is_none()
             {
                 continue;
             }
 
             let (where_clause, bound_vars) = self.generate_where_and_extract_vars(
-                &parsed.ast.where_windows,
+                &parsed.lowered.where_windows,
                 &parsed.where_clause,
                 window,
                 &parsed.prefixes,

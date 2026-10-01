@@ -3,6 +3,67 @@ use crate::parsing::janusql_parser::JanusQLParser;
 use std::collections::{HashMap, HashSet};
 
 impl JanusQLParser {
+    /// Parses the standard SPARQL top-level `{ pattern } UNION { pattern }`
+    /// shape without flattening its independent group graph patterns.
+    pub(crate) fn extract_top_level_union_branches(
+        &self,
+        where_clause: &str,
+    ) -> Result<Vec<crate::parsing::janusql_parser::ast::UnionBranch>, Box<dyn std::error::Error>>
+    {
+        let inner = self.extract_where_inner(where_clause);
+        let mut cursor = 0usize;
+        let bytes = inner.as_bytes();
+        let mut branches = Vec::new();
+        let mut saw_union = false;
+
+        loop {
+            while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() {
+                cursor += 1;
+            }
+            if cursor >= bytes.len() {
+                break;
+            }
+            if bytes[cursor] != b'{' {
+                return Ok(Vec::new());
+            }
+            let end = self
+                .find_matching_brace(&inner, cursor)
+                .ok_or_else(|| self.parse_error("Unclosed group graph pattern in WHERE clause"))?;
+            let body = inner[cursor + 1..end].trim().to_string();
+            branches.push(crate::parsing::janusql_parser::ast::UnionBranch {
+                where_windows: self.extract_where_windows(&body),
+                body,
+            });
+            cursor = end + 1;
+            while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() {
+                cursor += 1;
+            }
+            if cursor >= bytes.len() {
+                break;
+            }
+            let remaining = &inner[cursor..];
+            if !remaining.starts_with("UNION")
+                || remaining["UNION".len()..]
+                    .chars()
+                    .next()
+                    .is_some_and(|c| c.is_ascii_alphanumeric() || c == '_')
+            {
+                return Ok(Vec::new());
+            }
+            saw_union = true;
+            cursor += "UNION".len();
+        }
+
+        // A single explicitly grouped branch is the degenerate one-source
+        // form of the same federation shape.  Plain `WHERE { WINDOW ... }`
+        // remains represented only by `where_windows`.
+        if saw_union || branches.len() == 1 {
+            Ok(branches)
+        } else {
+            Ok(Vec::new())
+        }
+    }
+
     pub(crate) fn adapt_where_clause_for_live(
         &self,
         where_windows: &[WhereWindowClause],
@@ -10,6 +71,15 @@ impl JanusQLParser {
         live_windows: &[WindowDefinition],
         prefixes: &HashMap<String, String>,
     ) -> String {
+        // Rewriting window blocks branch-by-branch is not implemented here.
+        // Keeping the original legal RSP-QL preserves standard UNION semantics
+        // instead of flattening independent branches into a conjunction.
+        if self
+            .extract_top_level_union_branches(where_clause)
+            .map_or(false, |b| !b.is_empty())
+        {
+            return where_clause.to_string();
+        }
         let mut where_patterns = Vec::new();
         let non_window_patterns = self.extract_non_window_where_patterns(where_clause);
 

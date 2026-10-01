@@ -247,7 +247,7 @@ impl JanusApi {
             // Register all live streams
             {
                 let mut processor = live_processor.lock().unwrap();
-                if !parsed.ast.baseline_uses.is_empty() {
+                if !parsed.lowered.baseline_uses.is_empty() {
                     initialize_fixed_query_defined_baselines(
                         &self.storage,
                         parsed,
